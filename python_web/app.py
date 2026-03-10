@@ -94,13 +94,37 @@ HTML = '''
       .resultado {
         margin-top: 18px;
         padding: 16px;
-        white-space: pre-wrap;
         background: #021a26;
         border-radius: 10px;
         border: 1px dashed rgba(54, 192, 216, 0.35);
-        min-height: 12.5rem;
-        overflow-x: auto;
         color: #d3eff6;
+      }
+
+      .result-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .result-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+      }
+
+      .result-table th,
+      .result-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(80, 192, 212, 0.25);
+      }
+
+      .result-table th {
+        text-align: left;
+        color: #b4ecf3;
+      }
+
+      .result-table tr:nth-child(even) {
+        background: rgba(68, 148, 162, 0.15);
       }
       .foot {
         text-align: center;
@@ -160,8 +184,13 @@ HTML = '''
           vol: Number(f.vol.value),
           t: Number(f.t.value)
         };
-        const resultEl = document.getElementById('result');
-        resultEl.innerText = 'Calculando...';
+
+        const pricesTable = document.querySelector('#prices-table tbody');
+        const greeksTable = document.querySelector('#greeks-table tbody');
+
+        pricesTable.innerHTML = '<tr><td colspan="2">Calculando...</td></tr>';
+        greeksTable.innerHTML = '<tr><td colspan="2">Calculando...</td></tr>';
+
         try {
           const response = await fetch('/api/price', {
             method:'POST',
@@ -170,9 +199,31 @@ HTML = '''
           });
           if (!response.ok) throw new Error('Error del servidor: ' + response.status);
           const data = await response.json();
-          resultEl.innerText = JSON.stringify(data, null, 2);
+
+          pricesTable.innerHTML = '';
+          function row(tab, name, value){
+            const tr = document.createElement('tr');
+            const tdn = document.createElement('td'); tdn.innerText = name;
+            const tdv = document.createElement('td'); tdv.innerText = value;
+            tr.appendChild(tdn); tr.appendChild(tdv);
+            tab.appendChild(tr);
+          }
+
+          row(pricesTable, 'Black-Scholes', data.black_scholes.toFixed(6));
+          row(pricesTable, 'Binomial', data.binomial.toFixed(6));
+          row(pricesTable, 'Monte Carlo', data.montecarlo.toFixed(6));
+          row(pricesTable, 'Finite Difference', data.finite_difference.toFixed(6));
+
+          greeksTable.innerHTML = '';
+          row(greeksTable, 'Delta', data.delta.toFixed(6));
+          row(greeksTable, 'Gamma', data.gamma.toFixed(6));
+          row(greeksTable, 'Vega', data.vega.toFixed(6));
+          row(greeksTable, 'Theta', data.theta.toFixed(6));
+          row(greeksTable, 'Rho', data.rho.toFixed(6));
+
         } catch(e) {
-          resultEl.innerText = 'Error: ' + e.message;
+          pricesTable.innerHTML = '<tr><td colspan="2">Error: '+ e.message + '</td></tr>';
+          greeksTable.innerHTML = '';
         }
       }
     </script>
