@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include <qf/termstructure/yieldcurve.hpp>
+#include <qf/termstructure/bootstrap.hpp>
+#include <qf/instruments/swap.hpp>
 #include <qf/math/interpolation.hpp>
 #include <cmath>
 
@@ -101,4 +103,103 @@ TEST(YieldCurve, ForwardRateInvalidOrderThrows) {
     auto curve = flatCurve();
     EXPECT_THROW(curve.forwardRate(3.0, 1.0), std::invalid_argument);
     EXPECT_THROW(curve.forwardRate(2.0, 2.0), std::invalid_argument);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bootstrap
+// ═══════════════════════════════════════════════════════════════════════════
+
+using Inst = qf::termstructure::BootstrapInstrument;
+
+TEST(Bootstrap, DepositsRecoverZeroRates) {
+    // Pure deposit curve: bootstrapped zero rates should match inputs
+    std::vector<Inst> instruments = {
+        {0.25, 0.04, Inst::Deposit, 0},
+        {0.50, 0.042, Inst::Deposit, 0},
+        {1.00, 0.045, Inst::Deposit, 0},
+    };
+    auto curve = bootstrap(instruments);
+    EXPECT_NEAR(curve.zeroRate(0.25), 0.04, 1e-8);
+    EXPECT_NEAR(curve.zeroRate(0.50), 0.042, 1e-8);
+    EXPECT_NEAR(curve.zeroRate(1.00), 0.045, 1e-8);
+}
+
+TEST(Bootstrap, DiscountFactorsPositive) {
+    std::vector<Inst> instruments = {
+        {0.25, 0.04, Inst::Deposit, 0},
+        {0.50, 0.042, Inst::Deposit, 0},
+        {1.00, 0.045, Inst::Deposit, 0},
+        {2.00, 0.048, Inst::Swap, 2.0},
+        {5.00, 0.050, Inst::Swap, 2.0},
+    };
+    auto curve = bootstrap(instruments);
+    for (double T : {0.25, 0.5, 1.0, 2.0, 5.0}) {
+        EXPECT_GT(curve.discountFactor(T), 0.0);
+        EXPECT_LT(curve.discountFactor(T), 1.0);
+    }
+}
+
+TEST(Bootstrap, SwapParRatesRecovered) {
+    // After bootstrapping, par swap rates computed from the curve
+    // should match the input swap rates
+    std::vector<Inst> instruments = {
+        {0.50, 0.040, Inst::Deposit, 0},
+        {1.00, 0.045, Inst::Deposit, 0},
+        {2.00, 0.048, Inst::Swap, 2.0},
+        {3.00, 0.050, Inst::Swap, 2.0},
+        {5.00, 0.052, Inst::Swap, 2.0},
+    };
+    auto curve = bootstrap(instruments);
+
+    for (const auto& inst : instruments) {
+        if (inst.type == Inst::Swap) {
+            double recovered = qf::instruments::InterestRateSwap::parRate(
+                inst.maturity, inst.frequency, curve);
+            EXPECT_NEAR(recovered, inst.rate, 5e-4)
+                << "Par rate mismatch at T=" << inst.maturity;
+        }
+    }
+}
+
+TEST(Bootstrap, FlatInputGivesFlatCurve) {
+    double r = 0.05;
+    std::vector<Inst> instruments = {
+        {0.50, r, Inst::Deposit, 0},
+        {1.00, r, Inst::Deposit, 0},
+        {2.00, r, Inst::Deposit, 0},
+    };
+    auto curve = bootstrap(instruments, InterpolationMethod::Linear);
+    EXPECT_NEAR(curve.zeroRate(0.75), r, 1e-8);
+    EXPECT_NEAR(curve.zeroRate(1.50), r, 1e-8);
+}
+
+TEST(Bootstrap, MonotonicallyDecreasingDiscountFactors) {
+    std::vector<Inst> instruments = {
+        {0.25, 0.040, Inst::Deposit, 0},
+        {0.50, 0.042, Inst::Deposit, 0},
+        {1.00, 0.045, Inst::Deposit, 0},
+        {2.00, 0.048, Inst::Swap, 2.0},
+        {5.00, 0.052, Inst::Swap, 2.0},
+        {10.0, 0.055, Inst::Swap, 2.0},
+    };
+    auto curve = bootstrap(instruments);
+    double prevDF = 1.0;
+    for (double T : {0.25, 0.5, 1.0, 2.0, 5.0, 10.0}) {
+        double df = curve.discountFactor(T);
+        EXPECT_LT(df, prevDF);
+        prevDF = df;
+    }
+}
+
+TEST(Bootstrap, EmptyInstrumentsThrows) {
+    std::vector<Inst> empty;
+    EXPECT_THROW(bootstrap(empty), std::invalid_argument);
+}
+
+TEST(Bootstrap, UnsortedInstrumentsThrows) {
+    std::vector<Inst> unsorted = {
+        {1.00, 0.05, Inst::Deposit, 0},
+        {0.50, 0.04, Inst::Deposit, 0},
+    };
+    EXPECT_THROW(bootstrap(unsorted), std::invalid_argument);
 }

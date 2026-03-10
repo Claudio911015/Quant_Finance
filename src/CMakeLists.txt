@@ -3,6 +3,7 @@ add_library(qf
     math/rootfinding.cpp
     math/integration.cpp
     termstructure/yieldcurve.cpp
+    termstructure/bootstrap.cpp
     instruments/bond.cpp
     instruments/swap.cpp
     instruments/option.cpp
