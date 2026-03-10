@@ -3,6 +3,7 @@
 #include <qf/pricingengines/blackscholes.hpp>
 #include <qf/pricingengines/montecarlo.hpp>
 #include <qf/pricingengines/binomialtree.hpp>
+#include <qf/pricingengines/finite_difference.hpp>
 #include <cmath>
 
 using namespace qf::instruments;
@@ -129,6 +130,22 @@ TEST(BinomialTree, AmericanPutAboveEuropean) {
     double euPrice = binomialTreeBSPrice(european, 2000);
 
     EXPECT_GE(amPrice, euPrice);
+}
+
+TEST(FiniteDifference, ExplicitImplicitCrankConverge) {
+    auto p = makeCall(100, 100, 0.05, 0.0, 0.20, 1.0);
+    double bsPrice = blackScholes(p).price;
+
+    double expPrice = finiteDifferenceBSPrice(p, 500, 1000, FDMethod::Explicit);
+    double impPrice = finiteDifferenceBSPrice(p, 500, 1000, FDMethod::Implicit);
+    double cnPrice  = finiteDifferenceBSPrice(p, 500, 1000, FDMethod::CrankNicolson);
+
+    EXPECT_NEAR(cnPrice, bsPrice, 5e-2);
+    EXPECT_NEAR(impPrice, bsPrice, 2e-1);
+
+    // Explicit can be unstable for large dt -> but should be close with high resolution
+    EXPECT_NEAR(expPrice, bsPrice, 1.0);
+    EXPECT_LT(std::abs(cnPrice - bsPrice), std::abs(expPrice - bsPrice));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -9,6 +9,7 @@ add_library(qf
     pricingengines/blackscholes.cpp
     pricingengines/binomialtree.cpp
     pricingengines/montecarlo.cpp
+    pricingengines/finite_difference.cpp
     models/vasicek.cpp
     models/hullwhite.cpp
     risk/greeks.cpp
