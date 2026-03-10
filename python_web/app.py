@@ -128,7 +128,24 @@ HTML = '''
           </div>
           <button type="button" onclick="price()">Calcular precio</button>
         </form>
-        <div class="resultado" id="result">Introduce valores y haz clic en Calcular precio...</div>
+        <div class="resultado" id="result">
+          <div class="result-grid">
+            <div>
+              <h3>Precios por modelo</h3>
+              <table id="prices-table" class="result-table">
+                <thead><tr><th>Modelo</th><th>Precio</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div>
+              <h3>Griegas (Black-Scholes)</h3>
+              <table id="greeks-table" class="result-table">
+                <thead><tr><th>Griega</th><th>Valor</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="foot">Los valores se calculan en C++ a través de qfpy; actualiza la página para volver a cargar.</div>
     </div>
