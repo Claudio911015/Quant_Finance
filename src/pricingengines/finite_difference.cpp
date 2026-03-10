@@ -18,7 +18,7 @@ static void solveTriangular(std::vector<double>& a,
                             std::vector<double>& d,
                             int n)
 {
-    // Thomas algorithm for tridiagonal system (size n+1, 0..n)
+    // Thomas algorithm for tridiagonal system (interior nodes 1..n-1)
     std::vector<double> c_star(n + 1);
     std::vector<double> d_star(n + 1);
 
@@ -57,6 +57,7 @@ double finiteDifferenceBSPrice(const instruments::OptionParams& params,
     const double q = params.dividendYield;
     const double sigma = params.volatility;
     const double T = params.maturity;
+    const bool isCall = (params.type == instruments::OptionType::Call);
 
     const double Smax = 5.0 * S0;
     const double dS = Smax / nS;
@@ -64,54 +65,69 @@ double finiteDifferenceBSPrice(const instruments::OptionParams& params,
 
     std::vector<double> v_old(nS + 1), v_new(nS + 1);
 
+    // Terminal condition (payoff at maturity)
     for (int i = 0; i <= nS; ++i) {
         double Si = i * dS;
         v_old[i] = optionIntrinsic(Si, K, params.type);
     }
 
+    // Boundary conditions at time t
+    auto boundaryLow = [&](double t) -> double {
+        if (isCall) return 0.0;
+        return K * std::exp(-r * (T - t));
+    };
+    auto boundaryHigh = [&](double t) -> double {
+        if (isCall) return Smax * std::exp(-q * (T - t)) - K * std::exp(-r * (T - t));
+        return 0.0;
+    };
+
     for (int j = nT - 1; j >= 0; --j) {
         double t = j * dt;
 
+        v_new[0]  = boundaryLow(t);
+        v_new[nS] = boundaryHigh(t);
+
         if (method == FDMethod::Explicit) {
-            v_new[0] = optionIntrinsic(0.0, K, params.type);
-            v_new[nS] = optionIntrinsic(Smax, K, params.type) * std::exp(-q * (T - t));
-
             for (int i = 1; i < nS; ++i) {
-                double Si = i * dS;
-                double delta = (v_old[i+1] - v_old[i-1]) / (2.0 * dS);
-                double gamma = (v_old[i+1] - 2.0*v_old[i] + v_old[i-1]) / (dS*dS);
-
-                double a = 0.5 * dt * (sigma * sigma * i * i - (r - q) * i);
-                double b = 1.0 - dt * (sigma * sigma * i * i + r);
-                double c = 0.5 * dt * (sigma * sigma * i * i + (r - q) * i);
+                double i_d = static_cast<double>(i);
+                double a = 0.5 * dt * (sigma*sigma*i_d*i_d - (r - q)*i_d);
+                double b = 1.0 - dt * (sigma*sigma*i_d*i_d + r);
+                double c = 0.5 * dt * (sigma*sigma*i_d*i_d + (r - q)*i_d);
 
                 v_new[i] = a * v_old[i-1] + b * v_old[i] + c * v_old[i+1];
             }
             std::swap(v_new, v_old);
         }
         else {
+            // theta = 1.0 for Implicit, 0.5 for Crank-Nicolson
+            double theta = (method == FDMethod::Implicit) ? 1.0 : 0.5;
+
             std::vector<double> a(nS + 1), b(nS + 1), c(nS + 1), d(nS + 1);
             for (int i = 1; i < nS; ++i) {
                 double i_d = static_cast<double>(i);
-                double alpha = 0.5 * dt * (sigma*sigma * i_d * i_d - (r - q) * i_d);
-                double beta  = 1.0 + dt * (sigma*sigma * i_d * i_d + r);
-                double gamma = -0.5 * dt * (sigma*sigma * i_d * i_d + (r - q) * i_d);
+                double sig2i2 = sigma * sigma * i_d * i_d;
+                double rqi = (r - q) * i_d;
 
-                a[i] = -alpha;
-                b[i] = beta;
-                c[i] = -gamma;
+                // LHS (implicit side) tridiagonal coefficients
+                a[i] = -0.5 * theta * dt * (sig2i2 - rqi);
+                b[i] =  1.0 + theta * dt * (sig2i2 + r);
+                c[i] = -0.5 * theta * dt * (sig2i2 + rqi);
 
                 if (method == FDMethod::Implicit) {
                     d[i] = v_old[i];
                 } else {
-                    double alpha_e = -alpha;
-                    double beta_e  = 1.0 - dt * (sigma*sigma * i_d * i_d + r);
-                    double gamma_e = -gamma;
-                    d[i] = alpha_e * v_old[i-1] + beta_e * v_old[i] + gamma_e * v_old[i+1];
+                    // RHS (explicit side) for Crank-Nicolson
+                    double omt = 1.0 - theta;
+                    double ae =  0.5 * omt * dt * (sig2i2 - rqi);
+                    double be =  1.0 - omt * dt * (sig2i2 + r);
+                    double ce =  0.5 * omt * dt * (sig2i2 + rqi);
+                    d[i] = ae * v_old[i-1] + be * v_old[i] + ce * v_old[i+1];
                 }
             }
-            v_new[0] = optionIntrinsic(0.0, K, params.type);
-            v_new[nS] = optionIntrinsic(Smax, K, params.type) * std::exp(-q * (T - t));
+
+            // Incorporate known boundary values into the RHS
+            d[1]      -= a[1] * v_new[0];
+            d[nS - 1] -= c[nS - 1] * v_new[nS];
 
             solveTriangular(a, b, c, d, nS);
             for (int i = 1; i < nS; ++i) v_new[i] = d[i];
@@ -122,13 +138,11 @@ double finiteDifferenceBSPrice(const instruments::OptionParams& params,
 
     int idx0 = static_cast<int>(S0 / dS);
     if (idx0 < 0) idx0 = 0;
-    if (idx0 > nS) idx0 = nS;
+    if (idx0 >= nS) return v_old[nS];
+    if (idx0 == 0) return v_old[0];
 
     double s1 = idx0 * dS;
     double s2 = (idx0 + 1) * dS;
-    if (idx0 == nS) return v_old[nS];
-    if (idx0 == 0) return v_old[0];
-
     double w = (S0 - s1) / (s2 - s1);
     return v_old[idx0] * (1.0 - w) + v_old[idx0 + 1] * w;
 }
