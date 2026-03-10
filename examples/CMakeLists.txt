@@ -1,0 +1,10 @@
+function(add_example name)
+    add_executable(${name} ${name}.cpp)
+    target_link_libraries(${name} PRIVATE qf)
+    target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR}/include)
+endfunction()
+
+add_example(bond_pricing)
+add_example(yield_curve)
+add_example(black_scholes)
+add_example(monte_carlo)
