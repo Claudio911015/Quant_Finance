@@ -23,3 +23,16 @@ target_include_directories(qf
 )
 
 target_compile_features(qf PUBLIC cxx_std_17)
+
+# Optional Python bindings via pybind11
+find_package(pybind11 QUIET)
+if(pybind11_FOUND)
+    pybind11_add_module(qfpy
+        python_bindings/qfpy.cpp
+    )
+    target_link_libraries(qfpy PRIVATE qf)
+    target_include_directories(qfpy PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    set_target_properties(qfpy PROPERTIES PREFIX "")
+else()
+    message(WARNING "pybind11 not found. Python bindings will not be built.")
+endif()
