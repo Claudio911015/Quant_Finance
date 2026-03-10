@@ -1,3 +1,7 @@
+# Help CMake find the system GTest on Debian/Ubuntu if not already set
+if(NOT DEFINED GTest_DIR AND EXISTS "/usr/lib/x86_64-linux-gnu/cmake/GTest")
+    set(GTest_DIR "/usr/lib/x86_64-linux-gnu/cmake/GTest")
+endif()
 find_package(GTest QUIET)
 
 if(GTest_FOUND)

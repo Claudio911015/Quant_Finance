@@ -1,1 +1,128 @@
-// TODO: implement test_instruments.cpp
+#include <gtest/gtest.h>
+#include <qf/instruments/bond.hpp>
+#include <qf/termstructure/yieldcurve.hpp>
+#include <cmath>
+
+using namespace qf::instruments;
+using namespace qf::termstructure;
+using namespace qf::math;
+
+namespace {
+    // Flat curve helper
+    YieldCurve flatCurve(double rate) {
+        return YieldCurve({0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0},
+                          {rate, rate, rate, rate, rate, rate, rate},
+                          InterpolationMethod::Linear);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bond pricing
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(Bond, ParPriceWhenCouponEqualsYield) {
+    // Under continuous discounting, par pricing holds when coupon_rate = freq*(exp(r/freq)-1),
+    // not when coupon_rate == r.  Verify with the analytically correct par coupon.
+    double r = 0.05, freq = 2.0;
+    double par_coupon_rate = freq * (std::exp(r / freq) - 1.0); // ≈ 0.050626
+    auto curve = flatCurve(r);
+    Bond bond(1000.0, par_coupon_rate, 10, freq);
+    EXPECT_NEAR(bond.price(curve), 1000.0, 1e-6);
+}
+
+TEST(Bond, PremiumWhenCouponAboveYield) {
+    // Coupon 6% > yield 5% → price > par
+    auto curve = flatCurve(0.05);
+    Bond bond(1000.0, 0.06, 10, 2.0);
+    EXPECT_GT(bond.price(curve), 1000.0);
+}
+
+TEST(Bond, DiscountWhenCouponBelowYield) {
+    // Coupon 4% < yield 5% → price < par
+    auto curve = flatCurve(0.05);
+    Bond bond(1000.0, 0.04, 10, 2.0);
+    EXPECT_LT(bond.price(curve), 1000.0);
+}
+
+TEST(Bond, ZeroCouponBondAnalytical) {
+    // Zero coupon bond: price = face * exp(-r * T)
+    double r = 0.05, T = 5.0, face = 1000.0;
+    auto curve = flatCurve(r);
+    Bond zcb(face, 0.0, 1, 1.0 / T);  // 1 period at T years
+    double expected = face * std::exp(-r * T);
+    EXPECT_NEAR(zcb.price(curve), expected, 1e-4);
+}
+
+TEST(Bond, PriceDecreaseAsYieldIncrease) {
+    Bond bond(1000.0, 0.05, 10, 2.0);
+    double p1 = bond.price(flatCurve(0.04));
+    double p2 = bond.price(flatCurve(0.06));
+    EXPECT_GT(p1, p2);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// YTM round-trip
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(Bond, YTMRoundTrip) {
+    // Price a bond then recover YTM — must match original yield curve rate
+    double rate = 0.055;
+    auto curve = flatCurve(rate);
+    Bond bond(1000.0, 0.06, 10, 2.0);
+    double price = bond.price(curve);
+    double ytm   = bond.yield(price);
+    // Re-price using flat curve at recovered YTM
+    double reprice = bond.price(flatCurve(ytm));
+    EXPECT_NEAR(reprice, price, 1e-4);
+}
+
+TEST(Bond, YTMEqualsRateAtPar) {
+    double rate = 0.05;
+    auto curve = flatCurve(rate);
+    Bond bond(1000.0, rate, 10, 2.0);
+    double ytm = bond.yield(bond.price(curve));
+    EXPECT_NEAR(ytm, rate, 1e-6);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Duration & Convexity
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(Bond, DurationPositive) {
+    auto curve = flatCurve(0.05);
+    Bond bond(1000.0, 0.05, 10, 2.0);
+    EXPECT_GT(bond.duration(curve), 0.0);
+}
+
+TEST(Bond, DurationLessThanMaturity) {
+    // Modified duration < maturity (coupon bond)
+    auto curve = flatCurve(0.05);
+    Bond bond(1000.0, 0.05, 10, 2.0); // 5yr
+    EXPECT_LT(bond.duration(curve), 5.0);
+}
+
+TEST(Bond, LongerBondHasHigherDuration) {
+    auto curve = flatCurve(0.05);
+    Bond short_bond(1000.0, 0.05, 4,  2.0); // 2yr
+    Bond long_bond (1000.0, 0.05, 10, 2.0); // 5yr
+    EXPECT_GT(long_bond.duration(curve), short_bond.duration(curve));
+}
+
+TEST(Bond, ConvexityPositive) {
+    auto curve = flatCurve(0.05);
+    Bond bond(1000.0, 0.05, 10, 2.0);
+    EXPECT_GT(bond.convexity(curve), 0.0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Invalid inputs
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(Bond, InvalidPeriodsThrows) {
+    EXPECT_THROW(Bond(1000.0, 0.05, 0, 2.0), std::invalid_argument);
+    EXPECT_THROW(Bond(1000.0, 0.05, -1, 2.0), std::invalid_argument);
+}
+
+TEST(Bond, InvalidFrequencyThrows) {
+    EXPECT_THROW(Bond(1000.0, 0.05, 10, 0.0), std::invalid_argument);
+}
