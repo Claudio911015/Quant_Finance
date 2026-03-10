@@ -1,7 +1,0 @@
-<map id="qf::instruments::Bond::price" name="qf::instruments::Bond::price">
-<area shape="rect" id="Node000001" title=" " alt="" coords="5,5,167,45"/>
-<area shape="rect" id="Node000002" href="$d6/d5f/classqf_1_1termstructure_1_1YieldCurve.html#a062d3f0485aaeb8560f206eb990590e3" title=" " alt="" coords="215,5,409,45"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="167,23,201,23,201,28,167,28"/>
-<area shape="rect" id="Node000003" href="$d6/d5f/classqf_1_1termstructure_1_1YieldCurve.html#a7e18ce1e2a759ed76a4026f7c71820c8" title=" " alt="" coords="457,5,616,45"/>
-<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="409,23,444,23,444,28,409,28"/>
-</map>

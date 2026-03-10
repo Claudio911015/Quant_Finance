@@ -1,8 +1,0 @@
-<map id="qf::instruments::Bond::price" name="qf::instruments::Bond::price">
-<area shape="rect" id="Node000001" title=" " alt="" coords="413,35,575,75"/>
-<area shape="rect" id="Node000002" href="$d3/df3/classqf_1_1instruments_1_1Bond.html#abb6123d5ed40f062f4607019fd755926" title=" " alt="" coords="204,5,365,45"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="399,44,365,39,366,34,400,39"/>
-<area shape="rect" id="Node000003" href="$d6/d38/qfpy_8cpp.html#a49805e33eda1f8feebb40503ea62a892" title=" " alt="" coords="5,42,156,67"/>
-<area shape="poly" id="edge3_Node000001_Node000003" title=" " alt="" coords="400,60,365,60,204,60,156,59,156,54,204,55,365,55,400,54"/>
-<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="191,42,157,46,156,41,190,36"/>
-</map>
