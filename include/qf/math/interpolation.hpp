@@ -14,6 +14,7 @@ public:
 
 private:
     std::vector<double> x_, y_;
+    std::vector<double> spline_M_; // second derivatives for cubic spline
     InterpolationMethod method_;
 };
 
