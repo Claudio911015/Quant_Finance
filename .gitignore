@@ -19,6 +19,9 @@ Makefile
 .idea/
 *.user
 
+# Doxygen
+docs/doxygen/html/
+
 # OS
 .DS_Store
 Thumbs.db
