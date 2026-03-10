@@ -1,5 +1,6 @@
 #include <qf/instruments/option.hpp>
 #include <qf/pricingengines/blackscholes.hpp>
+#include <qf/pricingengines/binomialtree.hpp>
 #include <iostream>
 #include <iomanip>
 #include <random>
@@ -47,12 +48,19 @@ int main() {
 
     auto bs = qf::pricingengines::blackScholes(p);
     double mc = monteCarloBSPrice(p, 500000);
+    double bt_eu = qf::pricingengines::binomialTreeBSPrice(p, 2000);
+
+    auto p_am = p; p_am.exercise = qf::instruments::ExerciseType::American;
+    double bt_am = qf::pricingengines::binomialTreeBSPrice(p_am, 2000);
 
     std::cout << std::fixed << std::setprecision(4);
-    std::cout << "=== Monte Carlo vs Black-Scholes (ATM Call) ===\n";
+    std::cout << "=== Monte Carlo vs Black-Scholes vs Binomial (ATM Call) ===\n";
     std::cout << "Black-Scholes:  " << bs.price << "\n";
     std::cout << "Monte Carlo:    " << mc       << "  (N=500,000)\n";
-    std::cout << "Difference:     " << std::abs(bs.price - mc) << "\n";
+    std::cout << "Binomial (E):   " << bt_eu    << "  (n=2,000)\n";
+    std::cout << "Binomial (A):   " << bt_am    << "  (n=2,000)\n";
+    std::cout << "MC diff:        " << std::abs(bs.price - mc) << "\n";
+    std::cout << "Binomial diff:  " << std::abs(bs.price - bt_eu) << "\n";
 
     return 0;
 }

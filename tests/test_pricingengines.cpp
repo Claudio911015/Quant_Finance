@@ -2,6 +2,7 @@
 #include <qf/instruments/option.hpp>
 #include <qf/pricingengines/blackscholes.hpp>
 #include <qf/pricingengines/montecarlo.hpp>
+#include <qf/pricingengines/binomialtree.hpp>
 #include <cmath>
 
 using namespace qf::instruments;
@@ -87,6 +88,47 @@ TEST(MonteCarlo, ATMCallApproachesBlackScholes) {
 TEST(MonteCarlo, InvalidParametersThrows) {
     auto invalid = makeCall(0.0, 100, 0.05, 0.0, 0.20, 1.0);
     EXPECT_THROW(monteCarloBSPrice(invalid), std::invalid_argument);
+}
+
+TEST(BinomialTree, ConvergesToBlackScholes) {
+    auto p = makeCall(100, 100, 0.05, 0.0, 0.20, 1.0);
+    double bs = blackScholes(p).price;
+
+    double lowN  = binomialTreeBSPrice(p, 50);
+    double midN  = binomialTreeBSPrice(p, 250);
+    double highN = binomialTreeBSPrice(p, 2000);
+
+    EXPECT_NEAR(lowN, bs, 3.0);
+    EXPECT_NEAR(midN, bs, 1.0);
+    EXPECT_NEAR(highN, bs, 0.25);
+    EXPECT_LT(std::abs(highN - bs), std::abs(lowN - bs));
+}
+
+TEST(BinomialTree, PutConvergesToBlackScholes) {
+    auto p = makePut(100, 110, 0.05, 0.0, 0.20, 1.0);
+    double bs = blackScholes(p).price;
+
+    double lowN  = binomialTreeBSPrice(p, 50);
+    double midN  = binomialTreeBSPrice(p, 250);
+    double highN = binomialTreeBSPrice(p, 2000);
+
+    EXPECT_NEAR(lowN, bs, 3.0);
+    EXPECT_NEAR(midN, bs, 1.0);
+    EXPECT_NEAR(highN, bs, 0.25);
+    EXPECT_LT(std::abs(highN - bs), std::abs(lowN - bs));
+}
+
+TEST(BinomialTree, AmericanPutAboveEuropean) {
+    // American put should be >= European put
+    auto american = makePut(100, 110, 0.05, 0.0, 0.20, 1.0);
+    american.exercise = ExerciseType::American;
+
+    auto european = makePut(100, 110, 0.05, 0.0, 0.20, 1.0);
+
+    double amPrice = binomialTreeBSPrice(american, 2000);
+    double euPrice = binomialTreeBSPrice(european, 2000);
+
+    EXPECT_GE(amPrice, euPrice);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
