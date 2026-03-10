@@ -1,5 +1,8 @@
 <map id="qf::pricingengines::blackScholes" name="qf::pricingengines::blackScholes">
-<area shape="rect" id="Node000001" title=" " alt="" coords="191,5,328,45"/>
-<area shape="rect" id="Node000002" href="$d4/d7d/namespaceqf_1_1pricingengines.html#a413f1d50957f79ef99cb470079e67a44" title=" " alt="" coords="5,5,143,45"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="177,28,143,28,143,23,177,23"/>
+<area shape="rect" id="Node000001" title=" " alt="" coords="389,35,527,75"/>
+<area shape="rect" id="Node000002" href="$d4/d7d/namespaceqf_1_1pricingengines.html#a413f1d50957f79ef99cb470079e67a44" title=" " alt="" coords="204,5,341,45"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="376,44,341,39,342,34,376,39"/>
+<area shape="rect" id="Node000003" href="$d6/d38/qfpy_8cpp.html#a49805e33eda1f8feebb40503ea62a892" title=" " alt="" coords="5,42,156,67"/>
+<area shape="poly" id="edge3_Node000001_Node000003" title=" " alt="" coords="376,59,341,60,204,60,156,59,156,54,204,55,341,55,376,54"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="190,41,157,46,156,41,190,35"/>
 </map>

@@ -1,0 +1,3 @@
+flask
+# pybind11 is required for bindings; install via pip if missing
+pybind11

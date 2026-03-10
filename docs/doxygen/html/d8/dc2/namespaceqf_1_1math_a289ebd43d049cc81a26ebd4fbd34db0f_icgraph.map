@@ -1,9 +1,13 @@
 <map id="qf::math::brent" name="qf::math::brent">
-<area shape="rect" id="Node000001" title=" " alt="" coords="424,45,543,70"/>
-<area shape="rect" id="Node000002" href="$d4/d7d/namespaceqf_1_1pricingengines.html#a413f1d50957f79ef99cb470079e67a44" title=" " alt="" coords="227,5,364,45"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="410,48,364,40,365,34,411,42"/>
-<area shape="rect" id="Node000003" href="$d3/df3/classqf_1_1instruments_1_1Bond.html#ad363e7ac3e871c8232d627a833cc87f6" title=" " alt="" coords="215,69,376,109"/>
-<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="411,72,377,78,376,73,410,67"/>
-<area shape="rect" id="Node000004" href="$d3/df3/classqf_1_1instruments_1_1Bond.html#a3ff7cdd828b31b2e08be1d18a363103e" title=" " alt="" coords="5,69,167,109"/>
-<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="200,92,167,92,167,87,200,87"/>
+<area shape="rect" id="Node000001" title=" " alt="" coords="623,42,741,67"/>
+<area shape="rect" id="Node000002" href="$d4/d7d/namespaceqf_1_1pricingengines.html#a413f1d50957f79ef99cb470079e67a44" title=" " alt="" coords="216,5,353,45"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="609,52,353,33,354,28,609,47"/>
+<area shape="rect" id="Node000004" href="$d3/df3/classqf_1_1instruments_1_1Bond.html#ad363e7ac3e871c8232d627a833cc87f6" title=" " alt="" coords="413,63,575,103"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="610,68,575,73,575,68,609,63"/>
+<area shape="rect" id="Node000003" href="$d6/d38/qfpy_8cpp.html#a49805e33eda1f8feebb40503ea62a892" title=" " alt="" coords="5,70,156,95"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="204,51,128,72,126,67,202,46"/>
+<area shape="poly" id="edge6_Node000004_Node000003" title=" " alt="" coords="400,85,156,85,156,80,400,80"/>
+<area shape="rect" id="Node000005" href="$d3/df3/classqf_1_1instruments_1_1Bond.html#a3ff7cdd828b31b2e08be1d18a363103e" title=" " alt="" coords="204,120,365,160"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="408,109,359,123,358,117,407,104"/>
+<area shape="poly" id="edge5_Node000005_Node000003" title=" " alt="" coords="199,119,126,98,128,93,201,114"/>
 </map>

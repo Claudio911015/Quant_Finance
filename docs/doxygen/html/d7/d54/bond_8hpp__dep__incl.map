@@ -1,5 +1,7 @@
 <map id="include/qf/instruments/bond.hpp" name="include/qf/instruments/bond.hpp">
-<area shape="rect" id="Node000001" title=" " alt="" coords="15,5,183,45"/>
-<area shape="rect" id="Node000002" href="$d5/de4/bond_8cpp.html" title=" " alt="" coords="5,93,192,119"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="101,59,101,93,96,93,96,59"/>
+<area shape="rect" id="Node000001" title=" " alt="" coords="111,5,279,45"/>
+<area shape="rect" id="Node000002" href="$d5/de4/bond_8cpp.html" title=" " alt="" coords="5,101,192,126"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="165,57,114,102,110,98,161,53"/>
+<area shape="rect" id="Node000003" href="$d6/d38/qfpy_8cpp.html" title=" " alt="" coords="216,93,368,133"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="228,52,272,91,269,95,225,56"/>
 </map>

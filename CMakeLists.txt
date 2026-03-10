@@ -63,3 +63,19 @@ endif()
 if(QF_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
+
+# ── Web UI (Python) ──────────────────────────────────────────────────────────
+option(QF_BUILD_WEB "Build/run the Python web UI" ON)
+if(QF_BUILD_WEB)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND)
+        add_custom_target(run_web_ui
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python_web/app.py
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMENT "Run Python Flask UI (localhost:5000)"
+            USES_TERMINAL
+        )
+    else()
+        message(WARNING "Python3 not found. Web UI target will not be available.")
+    endif()
+endif()
