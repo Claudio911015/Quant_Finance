@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <qf/math/interpolation.hpp>
 #include <qf/math/rootfinding.hpp>
+#include <qf/math/integration.hpp>
 #include <cmath>
 
 using namespace qf::math;
@@ -99,4 +100,51 @@ TEST(RootFinding, BrentSine) {
 TEST(RootFinding, BrentRequiresBracket) {
     auto f = [](double x) { return x*x + 1.0; }; // no real root
     EXPECT_THROW(brent(f, 0.0, 1.0), std::invalid_argument);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Integration
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(Integration, SimpsonPolynomial) {
+    // ∫₀¹ x² dx = 1/3 (Simpson is exact for polynomials up to degree 3)
+    auto f = [](double x) { return x * x; };
+    EXPECT_NEAR(simpson(f, 0.0, 1.0, 100), 1.0 / 3.0, 1e-12);
+}
+
+TEST(Integration, SimpsonSine) {
+    // ∫₀^π sin(x) dx = 2
+    auto f = [](double x) { return std::sin(x); };
+    EXPECT_NEAR(simpson(f, 0.0, M_PI, 1000), 2.0, 1e-10);
+}
+
+TEST(Integration, SimpsonExponential) {
+    // ∫₀¹ e^x dx = e - 1
+    auto f = [](double x) { return std::exp(x); };
+    EXPECT_NEAR(simpson(f, 0.0, 1.0, 100), std::exp(1.0) - 1.0, 1e-10);
+}
+
+TEST(Integration, SimpsonInvalidN) {
+    auto f = [](double x) { return x; };
+    EXPECT_THROW(simpson(f, 0.0, 1.0, 3), std::invalid_argument);   // odd
+    EXPECT_THROW(simpson(f, 0.0, 1.0, 0), std::invalid_argument);   // zero
+}
+
+TEST(Integration, GaussLegendrePolynomial) {
+    // ∫₀¹ x³ dx = 1/4
+    auto f = [](double x) { return x * x * x; };
+    EXPECT_NEAR(gaussLegendre(f, 0.0, 1.0, 16), 0.25, 1e-12);
+}
+
+TEST(Integration, GaussLegendreSine) {
+    // ∫₀^π sin(x) dx = 2
+    auto f = [](double x) { return std::sin(x); };
+    EXPECT_NEAR(gaussLegendre(f, 0.0, M_PI, 32), 2.0, 1e-12);
+}
+
+TEST(Integration, GaussLegendreGaussian) {
+    // ∫₋₃³ e^(-x²) dx ≈ √π * erf(3) ≈ 1.7320...
+    auto f = [](double x) { return std::exp(-x * x); };
+    double expected = std::sqrt(M_PI) * std::erf(3.0);
+    EXPECT_NEAR(gaussLegendre(f, -3.0, 3.0, 32), expected, 1e-10);
 }

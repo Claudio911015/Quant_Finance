@@ -4,6 +4,7 @@
 #include <qf/pricingengines/montecarlo.hpp>
 #include <qf/pricingengines/binomialtree.hpp>
 #include <qf/pricingengines/finite_difference.hpp>
+#include <qf/pricingengines/heston.hpp>
 #include <cmath>
 
 using namespace qf::instruments;
@@ -244,4 +245,70 @@ TEST(BlackScholes, InvalidParamsThrow) {
     EXPECT_THROW(blackScholes(makeCall(100,  0.0, 0.05, 0.0, 0.20, 1.0)), std::invalid_argument);
     EXPECT_THROW(blackScholes(makeCall(100, 100,  0.05, 0.0, 0.0,  1.0)), std::invalid_argument);
     EXPECT_THROW(blackScholes(makeCall(100, 100,  0.05, 0.0, 0.20, 0.0)), std::invalid_argument);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Heston Model
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace {
+    HestonParams makeHeston(double v0, double kappa, double theta,
+                            double sigma, double rho) {
+        return {v0, kappa, theta, sigma, rho};
+    }
+}
+
+TEST(Heston, ConvergesToBSWhenVolOfVolNearZero) {
+    // When sigma (vol of vol) ≈ 0, Heston → Black-Scholes with vol = sqrt(v0)
+    auto opt = makeCall(100, 100, 0.05, 0.0, 0.20, 1.0);
+    auto h = makeHeston(0.04, 2.0, 0.04, 0.001, 0.0);  // sigma≈0, v0=theta=0.04
+    double bsPrice = blackScholes(opt).price;
+    double hPrice = hestonPrice(opt, h);
+    EXPECT_NEAR(hPrice, bsPrice, 0.05);
+}
+
+TEST(Heston, PutCallParity) {
+    auto call = makeCall(100, 100, 0.05, 0.0, 0.20, 1.0);
+    auto put  = makePut (100, 100, 0.05, 0.0, 0.20, 1.0);
+    auto h = makeHeston(0.04, 2.0, 0.04, 0.3, -0.7);
+    double C = hestonPrice(call, h);
+    double P = hestonPrice(put, h);
+    double parity = C - P - (100.0 * std::exp(-0.0) - 100.0 * std::exp(-0.05));
+    EXPECT_NEAR(parity, 0.0, 1e-4);
+}
+
+TEST(Heston, CallPricePositive) {
+    auto opt = makeCall(100, 100, 0.05, 0.0, 0.20, 1.0);
+    auto h = makeHeston(0.04, 2.0, 0.04, 0.3, -0.7);
+    EXPECT_GT(hestonPrice(opt, h), 0.0);
+}
+
+TEST(Heston, PutPricePositive) {
+    auto opt = makePut(100, 100, 0.05, 0.0, 0.20, 1.0);
+    auto h = makeHeston(0.04, 2.0, 0.04, 0.3, -0.7);
+    EXPECT_GT(hestonPrice(opt, h), 0.0);
+}
+
+TEST(Heston, HigherVolOfVolWidensSmile) {
+    // Higher vol of vol increases OTM put prices (fatter left tail)
+    auto otmPut = makePut(100, 80, 0.05, 0.0, 0.20, 1.0);
+    auto hLow  = makeHeston(0.04, 2.0, 0.04, 0.1, -0.5);
+    auto hHigh = makeHeston(0.04, 2.0, 0.04, 0.8, -0.5);
+    EXPECT_GT(hestonPrice(otmPut, hHigh), hestonPrice(otmPut, hLow));
+}
+
+TEST(Heston, MonteCarloApproachesAnalytical) {
+    auto opt = makeCall(100, 100, 0.05, 0.0, 0.20, 1.0);
+    auto h = makeHeston(0.04, 2.0, 0.04, 0.3, -0.5);
+    double analytic = hestonPrice(opt, h);
+    double mc = hestonMonteCarlo(opt, h, 200000, 252, 42);
+    EXPECT_NEAR(mc, analytic, 1.0);  // MC has variance; 1.0 tolerance is safe
+}
+
+TEST(Heston, InvalidParamsThrow) {
+    auto opt = makeCall(100, 100, 0.05, 0.0, 0.20, 1.0);
+    EXPECT_THROW(hestonPrice(opt, makeHeston(0.04, 2.0, 0.04, 0.0, -0.5)),
+                 std::invalid_argument);  // sigma = 0
+    EXPECT_THROW(hestonPrice(opt, makeHeston(0.04, 2.0, 0.04, 0.3, 1.5)),
+                 std::invalid_argument);  // |rho| > 1
 }

@@ -14,9 +14,6 @@ double binomialTreeBSPrice(const instruments::OptionParams& p,
     if (p.spot <= 0.0 || p.strike <= 0.0 || p.maturity <= 0.0 || p.volatility <= 0.0)
         throw std::invalid_argument("binomialTreeBSPrice: invalid option parameters");
 
-    if (p.exercise != instruments::ExerciseType::European)
-        throw std::invalid_argument("binomialTreeBSPrice: only European options supported");
-
     const double S0 = p.spot;
     const double K  = p.strike;
     const double r  = p.riskFreeRate;
