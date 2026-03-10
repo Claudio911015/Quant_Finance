@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <qf/instruments/option.hpp>
 #include <qf/pricingengines/blackscholes.hpp>
+#include <qf/pricingengines/montecarlo.hpp>
 #include <cmath>
 
 using namespace qf::instruments;
@@ -74,6 +75,18 @@ TEST(BlackScholes, ATMPutKnownValue) {
     // S=K=100, r=5%, q=0%, vol=20%, T=1yr → ≈ 5.5735
     auto res = blackScholes(makePut(100, 100, 0.05, 0.0, 0.20, 1.0));
     EXPECT_NEAR(res.price, 5.5735, 1e-3);
+}
+
+TEST(MonteCarlo, ATMCallApproachesBlackScholes) {
+    auto p = makeCall(100, 100, 0.05, 0.0, 0.20, 1.0);
+    auto bs = blackScholes(p).price;
+    auto mc = monteCarloBSPrice(p, 500000, 12345);
+    EXPECT_NEAR(mc, bs, 5e-1); // Monte Carlo std error ~ 0.1 so tolerance 0.5 is safe in CI
+}
+
+TEST(MonteCarlo, InvalidParametersThrows) {
+    auto invalid = makeCall(0.0, 100, 0.05, 0.0, 0.20, 1.0);
+    EXPECT_THROW(monteCarloBSPrice(invalid), std::invalid_argument);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
