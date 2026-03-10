@@ -31,6 +31,34 @@ if(QF_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+# ── Documentation ─────────────────────────────────────────────────────────────
+option(QF_BUILD_DOCS "Build API docs with Doxygen" ON)
+if(QF_BUILD_DOCS)
+    find_package(Doxygen QUIET)
+    if(DOXYGEN_FOUND)
+        set(DOXYGEN_IN ${CMAKE_SOURCE_DIR}/Doxyfile)
+        set(DOXYGEN_OUT ${CMAKE_BINARY_DIR}/Doxyfile)
+        add_custom_command(
+            OUTPUT ${DOXYGEN_OUT}
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${DOXYGEN_IN} ${DOXYGEN_OUT}
+            DEPENDS ${DOXYGEN_IN}
+            COMMENT "Copy Doxyfile"
+        )
+
+        add_custom_target(doxygen ALL
+            DEPENDS ${DOXYGEN_OUT}
+            COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMENT "Generating API documentation with Doxygen"
+            VERBATIM
+        )
+
+        set_target_properties(doxygen PROPERTIES FOLDER "documentation")
+    else()
+        message(WARNING "Doxygen not found. Docs target won't be built.")
+    endif()
+endif()
+
 # ── Examples ──────────────────────────────────────────────────────────────────
 if(QF_BUILD_EXAMPLES)
     add_subdirectory(examples)

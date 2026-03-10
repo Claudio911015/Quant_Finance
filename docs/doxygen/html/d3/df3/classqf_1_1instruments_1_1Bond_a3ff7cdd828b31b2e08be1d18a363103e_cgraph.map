@@ -1,0 +1,11 @@
+<map id="qf::instruments::Bond::duration" name="qf::instruments::Bond::duration">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,37,167,77"/>
+<area shape="rect" id="Node000002" href="$d6/d5f/classqf_1_1termstructure_1_1YieldCurve.html#a062d3f0485aaeb8560f206eb990590e3" title=" " alt="" coords="215,5,409,45"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="166,43,200,38,201,44,167,49"/>
+<area shape="rect" id="Node000004" href="$d3/df3/classqf_1_1instruments_1_1Bond.html#ad363e7ac3e871c8232d627a833cc87f6" title=" " alt="" coords="231,69,393,109"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="167,66,218,73,217,79,166,71"/>
+<area shape="rect" id="Node000003" href="$d6/d5f/classqf_1_1termstructure_1_1YieldCurve.html#a7e18ce1e2a759ed76a4026f7c71820c8" title=" " alt="" coords="457,5,616,45"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="409,23,444,23,444,28,409,28"/>
+<area shape="rect" id="Node000005" href="$d8/dc2/namespaceqf_1_1math.html#a289ebd43d049cc81a26ebd4fbd34db0f" title=" " alt="" coords="477,77,596,102"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="393,87,464,87,464,92,393,92"/>
+</map>
