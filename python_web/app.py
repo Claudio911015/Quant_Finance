@@ -10,6 +10,7 @@ for p in (build_src, build_root):
 
 try:
     import qfpy
+    print(f"qfpy loaded from: {qfpy.__file__}")
 except ModuleNotFoundError:
     raise ModuleNotFoundError('qfpy module not found. Run cmake --build build --target qfpy first.')
 
@@ -251,7 +252,10 @@ def api_price():
     bs = qfpy.black_scholes(p)
     bt = qfpy.binomial_tree_price(p, 1000)
     mc = qfpy.montecarlo_price(p, 200000, seed=123)
-    fd = qfpy.finite_difference_price(p, nS=200, nT=200, method=qfpy.FDMethod.CrankNicolson)
+    fd = qfpy.finite_difference_price(p, nS=500, nT=1000, method=qfpy.FDMethod.CrankNicolson)
+
+    if not (fd and fd == fd):  # check nan
+        fd = 0.0
 
     return jsonify({
         'black_scholes': bs['price'],
