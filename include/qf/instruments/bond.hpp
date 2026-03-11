@@ -1,10 +1,11 @@
 #pragma once
 #include <vector>
+#include <qf/instruments/instrument.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 
 namespace qf::instruments {
 
-class Bond {
+class Bond : public Instrument {
 public:
     Bond(double faceValue,
          double couponRate,

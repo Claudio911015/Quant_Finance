@@ -7,7 +7,8 @@ namespace qf::instruments {
 InterestRateSwap::InterestRateSwap(double notional, double fixedRate,
                                    double maturity, double frequency,
                                    SwapType type)
-    : notional_(notional), fixedRate_(fixedRate),
+    : Instrument(maturity),
+      notional_(notional), fixedRate_(fixedRate),
       maturity_(maturity), frequency_(frequency), type_(type)
 {
     if (notional <= 0.0)

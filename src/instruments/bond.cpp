@@ -7,7 +7,8 @@
 namespace qf::instruments {
 
 Bond::Bond(double faceValue, double couponRate, int periods, double frequency)
-    : faceValue_(faceValue), couponRate_(couponRate),
+    : Instrument(static_cast<double>(periods) / frequency),
+      faceValue_(faceValue), couponRate_(couponRate),
       periods_(periods), frequency_(frequency)
 {
     if (periods <= 0)

@@ -1,11 +1,12 @@
 #pragma once
+#include <qf/instruments/instrument.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 
 namespace qf::instruments {
 
 enum class SwapType { Payer, Receiver };
 
-class InterestRateSwap {
+class InterestRateSwap : public Instrument {
 public:
     // notional: nominal amount
     // fixedRate: annual fixed coupon rate
