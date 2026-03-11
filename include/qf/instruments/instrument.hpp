@@ -13,7 +13,7 @@ public:
     double maturity() const { return maturity_; }
     void setMaturity(double m) { maturity_ = m; }
 
-    double pv(const termstructure::YieldCurve& curve) {
+    double pv(const termstructure::YieldCurve& curve) const {
         pv_ = calculatePV(curve);
         return pv_;
     }

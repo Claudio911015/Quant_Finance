@@ -4,12 +4,67 @@
 
 namespace qf::instruments {
 
+static double discountAnnuity(double maturity, double frequency, const termstructure::YieldCurve& curve)
+{
+    double dt = 1.0 / frequency;
+    int nPayments = static_cast<int>(maturity * frequency);
+    double sum = 0.0;
+
+    for (int i = 1; i <= nPayments; ++i) {
+        double t = i * dt;
+        sum += dt * curve.discountFactor(t);
+    }
+    return sum;
+}
+
+// Leg implementation
+
+double Leg::calculatePV(const termstructure::YieldCurve& curve) const
+{
+    if (floating_) {
+        double floatPV = notional_ * (1.0 - curve.discountFactor(maturity()));
+        if (spread_ != 0.0) {
+            double dt = maturity();
+            floatPV += notional_ * spread_ * dt * curve.discountFactor(maturity());
+        }
+        return floatPV;
+    }
+
+    // Fixed leg: fixed coupon + notional at maturity
+    int nPayments = static_cast<int>(std::max(1.0, maturity()));
+    double fixedPV = 0.0;
+    for (int i = 1; i <= nPayments; ++i) {
+        double t = std::min(maturity(), static_cast<double>(i));
+        fixedPV += notional_ * fixedRate_ * curve.discountFactor(t);
+    }
+    fixedPV += notional_ * curve.discountFactor(maturity());
+    return fixedPV;
+}
+
+double InterestRateSwap::annuity(const termstructure::YieldCurve& curve) const
+{
+    return discountAnnuity(maturity_, frequency_, curve);
+}
+
+double InterestRateSwap::npv(const termstructure::YieldCurve& curve) const
+{
+    // Use the same classic formula as prior implementation for compatibility
+    double floatingLeg = notional_ * (1.0 - curve.discountFactor(maturity_));
+    double fixedLeg = fixedRate_ * annuity(curve);
+    double payer_npv = floatingLeg - fixedLeg;
+    double raw_npv = (type_ == SwapType::Payer) ? payer_npv : -payer_npv;
+    return raw_npv;
+}
+
 InterestRateSwap::InterestRateSwap(double notional, double fixedRate,
                                    double maturity, double frequency,
                                    SwapType type)
-    : Instrument(maturity),
-      notional_(notional), fixedRate_(fixedRate),
-      maturity_(maturity), frequency_(frequency), type_(type)
+    : Swap(
+          Leg("USD", "ACT/365", notional, maturity, fixedRate, 0.0, false),
+          Leg("USD", "ACT/365", notional, maturity, 0.0, 0.0, true),
+          SwapLegType::FixedFloating),
+      notional_(notional), fixedRate_(fixedRate), maturity_(maturity),
+      frequency_(frequency), type_(type)
 {
     if (notional <= 0.0)
         throw std::invalid_argument("InterestRateSwap: notional must be positive");
@@ -19,39 +74,15 @@ InterestRateSwap::InterestRateSwap(double notional, double fixedRate,
         throw std::invalid_argument("InterestRateSwap: frequency must be positive");
 }
 
-double InterestRateSwap::annuity(const termstructure::YieldCurve& curve) const
+// keep simple and compatible with previous interface:
+
+double InterestRateSwap::annuity(double maturity, double frequency,
+                                 const termstructure::YieldCurve& curve)
 {
-    double dt = 1.0 / frequency_;
-    int nPayments = static_cast<int>(maturity_ * frequency_);
-    double sum = 0.0;
-
-    for (int i = 1; i <= nPayments; ++i) {
-        double t = i * dt;
-        sum += dt * curve.discountFactor(t);
-    }
-
-    return notional_ * sum;
+    return discountAnnuity(maturity, frequency, curve);
 }
 
-double InterestRateSwap::npv(const termstructure::YieldCurve& curve) const
-{
-    // Floating leg value = N * (P(0, t_start) - P(0, t_end))
-    // For spot-starting swap: t_start = 0, so P(0,0) = 1
-    double floatingLeg = notional_ * (1.0 - curve.discountFactor(maturity_));
-
-    // Fixed leg value = R * Annuity
-    double fixedLeg = fixedRate_ * annuity(curve);
-
-    // Payer swap: pay fixed, receive floating
-    double payer_npv = floatingLeg - fixedLeg;
-
-    return (type_ == SwapType::Payer) ? payer_npv : -payer_npv;
-}
-
-double InterestRateSwap::calculatePV(const termstructure::YieldCurve& curve) const
-{
-    return npv(curve);
-}
+// old behaviour via static parRate
 
 double InterestRateSwap::parRate(double maturity, double frequency,
                                  const termstructure::YieldCurve& curve)
@@ -66,7 +97,6 @@ double InterestRateSwap::parRate(double maturity, double frequency,
     for (int i = 1; i <= nPayments; ++i)
         annuitySum += dt * curve.discountFactor(i * dt);
 
-    // Par rate: R = (1 - P(0,T)) / Annuity
     return (1.0 - curve.discountFactor(maturity)) / annuitySum;
 }
 

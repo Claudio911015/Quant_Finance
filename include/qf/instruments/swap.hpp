@@ -1,31 +1,81 @@
 #pragma once
+#include <memory>
+#include <string>
 #include <qf/instruments/instrument.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 
 namespace qf::instruments {
 
 enum class SwapType { Payer, Receiver };
+enum class SwapLegType { FixedFloating, FixedFixed, FixedInflation };
 
-class InterestRateSwap : public Instrument {
+class Leg : public Instrument {
 public:
-    // notional: nominal amount
-    // fixedRate: annual fixed coupon rate
-    // maturity: swap maturity in years
-    // frequency: payments per year (e.g. 2 = semi-annual)
-    InterestRateSwap(double notional, double fixedRate,
-                     double maturity, double frequency,
-                     SwapType type);
+    Leg(std::string currency,
+        std::string dayCountConvention,
+        double notional,
+        double maturity,
+        double fixedRate = 0.0,
+        double spread = 0.0,
+        bool floating = false)
+        : Instrument(maturity), currency_(std::move(currency)), dayCountConvention_(std::move(dayCountConvention)),
+          notional_(notional), fixedRate_(fixedRate), spread_(spread), floating_(floating)
+    {
+        if (notional_ <= 0.0) throw std::invalid_argument("Leg: notional must be positive");
+        if (maturity <= 0.0) throw std::invalid_argument("Leg: maturity must be positive");
+    }
 
-    // Net present value of the swap
-    double npv(const termstructure::YieldCurve& curve) const;
+    const std::string& currency() const { return currency_; }
+    const std::string& dayCountConvention() const { return dayCountConvention_; }
+
     double calculatePV(const termstructure::YieldCurve& curve) const override;
 
-    // Par swap rate (fixed rate that makes NPV = 0)
-    static double parRate(double maturity, double frequency,
-                          const termstructure::YieldCurve& curve);
+private:
+    std::string currency_;
+    std::string dayCountConvention_;
+    double notional_;
+    double fixedRate_;
+    double spread_;
+    bool floating_;
+};
 
-    // Annuity (PV of fixed leg basis point streams)
+class Swap : public Instrument {
+public:
+    Swap(Leg payLeg, Leg receiveLeg, SwapLegType type)
+        : Instrument(std::max(payLeg.maturity(), receiveLeg.maturity())),
+          payLeg_(std::move(payLeg)), receiveLeg_(std::move(receiveLeg)), type_(type)
+    {
+        if (payLeg_.maturity() <= 0.0 || receiveLeg_.maturity() <= 0.0)
+            throw std::invalid_argument("Swap: leg maturities must be positive");
+    }
+
+    double npv(const termstructure::YieldCurve& curve) const {
+        return payLeg_.pv(curve) - receiveLeg_.pv(curve);
+    }
+
+    double calculatePV(const termstructure::YieldCurve& curve) const override {
+        return npv(curve);
+    }
+
+    const Leg& payLeg() const { return payLeg_; }
+    const Leg& receiveLeg() const { return receiveLeg_; }
+    SwapLegType type() const { return type_; }
+
+private:
+    Leg payLeg_;
+    Leg receiveLeg_;
+    SwapLegType type_;
+};
+
+class InterestRateSwap : public Swap {
+public:
+    InterestRateSwap(double notional, double fixedRate, double maturity, double frequency, SwapType type);
+
+    double npv(const termstructure::YieldCurve& curve) const;
     double annuity(const termstructure::YieldCurve& curve) const;
+
+    static double parRate(double maturity, double frequency, const termstructure::YieldCurve& curve);
+    static double annuity(double maturity, double frequency, const termstructure::YieldCurve& curve);
 
 private:
     double notional_;

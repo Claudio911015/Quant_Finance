@@ -203,3 +203,14 @@ TEST(Swap, InvalidParamsThrow) {
     EXPECT_THROW(InterestRateSwap(1e6, 0.04, 5.0, 0.0, SwapType::Payer),
                  std::invalid_argument);
 }
+
+TEST(Swap, LegAndSwapPV) {
+    auto curve = swapCurve();
+    Leg payLeg("USD", "ACT/365", 1e6, 5.0, 0.04, 0.0, false);
+    Leg receiveLeg("USD", "ACT/365", 1e6, 5.0, 0.0, 0.0, true);
+    Swap swap(payLeg, receiveLeg, SwapLegType::FixedFloating);
+
+    double expected = payLeg.pv(curve) - receiveLeg.pv(curve);
+    EXPECT_NEAR(swap.npv(curve), expected, 1e-8);
+    EXPECT_NEAR(swap.pv(curve), expected, 1e-8);
+}
