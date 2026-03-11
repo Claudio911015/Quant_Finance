@@ -66,16 +66,22 @@ endif()
 
 # ── Web UI (Python) ──────────────────────────────────────────────────────────
 option(QF_BUILD_WEB "Build/run the Python web UI" ON)
-if(QF_BUILD_WEB)
-    find_package(Python3 COMPONENTS Interpreter QUIET)
-    if(Python3_FOUND)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    if(QF_BUILD_WEB)
         add_custom_target(run_web_ui
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python_web/app.py
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             COMMENT "Run Python Flask UI (localhost:5000)"
             USES_TERMINAL
         )
-    else()
-        message(WARNING "Python3 not found. Web UI target will not be available.")
     endif()
+
+    add_custom_target(pytests
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tests -p "test_*.py"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Run Python unit tests"
+    )
+else()
+    message(WARNING "Python3 not found. Web UI target and pytests target will not be available.")
 endif()
