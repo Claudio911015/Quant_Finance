@@ -52,10 +52,19 @@ pybind11
 ```bash
 # from repository root
 cmake -S . -B build
-cmake --build build --target test         # builds C++ tests
-cmake --build build --target qfpy         # builds Python extension qfpy if pybind11 available
-cmake --build build --target doxygen      # (optional) generates docs in docs/doxygen/html
+cmake --build build --target test         # builds C++ tests (GoogleTest)
+cmake --build build --target qfpy         # builds Python extension qfpy (pybind11)
+cmake --build build --target doxygen      # optional docs (if doxygen installed)
+cmake --build build --target pytests      # Python unittest discover for python_web/app.py
 ```
+
+Con esta configuración, el pipeline puede ejecutarse directamente desde la raíz con rutas relativas:
+
+1. `cmake -S . -B build`
+2. `cmake --build build --target test`
+3. `cmake --build build --target pytests`
+4. `cmake --build build --target qfpy`
+5. `cmake --build build --target run_web_ui` (o `python3 python_web/app.py`)
 
 ### Run web UI
 
