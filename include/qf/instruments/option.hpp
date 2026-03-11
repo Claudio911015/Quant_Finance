@@ -22,6 +22,8 @@ public:
     double volatility = 0.0;
     OptionType type = OptionType::Call;
     ExerciseType exercise = ExerciseType::European;
+
+    double calculatePV(const termstructure::YieldCurve& curve) const override;
 };
 
 struct OptionParams {

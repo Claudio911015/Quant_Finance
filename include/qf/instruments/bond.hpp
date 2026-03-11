@@ -13,6 +13,7 @@ public:
          double frequency = 2.0); // semi-annual by default
 
     double price(const termstructure::YieldCurve& curve) const;
+    double calculatePV(const termstructure::YieldCurve& curve) const override;
     double yield(double marketPrice) const;  // YTM via root-finding
     double duration(const termstructure::YieldCurve& curve) const;
     double convexity(const termstructure::YieldCurve& curve) const;

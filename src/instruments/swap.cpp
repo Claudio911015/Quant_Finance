@@ -48,6 +48,11 @@ double InterestRateSwap::npv(const termstructure::YieldCurve& curve) const
     return (type_ == SwapType::Payer) ? payer_npv : -payer_npv;
 }
 
+double InterestRateSwap::calculatePV(const termstructure::YieldCurve& curve) const
+{
+    return npv(curve);
+}
+
 double InterestRateSwap::parRate(double maturity, double frequency,
                                  const termstructure::YieldCurve& curve)
 {

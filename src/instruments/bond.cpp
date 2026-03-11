@@ -43,6 +43,11 @@ double Bond::price(const termstructure::YieldCurve& curve) const
     return pv;
 }
 
+double Bond::calculatePV(const termstructure::YieldCurve& curve) const
+{
+    return price(curve);
+}
+
 double Bond::yield(double marketPrice) const
 {
     // Find y such that sum(cf[i] * exp(-y * t[i])) = marketPrice

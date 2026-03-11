@@ -18,6 +18,7 @@ public:
 
     // Net present value of the swap
     double npv(const termstructure::YieldCurve& curve) const;
+    double calculatePV(const termstructure::YieldCurve& curve) const override;
 
     // Par swap rate (fixed rate that makes NPV = 0)
     static double parRate(double maturity, double frequency,
