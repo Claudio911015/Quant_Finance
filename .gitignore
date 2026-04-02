@@ -22,6 +22,9 @@ Makefile
 # Doxygen
 docs/doxygen/html/
 
+# Worktrees
+.worktrees/
+
 # OS
 .DS_Store
 Thumbs.db
