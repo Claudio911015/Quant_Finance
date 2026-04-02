@@ -1,4 +1,5 @@
 add_library(qf
+    core/market_environment.cpp
     math/interpolation.cpp
     math/rootfinding.cpp
     math/integration.cpp

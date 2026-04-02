@@ -12,6 +12,7 @@ if(GTest_FOUND)
         test_pricingengines.cpp
         test_models.cpp
         test_risk.cpp
+        test_market_environment.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)
