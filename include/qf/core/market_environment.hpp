@@ -6,8 +6,9 @@
 namespace qf::core {
 
 class MarketEnvironment {
+    // Not thread-safe. External synchronization required for concurrent access.
 public:
-    MarketEnvironment() = default;
+    MarketEnvironment() noexcept = default;
     explicit MarketEnvironment(termstructure::YieldCurve defaultCurve);
 
     void addCurve(const std::string& name, termstructure::YieldCurve curve);

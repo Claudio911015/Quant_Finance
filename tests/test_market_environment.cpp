@@ -85,3 +85,15 @@ TEST(MarketEnvironment, OverwriteSpotAndVol) {
     env.setVolatility("TSLA", 0.35);
     EXPECT_DOUBLE_EQ(env.volatility("TSLA"), 0.35);
 }
+
+// 9. NegativeVolThrows — volatilidad negativa lanza invalid_argument
+TEST(MarketEnvironment, NegativeVolThrows) {
+    MarketEnvironment env;
+    EXPECT_THROW(env.setVolatility("AAPL", -0.1), std::invalid_argument);
+}
+
+// 10. NegativeSpotThrows — spot negativo lanza invalid_argument
+TEST(MarketEnvironment, NegativeSpotThrows) {
+    MarketEnvironment env;
+    EXPECT_THROW(env.setSpot("AAPL", -100.0), std::invalid_argument);
+}

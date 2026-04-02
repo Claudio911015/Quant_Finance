@@ -20,10 +20,16 @@ const termstructure::YieldCurve& MarketEnvironment::curve(const std::string& nam
 }
 
 void MarketEnvironment::setSpot(const std::string& ticker, double spot) {
+    if (spot < 0.0) {
+        throw std::invalid_argument("MarketEnvironment: spot cannot be negative: " + ticker);
+    }
     spots_.insert_or_assign(ticker, spot);
 }
 
 void MarketEnvironment::setVolatility(const std::string& ticker, double vol) {
+    if (vol < 0.0) {
+        throw std::invalid_argument("MarketEnvironment: volatility cannot be negative: " + ticker);
+    }
     vols_.insert_or_assign(ticker, vol);
 }
 
