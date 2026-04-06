@@ -15,6 +15,8 @@ add_library(qf
     pricingengines/heston.cpp
     models/vasicek.cpp
     models/hullwhite.cpp
+    models/heston_model.cpp
+    models/bs_model.cpp
     risk/greeks.cpp
     risk/var.cpp
 )

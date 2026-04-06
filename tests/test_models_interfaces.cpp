@@ -2,6 +2,9 @@
 #include <qf/models/irate_model.hpp>
 #include <qf/models/vasicek.hpp>
 #include <qf/models/hullwhite.hpp>
+#include <qf/models/iequity_model.hpp>
+#include <qf/models/heston_model.hpp>
+#include <qf/models/bs_model.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 #include <qf/math/interpolation.hpp>
 #include <memory>
@@ -44,4 +47,49 @@ TEST(IRateModel, PolymorphicDispatch) {
         auto path = m->simulate(1.0, 50, 42);
         EXPECT_EQ(path.size(), 51u);
     }
+}
+
+// ---------------------------------------------------------------------------
+// IEquityModel tests (Task 3)
+// ---------------------------------------------------------------------------
+
+TEST(IEquityModel, HestonModelIsIEquityModel) {
+    HestonParams hp{0.04, 2.0, 0.04, 0.3, -0.7};
+    std::shared_ptr<IEquityModel> m = std::make_shared<HestonModel>(hp);
+    auto path = m->simulate(100.0, 1.0, 252, 42);
+    EXPECT_EQ(path.size(), 253u);
+    EXPECT_DOUBLE_EQ(path[0], 100.0);
+    for (double S : path) EXPECT_GT(S, 0.0);
+}
+
+TEST(IEquityModel, BSModelIsIEquityModel) {
+    std::shared_ptr<IEquityModel> m =
+        std::make_shared<BlackScholesModel>(0.05, 0.0, 0.20);
+    auto path = m->simulate(100.0, 1.0, 252, 42);
+    EXPECT_EQ(path.size(), 253u);
+    EXPECT_DOUBLE_EQ(path[0], 100.0);
+    for (double S : path) EXPECT_GT(S, 0.0);
+}
+
+TEST(IEquityModel, PolymorphicEquityDispatch) {
+    HestonParams hp{0.04, 2.0, 0.04, 0.3, -0.7};
+    std::vector<std::shared_ptr<IEquityModel>> models = {
+        std::make_shared<HestonModel>(hp),
+        std::make_shared<BlackScholesModel>(0.05, 0.0, 0.20)
+    };
+    for (auto& m : models) {
+        auto p = m->simulate(100.0, 1.0, 52, 1);
+        EXPECT_EQ(p.size(), 53u);
+        EXPECT_GT(p.back(), 0.0);
+    }
+}
+
+TEST(IEquityModel, HestonInvalidParamsThrow) {
+    EXPECT_THROW(HestonModel({-0.01, 2.0, 0.04, 0.3, -0.7}), std::invalid_argument);
+    EXPECT_THROW(HestonModel({0.04, 2.0, 0.04, 0.3, 1.5}),   std::invalid_argument);
+}
+
+TEST(IEquityModel, BSModelInvalidSigmaThrows) {
+    EXPECT_THROW(BlackScholesModel(0.05, 0.0, 0.0), std::invalid_argument);
+    EXPECT_THROW(BlackScholesModel(0.05, 0.0, -0.2), std::invalid_argument);
 }
