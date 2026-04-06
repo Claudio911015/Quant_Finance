@@ -5,6 +5,7 @@ add_library(qf
     math/integration.cpp
     termstructure/yieldcurve.cpp
     termstructure/bootstrap.cpp
+    instruments/instrument.cpp
     instruments/bond.cpp
     instruments/swap.cpp
     instruments/option.cpp

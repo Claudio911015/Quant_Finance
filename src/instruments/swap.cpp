@@ -1,4 +1,5 @@
 #include <qf/instruments/swap.hpp>
+#include <qf/core/market_environment.hpp>
 #include <cmath>
 #include <stdexcept>
 
@@ -19,8 +20,9 @@ static double discountAnnuity(double maturity, double frequency, const termstruc
 
 // Leg implementation
 
-double Leg::calculatePV(const termstructure::YieldCurve& curve) const
+double Leg::calculatePV(const core::MarketEnvironment& env) const
 {
+    const auto& curve = env.curve();
     if (floating_) {
         double floatPV = notional_ * (1.0 - curve.discountFactor(maturity()));
         if (spread_ != 0.0) {
@@ -98,6 +100,14 @@ double InterestRateSwap::parRate(double maturity, double frequency,
         annuitySum += dt * curve.discountFactor(i * dt);
 
     return (1.0 - curve.discountFactor(maturity)) / annuitySum;
+}
+
+double InterestRateSwap::npv(const core::MarketEnvironment& env) const {
+    return npv(env.curve());
+}
+
+double InterestRateSwap::annuity(const core::MarketEnvironment& env) const {
+    return annuity(env.curve());
 }
 
 } // namespace qf::instruments

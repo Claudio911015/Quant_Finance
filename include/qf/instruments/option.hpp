@@ -1,5 +1,6 @@
 #pragma once
 #include <qf/instruments/instrument.hpp>
+#include <qf/core/market_environment.hpp>
 
 namespace qf::instruments {
 
@@ -23,7 +24,7 @@ public:
     OptionType type = OptionType::Call;
     ExerciseType exercise = ExerciseType::European;
 
-    double calculatePV(const termstructure::YieldCurve& curve) const override;
+    double calculatePV(const core::MarketEnvironment& env) const override;
 };
 
 struct OptionParams {
