@@ -60,5 +60,12 @@ double binomialTreeBSPrice(const instruments::OptionParams& p,
     return values[0];
 }
 
+BinomialTreeEngine::BinomialTreeEngine(instruments::OptionParams params, int nSteps)
+    : params_(std::move(params)), nSteps_(nSteps) {}
+
+double BinomialTreeEngine::price(const core::MarketEnvironment& /*env*/) const {
+    return binomialTreeBSPrice(params_, nSteps_);
+}
+
 } // namespace qf::pricingengines
 

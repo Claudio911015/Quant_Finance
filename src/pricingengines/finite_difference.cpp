@@ -147,4 +147,11 @@ double finiteDifferenceBSPrice(const instruments::OptionParams& params,
     return v_old[idx0] * (1.0 - w) + v_old[idx0 + 1] * w;
 }
 
+FDMEngine::FDMEngine(instruments::OptionParams params, int nS, int nT, FDMethod method)
+    : params_(std::move(params)), nS_(nS), nT_(nT), method_(method) {}
+
+double FDMEngine::price(const core::MarketEnvironment& /*env*/) const {
+    return finiteDifferenceBSPrice(params_, nS_, nT_, method_);
+}
+
 } // namespace qf::pricingengines

@@ -1,23 +1,28 @@
 #pragma once
-
+#include <string>
 #include <qf/instruments/option.hpp>
+#include <qf/pricingengines/ipricing_engine.hpp>
 
 namespace qf::pricingengines {
 
-enum class FDMethod {
-    Explicit,
-    Implicit,
-    CrankNicolson
-};
+enum class FDMethod { Explicit, Implicit, CrankNicolson };
 
-// Finite-difference solver for Black-Scholes European (Call/Put) options.
-// nS: number of underlying asset steps, nT: number of time steps.
-// Smax relative to spot is internally set to 5.0.
-// Returns approximate option price at spot.
-
+/// Free function (preserved for backward-compat)
 double finiteDifferenceBSPrice(const instruments::OptionParams& params,
-                               int nS = 200,
-                               int nT = 200,
+                               int nS = 200, int nT = 200,
                                FDMethod method = FDMethod::CrankNicolson);
+
+class FDMEngine : public IPricingEngine {
+public:
+    FDMEngine(instruments::OptionParams params,
+              int nS = 200, int nT = 200,
+              FDMethod method = FDMethod::CrankNicolson);
+    double price(const core::MarketEnvironment& env) const override;
+    std::string name() const override { return "FiniteDifference"; }
+private:
+    instruments::OptionParams params_;
+    int nS_, nT_;
+    FDMethod method_;
+};
 
 } // namespace qf::pricingengines

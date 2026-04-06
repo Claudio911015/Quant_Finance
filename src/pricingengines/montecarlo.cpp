@@ -43,5 +43,12 @@ double monteCarloBSPrice(const instruments::OptionParams& p,
     return std::exp(-r * T) * sum / static_cast<double>(N);
 }
 
+MonteCarloEngine::MonteCarloEngine(instruments::OptionParams params, int N, unsigned seed)
+    : params_(std::move(params)), N_(N), seed_(seed) {}
+
+double MonteCarloEngine::price(const core::MarketEnvironment& /*env*/) const {
+    return monteCarloBSPrice(params_, N_, seed_);
+}
+
 } // namespace qf::pricingengines
 

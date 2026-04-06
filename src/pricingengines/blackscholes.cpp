@@ -93,4 +93,11 @@ double impliedVolatility(const instruments::OptionParams& p,
     return math::brent(priceFn, 1e-6, 5.0, tol, maxIt);
 }
 
+BlackScholesEngine::BlackScholesEngine(instruments::OptionParams params)
+    : params_(std::move(params)) {}
+
+double BlackScholesEngine::price(const core::MarketEnvironment& /*env*/) const {
+    return blackScholes(params_).price;
+}
+
 } // namespace qf::pricingengines
