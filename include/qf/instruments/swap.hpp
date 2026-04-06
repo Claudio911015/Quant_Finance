@@ -28,6 +28,8 @@ public:
 
     const std::string& currency() const { return currency_; }
     const std::string& dayCountConvention() const { return dayCountConvention_; }
+    double notional() const { return notional_; }
+    double fixedRate() const { return fixedRate_; }
 
     double calculatePV(const core::MarketEnvironment& env) const override;
 
@@ -75,22 +77,28 @@ private:
 
 class InterestRateSwap : public Swap {
 public:
-    InterestRateSwap(double notional, double fixedRate, double maturity, double frequency, SwapType type);
+    InterestRateSwap(double notional, double fixedRate,
+                     double maturity, double frequency, SwapType type);
 
-    double npv(const termstructure::YieldCurve& curve) const;
-    double annuity(const termstructure::YieldCurve& curve) const;
-
-    static double parRate(double maturity, double frequency, const termstructure::YieldCurve& curve);
-    static double annuity(double maturity, double frequency, const termstructure::YieldCurve& curve);
-
-    // MarketEnvironment overloads (forward to YieldCurve versions via env.curve())
+    // Primary API (MarketEnvironment)
     double npv(const core::MarketEnvironment& env) const;
     double annuity(const core::MarketEnvironment& env) const;
 
+    // Legacy overloads (backward-compat)
+    double npv(const termstructure::YieldCurve& curve) const;
+    double annuity(const termstructure::YieldCurve& curve) const;
+
+    static double parRate(double maturity, double frequency,
+                          const core::MarketEnvironment& env);
+    static double parRate(double maturity, double frequency,
+                          const termstructure::YieldCurve& curve);
+    static double annuity(double maturity, double frequency,
+                          const core::MarketEnvironment& env);
+    static double annuity(double maturity, double frequency,
+                          const termstructure::YieldCurve& curve);
+
 private:
-    double notional_;
-    double fixedRate_;
-    double maturity_;
+    // Only state not derivable from Leg objects
     double frequency_;
     SwapType type_;
 };
