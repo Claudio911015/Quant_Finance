@@ -203,3 +203,32 @@ TEST(BlackScholesEngine, LegacyConstructorStillIgnoresEnv) {
     double p2 = engine.price(atmEnv());
     EXPECT_DOUBLE_EQ(p1, p2);
 }
+
+// ── Task 4: MonteCarloEngine env-aware ───────────────────────────────────────
+
+TEST(MonteCarloEngine, EnvAwareReadsDifferentSpot) {
+    MarketEnvironment env;
+    env.setSpot("AAPL", 110.0);
+    env.setVolatility("AAPL", 0.20);
+    env.addCurve("default",
+        qf::termstructure::YieldCurve({0.5,1.0,2.0,5.0},{0.05,0.05,0.05,0.05}));
+
+    auto envEngine    = MonteCarloEngine(atm(), "AAPL", 100000, 42);
+    auto legacyEngine = MonteCarloEngine(atm(), 100000, 42);
+
+    double priceS110 = envEngine.price(env);
+    double priceS100 = legacyEngine.price(emptyEnv());
+    EXPECT_GT(priceS110, priceS100);
+}
+
+TEST(MonteCarloEngine, EnvAwareMissingTickerThrows) {
+    auto engine = MonteCarloEngine(atm(), "AAPL", 100000, 42);
+    EXPECT_THROW(engine.price(emptyEnv()), std::out_of_range);
+}
+
+TEST(MonteCarloEngine, LegacyConstructorIgnoresEnv) {
+    auto engine = MonteCarloEngine(atm(), 100000, 42);
+    double p1 = engine.price(emptyEnv());
+    double p2 = engine.price(atmEnv());
+    EXPECT_DOUBLE_EQ(p1, p2);
+}

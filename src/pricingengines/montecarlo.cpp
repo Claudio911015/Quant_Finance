@@ -1,4 +1,5 @@
 #include <qf/pricingengines/montecarlo.hpp>
+#include <qf/pricingengines/detail/env_resolver.hpp>
 #include <cmath>
 #include <random>
 #include <stdexcept>
@@ -48,29 +49,29 @@ MonteCarloEngine::MonteCarloEngine(std::shared_ptr<models::IEquityModel> model,
         throw std::invalid_argument("MonteCarloEngine: nSteps must be positive");
 }
 
+MonteCarloEngine::MonteCarloEngine(instruments::OptionParams params, std::string ticker,
+                                   int N, unsigned seed)
+    : params_(std::move(params)), ticker_(std::move(ticker)), N_(N), seed_(seed) {}
+
 double MonteCarloEngine::price(const core::MarketEnvironment& env) const {
-    if (!model_) {
-        return monteCarloBSPrice(params_, N_, seed_);
+    if (model_) {
+        // Model-driven: resolve params then simulate via model
+        auto p = detail::resolveEquityParams(params_, ticker_, env);
+        double sum = 0.0;
+        for (int i = 0; i < N_; ++i) {
+            auto path = model_->simulate(p.spot, p.maturity, nSteps_,
+                                         seed_ + static_cast<unsigned>(i));
+            double ST = path.back();
+            double payoff = (p.type == instruments::OptionType::Call)
+                          ? std::max(ST - p.strike, 0.0)
+                          : std::max(p.strike - ST, 0.0);
+            sum += payoff;
+        }
+        return std::exp(-p.riskFreeRate * p.maturity) * sum / static_cast<double>(N_);
     }
-
-    // Model-driven: delegate simulation to IEquityModel
-    // Each path i uses seed_ + i for independence
-    const double S0 = params_.spot;
-    const double K  = params_.strike;
-    const double r  = params_.riskFreeRate;
-    const double T  = params_.maturity;
-
-    double sum = 0.0;
-    for (int i = 0; i < N_; ++i) {
-        auto path = model_->simulate(S0, T, nSteps_,
-                                     seed_ + static_cast<unsigned>(i));
-        double ST = path.back();
-        double payoff = (params_.type == instruments::OptionType::Call)
-                      ? std::max(ST - K, 0.0)
-                      : std::max(K - ST, 0.0);
-        sum += payoff;
-    }
-    return std::exp(-r * T) * sum / static_cast<double>(N_);
+    // Legacy / env-aware: resolve params (ticker_ empty = pass-through) then free function
+    auto p = detail::resolveEquityParams(params_, ticker_, env);
+    return monteCarloBSPrice(p, N_, seed_);
 }
 
 } // namespace qf::pricingengines
