@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <qf/pricingengines/ipricing_engine.hpp>
+#include <qf/pricingengines/engine_factory.hpp>
 #include <qf/pricingengines/blackscholes.hpp>
 #include <qf/pricingengines/montecarlo.hpp>
 #include <qf/pricingengines/binomialtree.hpp>
@@ -59,6 +60,34 @@ TEST(HestonEngine, IsIPricingEngine) {
     EXPECT_EQ(e->name(), "Heston");
     double p = e->price(emptyEnv());
     EXPECT_NEAR(p, hestonPrice(opt, hp), 1e-10);
+}
+
+TEST(EngineFactory, MakesBlackScholesEngine) {
+    auto e = EngineFactory::makeEquityEngine("BS", atm());
+    EXPECT_EQ(e->name(), "BlackScholes");
+    EXPECT_GT(e->price(emptyEnv()), 0.0);
+}
+
+TEST(EngineFactory, MakesMonteCarloEngine) {
+    auto e = EngineFactory::makeEquityEngine("MC", atm(), 50000, 42);
+    EXPECT_EQ(e->name(), "MonteCarlo");
+    EXPECT_GT(e->price(emptyEnv()), 0.0);
+}
+
+TEST(EngineFactory, MakesBinomialTreeEngine) {
+    auto e = EngineFactory::makeEquityEngine("BT", atm());
+    EXPECT_EQ(e->name(), "BinomialTree");
+    EXPECT_GT(e->price(emptyEnv()), 0.0);
+}
+
+TEST(EngineFactory, MakesFDMEngine) {
+    auto e = EngineFactory::makeEquityEngine("FDM", atm());
+    EXPECT_EQ(e->name(), "FiniteDifference");
+    EXPECT_GT(e->price(emptyEnv()), 0.0);
+}
+
+TEST(EngineFactory, UnknownMethodThrows) {
+    EXPECT_THROW(EngineFactory::makeEquityEngine("UNKNOWN", atm()), std::invalid_argument);
 }
 
 TEST(PricingEngines, PutCallParityAcrossEngines) {
