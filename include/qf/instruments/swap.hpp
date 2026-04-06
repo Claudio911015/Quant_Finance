@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <qf/instruments/instrument.hpp>
+#include <qf/core/market_environment.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 
 namespace qf::instruments {
@@ -27,8 +28,10 @@ public:
 
     const std::string& currency() const { return currency_; }
     const std::string& dayCountConvention() const { return dayCountConvention_; }
+    double notional() const { return notional_; }
+    double fixedRate() const { return fixedRate_; }
 
-    double calculatePV(const termstructure::YieldCurve& curve) const override;
+    double calculatePV(const core::MarketEnvironment& env) const override;
 
 private:
     std::string currency_;
@@ -49,12 +52,17 @@ public:
             throw std::invalid_argument("Swap: leg maturities must be positive");
     }
 
-    double npv(const termstructure::YieldCurve& curve) const {
-        return payLeg_.pv(curve) - receiveLeg_.pv(curve);
+    double npv(const core::MarketEnvironment& env) const {
+        return payLeg_.pv(env) - receiveLeg_.pv(env);
     }
 
-    double calculatePV(const termstructure::YieldCurve& curve) const override {
-        return npv(curve);
+    /// Legacy overload for backward-compat
+    double npv(const termstructure::YieldCurve& curve) const {
+        return npv(core::MarketEnvironment(curve));
+    }
+
+    double calculatePV(const core::MarketEnvironment& env) const override {
+        return npv(env);
     }
 
     const Leg& payLeg() const { return payLeg_; }
@@ -69,18 +77,28 @@ private:
 
 class InterestRateSwap : public Swap {
 public:
-    InterestRateSwap(double notional, double fixedRate, double maturity, double frequency, SwapType type);
+    InterestRateSwap(double notional, double fixedRate,
+                     double maturity, double frequency, SwapType type);
 
+    // Primary API (MarketEnvironment)
+    double npv(const core::MarketEnvironment& env) const;
+    double annuity(const core::MarketEnvironment& env) const;
+
+    // Legacy overloads (backward-compat)
     double npv(const termstructure::YieldCurve& curve) const;
     double annuity(const termstructure::YieldCurve& curve) const;
 
-    static double parRate(double maturity, double frequency, const termstructure::YieldCurve& curve);
-    static double annuity(double maturity, double frequency, const termstructure::YieldCurve& curve);
+    static double parRate(double maturity, double frequency,
+                          const core::MarketEnvironment& env);
+    static double parRate(double maturity, double frequency,
+                          const termstructure::YieldCurve& curve);
+    static double annuity(double maturity, double frequency,
+                          const core::MarketEnvironment& env);
+    static double annuity(double maturity, double frequency,
+                          const termstructure::YieldCurve& curve);
 
 private:
-    double notional_;
-    double fixedRate_;
-    double maturity_;
+    // Only state not derivable from Leg objects
     double frequency_;
     SwapType type_;
 };

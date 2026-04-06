@@ -1,4 +1,5 @@
 #include <qf/instruments/bond.hpp>
+#include <qf/core/market_environment.hpp>
 #include <qf/math/rootfinding.hpp>
 #include <cmath>
 #include <stdexcept>
@@ -43,9 +44,9 @@ double Bond::price(const termstructure::YieldCurve& curve) const
     return pv;
 }
 
-double Bond::calculatePV(const termstructure::YieldCurve& curve) const
+double Bond::calculatePV(const core::MarketEnvironment& env) const
 {
-    return price(curve);
+    return price(env.curve());
 }
 
 double Bond::yield(double marketPrice) const

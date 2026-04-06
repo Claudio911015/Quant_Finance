@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <qf/instruments/instrument.hpp>
+#include <qf/core/market_environment.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 
 namespace qf::instruments {
@@ -13,7 +14,7 @@ public:
          double frequency = 2.0); // semi-annual by default
 
     double price(const termstructure::YieldCurve& curve) const;
-    double calculatePV(const termstructure::YieldCurve& curve) const override;
+    double calculatePV(const core::MarketEnvironment& env) const override;
     double yield(double marketPrice) const;  // YTM via root-finding
     double duration(const termstructure::YieldCurve& curve) const;
     double convexity(const termstructure::YieldCurve& curve) const;

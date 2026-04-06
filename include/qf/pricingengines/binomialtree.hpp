@@ -1,14 +1,21 @@
 #pragma once
-
+#include <string>
 #include <qf/instruments/option.hpp>
+#include <qf/pricingengines/ipricing_engine.hpp>
 
 namespace qf::pricingengines {
 
-// Cox-Ross-Rubinstein binomial tree pricer for European/American options.
-// - nSteps is the number of time steps in the tree (default 1000).
-// - American exercise uses early exercise in backward induction.
+/// Free function (preserved for backward-compat)
+double binomialTreeBSPrice(const instruments::OptionParams& params, int nSteps = 1000);
 
-double binomialTreeBSPrice(const instruments::OptionParams& params,
-                           int nSteps = 1000);
+class BinomialTreeEngine : public IPricingEngine {
+public:
+    BinomialTreeEngine(instruments::OptionParams params, int nSteps = 1000);
+    double price(const core::MarketEnvironment& env) const override;
+    std::string name() const override { return "BinomialTree"; }
+private:
+    instruments::OptionParams params_;
+    int nSteps_;
+};
 
 } // namespace qf::pricingengines

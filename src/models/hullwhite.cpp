@@ -1,5 +1,6 @@
 #include <qf/models/hullwhite.hpp>
 #include <cmath>
+#include <random>
 #include <stdexcept>
 
 namespace qf::models {
@@ -43,6 +44,34 @@ double HullWhite::zeroRate(double T) const
     if (T <= 0.0)
         throw std::invalid_argument("HullWhite::zeroRate: T must be positive");
     return curve_.zeroRate(T);
+}
+
+double HullWhite::theta(double t) const
+{
+    const double dt = 1e-5;
+    // Ensure T1 > 0 for forwardRate calls (YieldCurve requires positive maturities)
+    double t0 = std::max(t, dt);
+    double f1 = curve_.forwardRate(t0, t0 + dt);
+    double f0 = (t0 > dt) ? curve_.forwardRate(t0 - dt, t0) : f1;
+    double dfdt = (f1 - f0) / dt;
+    double ft = curve_.forwardRate(t0, t0 + 1e-4);
+    return dfdt + a_ * ft + (sigma_ * sigma_ / (2.0 * a_)) * (1.0 - std::exp(-2.0 * a_ * t));
+}
+
+std::vector<double> HullWhite::simulate(double T, int steps, unsigned seed) const
+{
+    std::mt19937_64 rng(seed);
+    std::normal_distribution<double> N(0.0, 1.0);
+    double dt = T / steps;
+    double sqdt = std::sqrt(dt);
+    double r0 = curve_.zeroRate(1e-4);
+    std::vector<double> path(steps + 1);
+    path[0] = r0;
+    for (int i = 0; i < steps; ++i) {
+        double t = i * dt;
+        path[i + 1] = path[i] + (theta(t) - a_ * path[i]) * dt + sigma_ * sqdt * N(rng);
+    }
+    return path;
 }
 
 } // namespace qf::models
