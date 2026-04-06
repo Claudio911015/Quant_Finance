@@ -8,6 +8,7 @@
 #include <qf/pricingengines/heston.hpp>
 #include <qf/core/market_environment.hpp>
 #include <qf/instruments/option.hpp>
+#include <qf/termstructure/yieldcurve.hpp>
 #include <qf/models/iequity_model.hpp>
 #include <qf/models/bs_model.hpp>
 #include <qf/models/heston_model.hpp>
@@ -154,4 +155,51 @@ TEST(MonteCarloEngine, HestonModelDrivenAgreesWithHestonEngine) {
     double mcPrice = mcEngine->price(emptyEnv());
 
     EXPECT_NEAR(mcPrice, analytical, analytical * 0.03);
+}
+
+// ── Task 3: BlackScholesEngine env-aware ─────────────────────────────────────
+
+static MarketEnvironment atmEnv() {
+    // Matches atm() params: S=100, sigma=0.20, r=0.05
+    MarketEnvironment env;
+    env.setSpot("AAPL", 100.0);
+    env.setVolatility("AAPL", 0.20);
+    env.addCurve("default",
+        qf::termstructure::YieldCurve({0.5,1.0,2.0,5.0},{0.05,0.05,0.05,0.05}));
+    return env;
+}
+
+TEST(BlackScholesEngine, EnvAwareMatchesParamsBased) {
+    auto paramsEngine = BlackScholesEngine(atm());
+    auto envEngine    = BlackScholesEngine(atm(), "AAPL");
+
+    double expected = paramsEngine.price(emptyEnv());
+    double actual   = envEngine.price(atmEnv());
+    EXPECT_NEAR(actual, expected, 1e-8);
+}
+
+TEST(BlackScholesEngine, EnvAwareReadsDifferentSpot) {
+    auto envEngine = BlackScholesEngine(atm(), "AAPL");
+    MarketEnvironment env;
+    env.setSpot("AAPL", 110.0);
+    env.setVolatility("AAPL", 0.20);
+    env.addCurve("default",
+        qf::termstructure::YieldCurve({0.5,1.0,2.0,5.0},{0.05,0.05,0.05,0.05}));
+
+    double priceS100 = BlackScholesEngine(atm()).price(emptyEnv());
+    double priceS110 = envEngine.price(env);
+    EXPECT_GT(priceS110, priceS100);
+}
+
+TEST(BlackScholesEngine, EnvAwareMissingSpotThrows) {
+    auto engine = BlackScholesEngine(atm(), "AAPL");
+    MarketEnvironment emptyNamed;
+    EXPECT_THROW(engine.price(emptyNamed), std::out_of_range);
+}
+
+TEST(BlackScholesEngine, LegacyConstructorStillIgnoresEnv) {
+    auto engine = BlackScholesEngine(atm());
+    double p1 = engine.price(emptyEnv());
+    double p2 = engine.price(atmEnv());
+    EXPECT_DOUBLE_EQ(p1, p2);
 }
