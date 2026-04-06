@@ -272,3 +272,30 @@ TEST(FDMEngine, EnvAwareMissingTickerThrows) {
     auto engine = FDMEngine(atm(), "AAPL");
     EXPECT_THROW(engine.price(emptyEnv()), std::out_of_range);
 }
+
+// ── Task 6: HestonEngine env-aware ───────────────────────────────────────────
+
+TEST(HestonEngine, EnvAwareReadsDifferentSpot) {
+    OptionParams opt = {100, 100, 0.05, 0.0, 0.0, 1.0,
+                        OptionType::Call, ExerciseType::European};
+    HestonParams hp{0.04, 2.0, 0.04, 0.3, -0.7};
+
+    auto envEngine = HestonEngine(opt, hp, "AAPL");
+
+    MarketEnvironment env;
+    env.setSpot("AAPL", 110.0);
+    env.addCurve("default",
+        qf::termstructure::YieldCurve({0.5,1.0,2.0,5.0},{0.05,0.05,0.05,0.05}));
+
+    double priceS100 = HestonEngine(opt, hp).price(emptyEnv());
+    double priceS110 = envEngine.price(env);
+    EXPECT_GT(priceS110, priceS100);
+}
+
+TEST(HestonEngine, EnvAwareMissingSpotThrows) {
+    OptionParams opt = {100, 100, 0.05, 0.0, 0.0, 1.0,
+                        OptionType::Call, ExerciseType::European};
+    HestonParams hp{0.04, 2.0, 0.04, 0.3, -0.7};
+    auto engine = HestonEngine(opt, hp, "AAPL");
+    EXPECT_THROW(engine.price(emptyEnv()), std::out_of_range);
+}

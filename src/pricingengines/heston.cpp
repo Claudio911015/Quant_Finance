@@ -1,4 +1,5 @@
 #include <qf/pricingengines/heston.hpp>
+#include <qf/pricingengines/detail/env_resolver.hpp>
 #include <qf/math/integration.hpp>
 #include <cmath>
 #include <complex>
@@ -125,10 +126,19 @@ double hestonMonteCarlo(const instruments::OptionParams& opt,
 }
 
 HestonEngine::HestonEngine(instruments::OptionParams opt, HestonParams heston)
-    : opt_(std::move(opt)), heston_(heston) {}
+    : opt_(std::move(opt)), heston_(std::move(heston)) {}
 
-double HestonEngine::price(const core::MarketEnvironment& /*env*/) const {
-    return hestonPrice(opt_, heston_);
+HestonEngine::HestonEngine(instruments::OptionParams opt, HestonParams heston,
+                            std::string ticker)
+    : opt_(std::move(opt)), heston_(std::move(heston)), ticker_(std::move(ticker)) {}
+
+double HestonEngine::price(const core::MarketEnvironment& env) const {
+    auto [spot, rate] = detail::resolveSpotAndRate(
+        opt_.spot, opt_.riskFreeRate, opt_.maturity, ticker_, env);
+    auto p = opt_;
+    p.spot = spot;
+    p.riskFreeRate = rate;
+    return hestonPrice(p, heston_);
 }
 
 } // namespace qf::pricingengines
