@@ -6,6 +6,7 @@ add_library(qf
     termstructure/yieldcurve.cpp
     termstructure/bootstrap.cpp
     instruments/instrument.cpp
+    instruments/iunderlying.cpp
     instruments/bond.cpp
     instruments/swap.cpp
     instruments/option.cpp

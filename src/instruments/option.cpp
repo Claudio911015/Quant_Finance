@@ -4,22 +4,19 @@
 
 namespace qf::instruments {
 
-double Option::calculatePV(const core::MarketEnvironment& /*env*/) const
-{
-    // For simple Black-Scholes European option pricing, term structure is not used directly
-    // because we rely on constant rates in Option object.
-    qf::instruments::OptionParams params{
-        spot,
-        strike,
-        riskFreeRate,
-        dividendYield,
-        volatility,
-        maturity(),
-        type,
-        exercise
-    };
-    return qf::pricingengines::blackScholes(params).price;
+Option::Option(std::shared_ptr<IUnderlying> underlying,
+               double strikeVal, double maturity,
+               OptionType optType, ExerciseType exer)
+    : Instrument(maturity),
+      underlying_(std::move(underlying)),
+      strike_(strikeVal), type_(optType), exercise_(exer)
+{}
+
+double Option::calculatePV(const core::MarketEnvironment& /*env*/) const {
+    // Legacy path: uses fields stored directly on Option
+    OptionParams params{spot, strike, riskFreeRate, dividendYield,
+                        volatility, maturity(), type, exercise};
+    return pricingengines::blackScholes(params).price;
 }
 
 } // namespace qf::instruments
-
