@@ -124,4 +124,11 @@ double hestonMonteCarlo(const instruments::OptionParams& opt,
     return std::exp(-r * T) * sum / static_cast<double>(nPaths);
 }
 
+HestonEngine::HestonEngine(instruments::OptionParams opt, HestonParams heston)
+    : opt_(std::move(opt)), heston_(heston) {}
+
+double HestonEngine::price(const core::MarketEnvironment& /*env*/) const {
+    return hestonPrice(opt_, heston_);
+}
+
 } // namespace qf::pricingengines
