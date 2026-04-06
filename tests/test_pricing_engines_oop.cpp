@@ -231,4 +231,44 @@ TEST(MonteCarloEngine, LegacyConstructorIgnoresEnv) {
     double p1 = engine.price(emptyEnv());
     double p2 = engine.price(atmEnv());
     EXPECT_DOUBLE_EQ(p1, p2);
+
+}
+
+// ── Task 5: BinomialTreeEngine and FDMEngine env-aware ───────────────────────
+
+TEST(BinomialTreeEngine, EnvAwareReadsDifferentVol) {
+    // Construct with vol=0.20 in params; env has vol=0.30 — env wins
+    auto envEngine = BinomialTreeEngine(atm(), "AAPL", 500);
+    MarketEnvironment env;
+    env.setSpot("AAPL", 100.0);
+    env.setVolatility("AAPL", 0.30);
+    env.addCurve("default",
+        qf::termstructure::YieldCurve({0.5,1.0,2.0,5.0},{0.05,0.05,0.05,0.05}));
+
+    double priceVol20 = BinomialTreeEngine(atm(), 500).price(emptyEnv());
+    double priceVol30 = envEngine.price(env);
+    EXPECT_GT(priceVol30, priceVol20);
+}
+
+TEST(BinomialTreeEngine, EnvAwareMissingTickerThrows) {
+    auto engine = BinomialTreeEngine(atm(), "AAPL", 500);
+    EXPECT_THROW(engine.price(emptyEnv()), std::out_of_range);
+}
+
+TEST(FDMEngine, EnvAwareReadsDifferentSpot) {
+    auto envEngine = FDMEngine(atm(), "AAPL");
+    MarketEnvironment env;
+    env.setSpot("AAPL", 90.0);
+    env.setVolatility("AAPL", 0.20);
+    env.addCurve("default",
+        qf::termstructure::YieldCurve({0.5,1.0,2.0,5.0},{0.05,0.05,0.05,0.05}));
+
+    double priceATM = FDMEngine(atm()).price(emptyEnv());
+    double priceOTM = envEngine.price(env);
+    EXPECT_LT(priceOTM, priceATM);
+}
+
+TEST(FDMEngine, EnvAwareMissingTickerThrows) {
+    auto engine = FDMEngine(atm(), "AAPL");
+    EXPECT_THROW(engine.price(emptyEnv()), std::out_of_range);
 }

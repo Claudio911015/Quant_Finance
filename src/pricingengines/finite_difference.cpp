@@ -1,4 +1,5 @@
 #include <qf/pricingengines/finite_difference.hpp>
+#include <qf/pricingengines/detail/env_resolver.hpp>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -150,8 +151,14 @@ double finiteDifferenceBSPrice(const instruments::OptionParams& params,
 FDMEngine::FDMEngine(instruments::OptionParams params, int nS, int nT, FDMethod method)
     : params_(std::move(params)), nS_(nS), nT_(nT), method_(method) {}
 
-double FDMEngine::price(const core::MarketEnvironment& /*env*/) const {
-    return finiteDifferenceBSPrice(params_, nS_, nT_, method_);
+FDMEngine::FDMEngine(instruments::OptionParams params, std::string ticker,
+                     int nS, int nT, FDMethod method)
+    : params_(std::move(params)), ticker_(std::move(ticker)),
+      nS_(nS), nT_(nT), method_(method) {}
+
+double FDMEngine::price(const core::MarketEnvironment& env) const {
+    auto p = detail::resolveEquityParams(params_, ticker_, env);
+    return finiteDifferenceBSPrice(p, nS_, nT_, method_);
 }
 
 } // namespace qf::pricingengines
