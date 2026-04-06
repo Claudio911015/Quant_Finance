@@ -299,3 +299,24 @@ TEST(HestonEngine, EnvAwareMissingSpotThrows) {
     auto engine = HestonEngine(opt, hp, "AAPL");
     EXPECT_THROW(engine.price(emptyEnv()), std::out_of_range);
 }
+
+// ── Task 7: EngineFactory ticker support ─────────────────────────────────────
+
+TEST(EngineFactory, EnvAwareEngineReadsMktData) {
+    auto engine = EngineFactory::makeEquityEngine("BS", atm(), 0, 0, "AAPL");
+
+    MarketEnvironment env;
+    env.setSpot("AAPL", 110.0);
+    env.setVolatility("AAPL", 0.20);
+    env.addCurve("default",
+        qf::termstructure::YieldCurve({0.5,1.0,2.0,5.0},{0.05,0.05,0.05,0.05}));
+
+    double priceS100 = EngineFactory::makeEquityEngine("BS", atm())->price(emptyEnv());
+    double priceS110 = engine->price(env);
+    EXPECT_GT(priceS110, priceS100);
+}
+
+TEST(EngineFactory, NoTickerStillWorks) {
+    auto engine = EngineFactory::makeEquityEngine("MC", atm(), 50000, 42);
+    EXPECT_GT(engine->price(emptyEnv()), 0.0);
+}
