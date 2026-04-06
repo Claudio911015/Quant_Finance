@@ -15,7 +15,11 @@ struct HestonParams {
 /// Heston (1993) stochastic volatility model.
 class HestonModel : public IEquityModel {
 public:
-    explicit HestonModel(const HestonParams& params);
+    /// @param params Heston parameters.
+    /// @param r Risk-free rate (default 0 — pass rate for risk-neutral paths).
+    /// @param q Dividend yield (default 0).
+    explicit HestonModel(const HestonParams& params,
+                         double r = 0.0, double q = 0.0);
 
     std::vector<double> simulate(double S0, double T,
                                   int steps,
@@ -25,6 +29,8 @@ public:
 
 private:
     HestonParams params_;
+    double r_ = 0.0;
+    double q_ = 0.0;
 };
 
 } // namespace qf::models

@@ -10,16 +10,25 @@ namespace qf::pricingengines {
 std::shared_ptr<IPricingEngine>
 EngineFactory::makeEquityEngine(const std::string& method,
                                 const instruments::OptionParams& params,
-                                int simPaths, unsigned seed)
+                                int simPaths, unsigned seed,
+                                std::string ticker)
 {
-    if (method == "BS")
-        return std::make_shared<BlackScholesEngine>(params);
-    if (method == "MC")
-        return std::make_shared<MonteCarloEngine>(params, simPaths, seed);
-    if (method == "BT")
-        return std::make_shared<BinomialTreeEngine>(params);
-    if (method == "FDM")
-        return std::make_shared<FDMEngine>(params);
+    if (method == "BS") {
+        if (ticker.empty()) return std::make_shared<BlackScholesEngine>(params);
+        return std::make_shared<BlackScholesEngine>(params, std::move(ticker));
+    }
+    if (method == "MC") {
+        if (ticker.empty()) return std::make_shared<MonteCarloEngine>(params, simPaths, seed);
+        return std::make_shared<MonteCarloEngine>(params, std::move(ticker), simPaths, seed);
+    }
+    if (method == "BT") {
+        if (ticker.empty()) return std::make_shared<BinomialTreeEngine>(params);
+        return std::make_shared<BinomialTreeEngine>(params, std::move(ticker));
+    }
+    if (method == "FDM") {
+        if (ticker.empty()) return std::make_shared<FDMEngine>(params);
+        return std::make_shared<FDMEngine>(params, std::move(ticker));
+    }
     throw std::invalid_argument("EngineFactory: unknown method '" + method + "'");
 }
 

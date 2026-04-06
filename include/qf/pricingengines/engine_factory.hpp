@@ -8,17 +8,17 @@ namespace qf::pricingengines {
 
 class EngineFactory {
 public:
-    /// @brief Create an equity pricing engine by method name.
-    /// @param method "BS" | "MC" | "BT" | "FDM" | "Heston"
-    /// @param params OptionParams used by all equity engines.
-    /// @param simPaths Number of simulation paths (MC/Heston only).
-    /// @param seed RNG seed (MC/Heston only).
-    /// @throws std::invalid_argument for unknown method.
+    /// @param method    "BS" | "MC" | "BT" | "FDM"
+    /// @param params    OptionParams (contractual + fallback market data)
+    /// @param simPaths  Number of MC paths (MC only)
+    /// @param seed      RNG seed (MC only)
+    /// @param ticker    If non-empty, engine reads market data from MarketEnvironment
     static std::shared_ptr<IPricingEngine>
     makeEquityEngine(const std::string& method,
                      const instruments::OptionParams& params,
                      int simPaths = 100000,
-                     unsigned seed = 42);
+                     unsigned seed = 42,
+                     std::string ticker = "");
 };
 
 } // namespace qf::pricingengines

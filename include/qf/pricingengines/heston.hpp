@@ -21,12 +21,21 @@ double hestonMonteCarlo(const instruments::OptionParams& opt,
 
 class HestonEngine : public IPricingEngine {
 public:
+    /// Legacy: all market data in params; env is ignored.
     HestonEngine(instruments::OptionParams opt, HestonParams heston);
+
+    /// Env-aware: spot and riskFreeRate read from env using ticker.
+    /// HestonParams are model calibration data — not read from env.
+    HestonEngine(instruments::OptionParams opt, HestonParams heston,
+                 std::string ticker);
+
     double price(const core::MarketEnvironment& env) const override;
     std::string name() const override { return "Heston"; }
+
 private:
     instruments::OptionParams opt_;
     HestonParams heston_;
+    std::string ticker_;
 };
 
 } // namespace qf::pricingengines

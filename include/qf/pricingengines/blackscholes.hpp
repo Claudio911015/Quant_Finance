@@ -25,11 +25,18 @@ double impliedVolatility(const instruments::OptionParams& params,
 /// Strategy engine wrapping blackScholes()
 class BlackScholesEngine : public IPricingEngine {
 public:
+    /// Legacy: all market data in params; env is ignored.
     explicit BlackScholesEngine(instruments::OptionParams params);
+
+    /// Env-aware: spot, vol, and riskFreeRate are read from env using ticker.
+    BlackScholesEngine(instruments::OptionParams params, std::string ticker);
+
     double price(const core::MarketEnvironment& env) const override;
     std::string name() const override { return "BlackScholes"; }
+
 private:
     instruments::OptionParams params_;
+    std::string ticker_;   // empty => legacy (ignore env)
 };
 
 } // namespace qf::pricingengines

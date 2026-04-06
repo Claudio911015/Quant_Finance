@@ -1,4 +1,5 @@
 #include <qf/pricingengines/blackscholes.hpp>
+#include <qf/pricingengines/detail/env_resolver.hpp>
 #include <qf/math/rootfinding.hpp>
 #include <cmath>
 #include <stdexcept>
@@ -96,8 +97,12 @@ double impliedVolatility(const instruments::OptionParams& p,
 BlackScholesEngine::BlackScholesEngine(instruments::OptionParams params)
     : params_(std::move(params)) {}
 
-double BlackScholesEngine::price(const core::MarketEnvironment& /*env*/) const {
-    return blackScholes(params_).price;
+BlackScholesEngine::BlackScholesEngine(instruments::OptionParams params, std::string ticker)
+    : params_(std::move(params)), ticker_(std::move(ticker)) {}
+
+double BlackScholesEngine::price(const core::MarketEnvironment& env) const {
+    auto p = detail::resolveEquityParams(params_, ticker_, env);
+    return blackScholes(p).price;
 }
 
 } // namespace qf::pricingengines

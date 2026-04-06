@@ -1,4 +1,5 @@
 #include <qf/pricingengines/binomialtree.hpp>
+#include <qf/pricingengines/detail/env_resolver.hpp>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -63,8 +64,13 @@ double binomialTreeBSPrice(const instruments::OptionParams& p,
 BinomialTreeEngine::BinomialTreeEngine(instruments::OptionParams params, int nSteps)
     : params_(std::move(params)), nSteps_(nSteps) {}
 
-double BinomialTreeEngine::price(const core::MarketEnvironment& /*env*/) const {
-    return binomialTreeBSPrice(params_, nSteps_);
+BinomialTreeEngine::BinomialTreeEngine(instruments::OptionParams params,
+                                        std::string ticker, int nSteps)
+    : params_(std::move(params)), ticker_(std::move(ticker)), nSteps_(nSteps) {}
+
+double BinomialTreeEngine::price(const core::MarketEnvironment& env) const {
+    auto p = detail::resolveEquityParams(params_, ticker_, env);
+    return binomialTreeBSPrice(p, nSteps_);
 }
 
 } // namespace qf::pricingengines
