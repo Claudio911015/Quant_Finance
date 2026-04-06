@@ -320,3 +320,44 @@ TEST(EngineFactory, NoTickerStillWorks) {
     auto engine = EngineFactory::makeEquityEngine("MC", atm(), 50000, 42);
     EXPECT_GT(engine->price(emptyEnv()), 0.0);
 }
+
+// ── Task 8: Bump-and-reprice integration ─────────────────────────────────────
+
+TEST(PricingEngines, BumpAndReprice) {
+    // Build env-aware engines once via factory
+    auto bs  = EngineFactory::makeEquityEngine("BS",  atm(), 0,      0,  "AAPL");
+    auto mc  = EngineFactory::makeEquityEngine("MC",  atm(), 100000, 42, "AAPL");
+    auto bt  = EngineFactory::makeEquityEngine("BT",  atm(), 0,      0,  "AAPL");
+
+    // Base scenario: S=100, sigma=0.20, r=0.05
+    MarketEnvironment base;
+    base.setSpot("AAPL", 100.0);
+    base.setVolatility("AAPL", 0.20);
+    base.addCurve("default",
+        qf::termstructure::YieldCurve({0.5,1.0,2.0,5.0},{0.05,0.05,0.05,0.05}));
+
+    double bsBase  = bs->price(base);
+    double mcBase  = mc->price(base);
+    double btBase  = bt->price(base);
+
+    // Bump spot +10 (modify env, NOT the engine)
+    MarketEnvironment bumped = base;
+    bumped.setSpot("AAPL", 110.0);
+
+    double bsBumped = bs->price(bumped);
+    double mcBumped = mc->price(bumped);
+    double btBumped = bt->price(bumped);
+
+    // All engines must show higher call price after spot bump
+    EXPECT_GT(bsBumped, bsBase);
+    EXPECT_GT(mcBumped, mcBase);
+    EXPECT_GT(btBumped, btBase);
+
+    // Numerical delta (BS): (price_up - price_down) / (S_up - S_down)
+    MarketEnvironment down = base;
+    down.setSpot("AAPL", 99.0);
+    double bsDown = bs->price(down);
+    double numericalDelta = (bsBumped - bsDown) / (110.0 - 99.0);
+    double analyticalDelta = blackScholes(atm()).delta;
+    EXPECT_NEAR(numericalDelta, analyticalDelta, 0.08);
+}
