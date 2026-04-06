@@ -359,5 +359,8 @@ TEST(PricingEngines, BumpAndReprice) {
     double bsDown = bs->price(down);
     double numericalDelta = (bsBumped - bsDown) / (110.0 - 99.0);
     double analyticalDelta = blackScholes(atm()).delta;
+    // Tolerance 0.08: bump interval [99,110] is asymmetric (midpoint=104.5, not 100).
+    // Numerical delta is evaluated at S~104.5; analytical delta at S=100.
+    // The difference is dominated by gamma*(104.5-100) ≈ 0.019*4.5 ≈ 0.085.
     EXPECT_NEAR(numericalDelta, analyticalDelta, 0.08);
 }
