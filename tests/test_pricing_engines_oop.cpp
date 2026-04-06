@@ -8,6 +8,9 @@
 #include <qf/pricingengines/heston.hpp>
 #include <qf/core/market_environment.hpp>
 #include <qf/instruments/option.hpp>
+#include <qf/models/iequity_model.hpp>
+#include <qf/models/bs_model.hpp>
+#include <qf/models/heston_model.hpp>
 #include <memory>
 #include <cmath>
 
@@ -106,4 +109,49 @@ TEST(PricingEngines, PutCallParityAcrossEngines) {
         double p = ep->price(emptyEnv());
         EXPECT_NEAR(c - p, parity, 0.05);
     }
+}
+
+// ── Task 1: IEquityModel injection into MonteCarloEngine ─────────────────────
+
+TEST(MonteCarloEngine, BSModelDrivenMatchesLegacy) {
+    auto params = atm();  // S=100, K=100, r=0.05, q=0, sigma=0.20, T=1, Call
+    auto model = std::make_shared<qf::models::BlackScholesModel>(
+        params.riskFreeRate, params.dividendYield, params.volatility);
+
+    auto legacyEngine = std::make_shared<MonteCarloEngine>(params, 200000, 42);
+    auto modelEngine  = std::make_shared<MonteCarloEngine>(model, params, 200000, 1, 42);
+
+    double legacyPrice = legacyEngine->price(emptyEnv());
+    double modelPrice  = modelEngine->price(emptyEnv());
+
+    EXPECT_EQ(modelEngine->name(), "MonteCarlo");
+    EXPECT_NEAR(modelPrice, legacyPrice, 0.10);
+    EXPECT_GT(modelPrice, 0.0);
+}
+
+TEST(MonteCarloEngine, HestonModelDrivenGivesPositivePrice) {
+    auto params = atm();
+    qf::models::HestonParams hp{0.04, 2.0, 0.04, 0.3, -0.7};
+    auto model  = std::make_shared<qf::models::HestonModel>(hp, params.riskFreeRate, params.dividendYield);
+
+    auto engine = std::make_shared<MonteCarloEngine>(model, params, 50000, 252, 42);
+
+    EXPECT_EQ(engine->name(), "MonteCarlo");
+    double p = engine->price(emptyEnv());
+    EXPECT_GT(p, 0.0);
+    EXPECT_LT(p, params.spot);
+}
+
+TEST(MonteCarloEngine, HestonModelDrivenAgreesWithHestonEngine) {
+    auto params = atm();
+    qf::models::HestonParams hp{0.04, 2.0, 0.04, 0.3, -0.7};
+    auto model  = std::make_shared<qf::models::HestonModel>(hp, params.riskFreeRate, params.dividendYield);
+
+    HestonParams hpEngine{0.04, 2.0, 0.04, 0.3, -0.7};
+    double analytical = hestonPrice(params, hpEngine);
+
+    auto mcEngine = std::make_shared<MonteCarloEngine>(model, params, 200000, 252, 42);
+    double mcPrice = mcEngine->price(emptyEnv());
+
+    EXPECT_NEAR(mcPrice, analytical, analytical * 0.03);
 }

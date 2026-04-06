@@ -5,7 +5,8 @@
 
 namespace qf::models {
 
-HestonModel::HestonModel(const HestonParams& p) : params_(p) {
+HestonModel::HestonModel(const HestonParams& p, double r, double q)
+    : params_(p), r_(r), q_(q) {
     if (p.v0 <= 0.0 || p.theta <= 0.0 || p.kappa <= 0.0)
         throw std::invalid_argument("HestonModel: v0, theta, kappa must be positive");
     if (p.sigma <= 0.0)
@@ -35,7 +36,7 @@ std::vector<double> HestonModel::simulate(double S0, double T,
         double z2 = params_.rho * z1 + rho2 * N(rng);
         double vp = std::max(v, 0.0);  // reflection floor
         double svp = std::sqrt(vp);
-        S *= std::exp(-0.5 * vp * dt + svp * sqdt * z1);
+        S *= std::exp((r_ - q_ - 0.5 * vp) * dt + svp * sqdt * z1);
         v += params_.kappa * (params_.theta - vp) * dt + params_.sigma * svp * sqdt * z2;
         path[i + 1] = S;
     }
