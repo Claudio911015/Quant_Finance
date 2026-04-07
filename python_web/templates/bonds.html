@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Fixed Income — Quant Finance Dashboard{% endblock %}
+
+{% block content %}
+      <header>
+        <h1>Fixed Income</h1>
+        <p>Bond pricing and yield curve analysis powered by C++</p>
+      </header>
+
+      <div class="panel">
+        <h3>Bond Parameters</h3>
+        <form id="bond-form" novalidate>
+          <div class="grid">
+            <div class="field">
+              <label>Face Value</label>
+              <input type="number" step="any" min="1" name="faceValue" value="1000" required>
+              <span class="error-msg"></span>
+            </div>
+            <div class="field">
+              <label>Coupon Rate</label>
+              <input type="number" step="any" min="0" max="1" name="couponRate" value="0.05" required>
+              <span class="error-msg"></span>
+            </div>
+            <div class="field">
+              <label>Periods</label>
+              <input type="number" step="1" min="1" max="100" name="periods" value="10" required>
+              <span class="error-msg"></span>
+            </div>
+            <div class="field field--select">
+              <label>Frequency</label>
+              <select name="frequency">
+                <option value="1">Annual</option>
+                <option value="2" selected>Semi-annual</option>
+                <option value="4">Quarterly</option>
+              </select>
+            </div>
+          </div>
+
+          <h3 style="margin-top: 16px;">Yield Curve Points</h3>
+          <table class="result-table" id="curve-table" style="max-width: 400px;">
+            <thead>
+              <tr><th>Maturity (yrs)</th><th>Zero Rate</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr><td><input type="number" step="any" class="curve-mat" value="0.5"></td><td><input type="number" step="any" class="curve-rate" value="0.040"></td><td><button type="button" class="btn-remove" onclick="removeRow(this)">×</button></td></tr>
+              <tr><td><input type="number" step="any" class="curve-mat" value="1"></td><td><input type="number" step="any" class="curve-rate" value="0.042"></td><td><button type="button" class="btn-remove" onclick="removeRow(this)">×</button></td></tr>
+              <tr><td><input type="number" step="any" class="curve-mat" value="2"></td><td><input type="number" step="any" class="curve-rate" value="0.045"></td><td><button type="button" class="btn-remove" onclick="removeRow(this)">×</button></td></tr>
+              <tr><td><input type="number" step="any" class="curve-mat" value="5"></td><td><input type="number" step="any" class="curve-rate" value="0.048"></td><td><button type="button" class="btn-remove" onclick="removeRow(this)">×</button></td></tr>
+              <tr><td><input type="number" step="any" class="curve-mat" value="10"></td><td><input type="number" step="any" class="curve-rate" value="0.050"></td><td><button type="button" class="btn-remove" onclick="removeRow(this)">×</button></td></tr>
+            </tbody>
+          </table>
+          <button type="button" class="btn-sm" onclick="addRow()">+ Add Point</button>
+
+          <div class="field field--select" style="margin-top: 10px; max-width: 200px;">
+            <label>Interpolation</label>
+            <select name="interpMethod">
+              <option value="CubicSpline" selected>Cubic Spline</option>
+              <option value="Linear">Linear</option>
+              <option value="LogLinear">Log-Linear</option>
+            </select>
+          </div>
+
+          <button type="button" id="bond-calc-btn" onclick="calcBond()">
+            <span class="btn-text">Calculate</span>
+            <span class="spinner" hidden></span>
+          </button>
+        </form>
+
+        <div class="error-banner" id="error-banner" hidden></div>
+
+        <div class="resultado" id="bond-result" style="margin-top: 16px;">
+          <div class="result-grid result-grid--3">
+            <div class="metric-card">
+              <div class="metric-label">Price</div>
+              <div class="metric-value" id="bond-price">—</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Duration</div>
+              <div class="metric-value" id="bond-duration">—</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Convexity</div>
+              <div class="metric-value" id="bond-convexity">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top: 16px;">
+        <h3>Yield Curve Visualization</h3>
+        <div id="chart-yield-curve" class="chart-container"></div>
+      </div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/bonds.js') }}"></script>
+{% endblock %}

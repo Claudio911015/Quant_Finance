@@ -4,10 +4,12 @@
 #include <qf/instruments/bond.hpp>
 #include <qf/instruments/option.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
+#include <qf/math/interpolation.hpp>
 #include <qf/pricingengines/blackscholes.hpp>
 #include <qf/pricingengines/binomialtree.hpp>
 #include <qf/pricingengines/montecarlo.hpp>
 #include <qf/pricingengines/finite_difference.hpp>
+#include <qf/pricingengines/heston.hpp>
 
 namespace py = pybind11;
 
@@ -43,9 +45,18 @@ PYBIND11_MODULE(qfpy, m) {
         .def("duration", &qf::instruments::Bond::duration)
         .def("convexity", &qf::instruments::Bond::convexity);
 
+    py::enum_<qf::math::InterpolationMethod>(m, "InterpolationMethod")
+        .value("Linear", qf::math::InterpolationMethod::Linear)
+        .value("CubicSpline", qf::math::InterpolationMethod::CubicSpline)
+        .value("LogLinear", qf::math::InterpolationMethod::LogLinear)
+        .export_values();
+
     py::class_<qf::termstructure::YieldCurve>(m, "YieldCurve")
         .def(py::init<const std::vector<double>&, const std::vector<double>&, qf::math::InterpolationMethod>(),
-             py::arg("maturities"), py::arg("zeroRates"), py::arg("method"));
+             py::arg("maturities"), py::arg("zeroRates"), py::arg("method"))
+        .def("zero_rate", &qf::termstructure::YieldCurve::zeroRate)
+        .def("discount_factor", &qf::termstructure::YieldCurve::discountFactor)
+        .def("forward_rate", &qf::termstructure::YieldCurve::forwardRate);
 
     py::enum_<qf::pricingengines::FDMethod>(m, "FDMethod")
         .value("Explicit", qf::pricingengines::FDMethod::Explicit)
@@ -75,4 +86,17 @@ PYBIND11_MODULE(qfpy, m) {
 
     m.def("finite_difference_price", &qf::pricingengines::finiteDifferenceBSPrice, "Finite difference BS price",
           py::arg("params"), py::arg("nS") = 200, py::arg("nT") = 200, py::arg("method") = qf::pricingengines::FDMethod::CrankNicolson);
+
+    py::class_<qf::pricingengines::HestonParams>(m, "HestonParams")
+        .def(py::init<>())
+        .def_readwrite("v0", &qf::pricingengines::HestonParams::v0)
+        .def_readwrite("kappa", &qf::pricingengines::HestonParams::kappa)
+        .def_readwrite("theta", &qf::pricingengines::HestonParams::theta)
+        .def_readwrite("sigma", &qf::pricingengines::HestonParams::sigma)
+        .def_readwrite("rho", &qf::pricingengines::HestonParams::rho);
+
+    m.def("heston_price", &qf::pricingengines::hestonPrice, "Heston analytical price",
+          py::arg("opt"), py::arg("heston"));
+    m.def("heston_montecarlo", &qf::pricingengines::hestonMonteCarlo, "Heston Monte Carlo price",
+          py::arg("opt"), py::arg("heston"), py::arg("nPaths") = 100000, py::arg("nSteps") = 252, py::arg("seed") = 42);
 }

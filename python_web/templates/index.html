@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block content %}
+      <header>
+        <h1>Quant Finance Dashboard</h1>
+        <p>Option pricing dashboard powered by C++ engines</p>
+      </header>
+      <div class="panel">
+        <form id="bs-form" novalidate>
+          <div class="grid">
+            <div class="field">
+              <label>Spot</label>
+              <input type="number" step="any" min="0.01" name="spot" value="100" required>
+              <span class="error-msg"></span>
+            </div>
+            <div class="field">
+              <label>Strike</label>
+              <input type="number" step="any" min="0.01" name="strike" value="100" required>
+              <span class="error-msg"></span>
+            </div>
+            <div class="field">
+              <label>Rate</label>
+              <input type="number" step="any" name="r" value="0.05" required>
+              <span class="error-msg"></span>
+            </div>
+            <div class="field">
+              <label>Dividend</label>
+              <input type="number" step="any" name="q" value="0.0" required>
+              <span class="error-msg"></span>
+            </div>
+            <div class="field">
+              <label>Volatility</label>
+              <input type="number" step="any" min="0.001" max="5.0" name="vol" value="0.2" required>
+              <span class="error-msg"></span>
+            </div>
+            <div class="field">
+              <label>Maturity (years)</label>
+              <input type="number" step="any" min="0.001" max="30" name="t" value="1.0" required>
+              <span class="error-msg"></span>
+            </div>
+          </div>
+
+          <div class="controls-row">
+            <div class="toggle-group">
+              <label class="toggle-label">Type</label>
+              <div class="toggle-buttons">
+                <label class="toggle-btn">
+                  <input type="radio" name="optionType" value="Call" checked>
+                  <span>Call</span>
+                </label>
+                <label class="toggle-btn">
+                  <input type="radio" name="optionType" value="Put">
+                  <span>Put</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="toggle-group">
+              <label class="toggle-label">Exercise</label>
+              <div class="toggle-buttons">
+                <label class="toggle-btn">
+                  <input type="radio" name="exerciseType" value="European" checked>
+                  <span>European</span>
+                </label>
+                <label class="toggle-btn">
+                  <input type="radio" name="exerciseType" value="American">
+                  <span>American</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="field field--select">
+              <label>FD Method</label>
+              <select name="fdMethod">
+                <option value="CrankNicolson" selected>Crank-Nicolson</option>
+                <option value="Implicit">Implicit</option>
+                <option value="Explicit">Explicit</option>
+              </select>
+            </div>
+          </div>
+
+          <button type="button" id="calc-btn" onclick="price()">
+            <span class="btn-text">Calculate</span>
+            <span class="spinner" hidden></span>
+          </button>
+        </form>
+
+        <details class="collapsible-section">
+          <summary class="collapsible-header">Advanced: Heston Stochastic Volatility</summary>
+          <div class="collapsible-body">
+            <div class="grid">
+              <div class="field">
+                <label>v₀ (init var)</label>
+                <input type="number" step="any" id="heston-v0" value="0.04">
+              </div>
+              <div class="field">
+                <label>κ (mean rev)</label>
+                <input type="number" step="any" id="heston-kappa" value="2.0">
+              </div>
+              <div class="field">
+                <label>θ (long-run var)</label>
+                <input type="number" step="any" id="heston-theta" value="0.04">
+              </div>
+              <div class="field">
+                <label>σ (vol of vol)</label>
+                <input type="number" step="any" id="heston-sigma" value="0.3">
+              </div>
+              <div class="field">
+                <label>ρ (correlation)</label>
+                <input type="number" step="any" id="heston-rho" value="-0.7">
+              </div>
+            </div>
+            <label class="checkbox-label">
+              <input type="checkbox" id="include-heston"> Include Heston in pricing
+            </label>
+          </div>
+        </details>
+
+        <details class="collapsible-section">
+          <summary class="collapsible-header">Implied Volatility Calculator</summary>
+          <div class="collapsible-body">
+            <div class="controls-row">
+              <div class="field">
+                <label>Market Price</label>
+                <input type="number" step="any" id="iv-market-price" value="10.0">
+              </div>
+              <button type="button" class="btn-sm" onclick="calcImpliedVol()">Calculate IV</button>
+              <div class="field" style="min-width: 120px;">
+                <label>Implied Vol</label>
+                <div class="metric-value" id="iv-result" style="font-size: 1.1rem;">—</div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <div class="error-banner" id="error-banner" hidden></div>
+
+        <div class="resultado" id="result">
+          <div class="result-grid">
+            <div>
+              <h3>Prices by Model</h3>
+              <table id="prices-table" class="result-table">
+                <thead><tr><th>Model</th><th>Price</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div>
+              <h3>Greeks (Black-Scholes)</h3>
+              <table id="greeks-table" class="result-table">
+                <thead><tr><th>Greek</th><th>Value</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel charts-panel" style="margin-top: 16px;">
+        <div class="tab-bar">
+          <button type="button" class="tab-btn active" data-tab="payoff">Payoff Diagram</button>
+          <button type="button" class="tab-btn" data-tab="greeks">Greeks Sensitivity</button>
+          <button type="button" class="tab-btn" data-tab="convergence">Model Convergence</button>
+        </div>
+
+        <div class="tab-content active" id="tab-payoff">
+          <div id="chart-payoff" class="chart-container"></div>
+        </div>
+
+        <div class="tab-content" id="tab-greeks">
+          <div class="chart-controls">
+            <div class="field field--select">
+              <label>Greek</label>
+              <select id="greek-select">
+                <option value="delta">Delta</option>
+                <option value="gamma">Gamma</option>
+                <option value="vega">Vega</option>
+                <option value="theta">Theta</option>
+                <option value="rho">Rho</option>
+              </select>
+            </div>
+            <div class="field field--select">
+              <label>Variable</label>
+              <select id="variable-select">
+                <option value="spot">Spot</option>
+                <option value="vol">Volatility</option>
+                <option value="maturity">Maturity</option>
+              </select>
+            </div>
+            <button type="button" class="btn-sm" onclick="fetchGreeksSurface()">Plot</button>
+          </div>
+          <div id="chart-greeks" class="chart-container"></div>
+        </div>
+
+        <div class="tab-content" id="tab-convergence">
+          <button type="button" class="btn-sm" onclick="fetchConvergence()">Run Convergence Analysis</button>
+          <div id="chart-convergence" class="chart-container"></div>
+        </div>
+      </div>
+
+      <div class="foot">Calculations powered by C++ via qfpy</div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+{% endblock %}

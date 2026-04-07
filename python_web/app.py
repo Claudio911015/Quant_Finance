@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template, request, jsonify
 import os, sys
 
 # Ensure qfpy built extension is importable:
@@ -16,258 +16,321 @@ except ModuleNotFoundError:
 
 app = Flask(__name__)
 
-HTML = '''
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quant Finance Dashboard</title>
-    <style>
-      :root {
-        --bg: #081c24;
-        --card: #123139;
-        --card2: #1b3b45;
-        --accent: #36c0d8;
-        --accent-2: #64e2f0;
-        --text: #f6fcff;
-        --muted: #8cb9c4;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        background: linear-gradient(145deg, #02121a, #0e2e3c);
-        color: var(--text);
-      }
-      .container {
-        max-width: 980px;
-        margin: 24px auto;
-        padding: 1rem;
-      }
-      header {
-        text-align: center;
-        margin-bottom: 1rem;
-      }
-      header h1 { margin: .2rem 0; font-size: 2.1rem; }
-      header p { color: var(--muted); }
-      .panel {
-        background: var(--card);
-        border: 1px solid rgba(98, 175, 190, 0.2);
-        border-radius: 14px;
-        padding: 18px;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-        gap: 12px;
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        margin-bottom: 8px;
-      }
-      .field label {
-        font-size: 0.9rem;
-        color: var(--muted);
-        margin-bottom: 4px;
-      }
-      .field input {
-        border: 1px solid rgba(150, 207, 219, 0.35);
-        border-radius: 8px;
-        background: var(--card2);
-        color: var(--text);
-        padding: 8px 10px;
-      }
-      button {
-        display: inline-flex;
-        background: linear-gradient(120deg, var(--accent), var(--accent-2));
-        border: 0;
-        border-radius: 10px;
-        color: #082d33;
-        font-weight: 700;
-        padding: 11px 20px;
-        cursor: pointer;
-        transition: transform .15s ease, filter .15s ease;
-        margin-top: 0.6rem;
-      }
-      button:hover { transform: translateY(-2px); filter: brightness(1.08); }
-      .resultado {
-        margin-top: 18px;
-        padding: 16px;
-        background: #021a26;
-        border-radius: 10px;
-        border: 1px dashed rgba(54, 192, 216, 0.35);
-        color: #d3eff6;
-      }
-
-      .result-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-      }
-
-      .result-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 8px;
-      }
-
-      .result-table th,
-      .result-table td {
-        padding: 8px 10px;
-        border-bottom: 1px solid rgba(80, 192, 212, 0.25);
-      }
-
-      .result-table th {
-        text-align: left;
-        color: #b4ecf3;
-      }
-
-      .result-table tr:nth-child(even) {
-        background: rgba(68, 148, 162, 0.15);
-      }
-      .foot {
-        text-align: center;
-        color: var(--muted);
-        margin-top: 14px;
-        font-size: 0.87rem;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <header>
-        <h1>Quant Finance Dashboard</h1>
-        <p>Interfaz web para probar precios de opciones con modelos C++</p>
-      </header>
-      <div class="panel">
-        <form id="bs-form">
-          <div class="grid">
-            <div class="field"><label>Spot</label><input type="number" step="any" name="spot" value="100"></div>
-            <div class="field"><label>Strike</label><input type="number" step="any" name="strike" value="100"></div>
-            <div class="field"><label>Rate</label><input type="number" step="any" name="r" value="0.05"></div>
-            <div class="field"><label>Dividend</label><input type="number" step="any" name="q" value="0.0"></div>
-            <div class="field"><label>Volatility</label><input type="number" step="any" name="vol" value="0.2"></div>
-            <div class="field"><label>Maturity</label><input type="number" step="any" name="t" value="1.0"></div>
-          </div>
-          <button type="button" onclick="price()">Calcular precio</button>
-        </form>
-        <div class="resultado" id="result">
-          <div class="result-grid">
-            <div>
-              <h3>Precios por modelo</h3>
-              <table id="prices-table" class="result-table">
-                <thead><tr><th>Modelo</th><th>Precio</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <div>
-              <h3>Griegas (Black-Scholes)</h3>
-              <table id="greeks-table" class="result-table">
-                <thead><tr><th>Griega</th><th>Valor</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="foot">Los valores se calculan en C++ a través de qfpy; actualiza la página para volver a cargar.</div>
-    </div>
-    <script>
-      async function price(){
-        const f = document.getElementById('bs-form');
-        const payload = {
-          spot: Number(f.spot.value),
-          strike: Number(f.strike.value),
-          r: Number(f.r.value),
-          q: Number(f.q.value),
-          vol: Number(f.vol.value),
-          t: Number(f.t.value)
-        };
-
-        const pricesTable = document.querySelector('#prices-table tbody');
-        const greeksTable = document.querySelector('#greeks-table tbody');
-
-        pricesTable.innerHTML = '<tr><td colspan="2">Calculando...</td></tr>';
-        greeksTable.innerHTML = '<tr><td colspan="2">Calculando...</td></tr>';
-
-        try {
-          const response = await fetch('/api/price', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify(payload)
-          });
-          if (!response.ok) throw new Error('Error del servidor: ' + response.status);
-          const data = await response.json();
-
-          pricesTable.innerHTML = '';
-          function row(tab, name, value){
-            const tr = document.createElement('tr');
-            const tdn = document.createElement('td'); tdn.innerText = name;
-            const tdv = document.createElement('td'); tdv.innerText = value;
-            tr.appendChild(tdn); tr.appendChild(tdv);
-            tab.appendChild(tr);
-          }
-
-          row(pricesTable, 'Black-Scholes', data.black_scholes.toFixed(6));
-          row(pricesTable, 'Binomial', data.binomial.toFixed(6));
-          row(pricesTable, 'Monte Carlo', data.montecarlo.toFixed(6));
-          row(pricesTable, 'Finite Difference', data.finite_difference.toFixed(6));
-
-          greeksTable.innerHTML = '';
-          row(greeksTable, 'Delta', data.delta.toFixed(6));
-          row(greeksTable, 'Gamma', data.gamma.toFixed(6));
-          row(greeksTable, 'Vega', data.vega.toFixed(6));
-          row(greeksTable, 'Theta', data.theta.toFixed(6));
-          row(greeksTable, 'Rho', data.rho.toFixed(6));
-
-        } catch(e) {
-          pricesTable.innerHTML = '<tr><td colspan="2">Error: '+ e.message + '</td></tr>';
-          greeksTable.innerHTML = '';
-        }
-      }
-    </script>
-  </body>
-</html>
-'''
-
 @app.route('/')
 def index():
-    return render_template_string(HTML)
+    return render_template('index.html')
 
 @app.route('/api/price', methods=['POST'])
 def api_price():
-    data = request.json
+    data = request.json or {}
+
+    try:
+        p = qfpy.OptionParams()
+        p.spot = float(data.get('spot', 100.0))
+        p.strike = float(data.get('strike', 100.0))
+        p.riskFreeRate = float(data.get('r', 0.05))
+        p.dividendYield = float(data.get('q', 0.0))
+        p.volatility = float(data.get('vol', 0.2))
+        p.maturity = float(data.get('t', 1.0))
+
+        if p.spot <= 0 or p.strike <= 0 or p.volatility <= 0 or p.maturity <= 0:
+            return jsonify({'error': 'spot, strike, volatility and maturity must be positive'}), 400
+
+        option_type = data.get('optionType', 'Call')
+        p.type = qfpy.OptionType.Put if option_type == 'Put' else qfpy.OptionType.Call
+
+        exercise_type = data.get('exerciseType', 'European')
+        p.exercise = qfpy.ExerciseType.American if exercise_type == 'American' else qfpy.ExerciseType.European
+
+        fd_method_map = {
+            'Explicit': qfpy.FDMethod.Explicit,
+            'Implicit': qfpy.FDMethod.Implicit,
+            'CrankNicolson': qfpy.FDMethod.CrankNicolson,
+        }
+        fd_method = fd_method_map.get(data.get('fdMethod', 'CrankNicolson'), qfpy.FDMethod.CrankNicolson)
+
+        bs = qfpy.black_scholes(p)
+        bt = qfpy.binomial_tree_price(p, 1000)
+        mc = qfpy.montecarlo_price(p, 200000, seed=123)
+        fd = qfpy.finite_difference_price(p, nS=500, nT=1000, method=fd_method)
+
+        if not (fd and fd == fd):  # check nan
+            fd = 0.0
+
+        return jsonify({
+            'black_scholes': bs['price'],
+            'delta': bs['delta'],
+            'gamma': bs['gamma'],
+            'vega': bs['vega'],
+            'theta': bs['theta'],
+            'rho': bs['rho'],
+            'binomial': bt,
+            'montecarlo': mc,
+            'finite_difference': fd
+        })
+    except (ValueError, TypeError) as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/payoff', methods=['POST'])
+def api_payoff():
+    data = request.json or {}
+    spot = float(data.get('spot', 100.0))
+    strike = float(data.get('strike', 100.0))
+    option_type = data.get('optionType', 'Call')
+
+    # Calculate premium using BS
     p = qfpy.OptionParams()
-    p.spot = data.get('spot', 100.0)
-    p.strike = data.get('strike', 100.0)
-    p.riskFreeRate = data.get('r', 0.05)
-    p.dividendYield = data.get('q', 0.0)
-    p.volatility = data.get('vol', 0.2)
-    p.maturity = data.get('t', 1.0)
-    p.type = qfpy.OptionType.Call
+    p.spot = spot
+    p.strike = strike
+    p.riskFreeRate = float(data.get('r', 0.05))
+    p.dividendYield = float(data.get('q', 0.0))
+    p.volatility = float(data.get('vol', 0.2))
+    p.maturity = float(data.get('t', 1.0))
+    p.type = qfpy.OptionType.Put if option_type == 'Put' else qfpy.OptionType.Call
+    p.exercise = qfpy.ExerciseType.European
+    premium = qfpy.black_scholes(p)['price']
+
+    lo, hi = 0.5 * strike, 1.5 * strike
+    n = 100
+    results = []
+    for i in range(n + 1):
+        s = lo + (hi - lo) * i / n
+        if option_type == 'Put':
+            payoff = max(strike - s, 0)
+        else:
+            payoff = max(s - strike, 0)
+        results.append({'spot': round(s, 4), 'payoff': round(payoff, 6), 'profit': round(payoff - premium, 6)})
+    return jsonify(results)
+
+
+@app.route('/api/greeks-surface', methods=['POST'])
+def api_greeks_surface():
+    data = request.json or {}
+    greek = data.get('greek', 'delta')
+    variable = data.get('variable', 'spot')
+
+    base_spot = float(data.get('spot', 100.0))
+    base_strike = float(data.get('strike', 100.0))
+    base_r = float(data.get('r', 0.05))
+    base_q = float(data.get('q', 0.0))
+    base_vol = float(data.get('vol', 0.2))
+    base_t = float(data.get('t', 1.0))
+    option_type = data.get('optionType', 'Call')
+
+    ranges = {
+        'spot': (0.5 * base_strike, 1.5 * base_strike, 60),
+        'vol': (0.01, min(base_vol * 4, 2.0), 60),
+        'maturity': (0.01, min(base_t * 3, 10.0), 60),
+    }
+
+    lo, hi, n = ranges.get(variable, (0.5 * base_strike, 1.5 * base_strike, 60))
+    results = []
+    for i in range(n + 1):
+        x = lo + (hi - lo) * i / n
+        p = qfpy.OptionParams()
+        p.spot = x if variable == 'spot' else base_spot
+        p.strike = base_strike
+        p.riskFreeRate = base_r
+        p.dividendYield = base_q
+        p.volatility = x if variable == 'vol' else base_vol
+        p.maturity = x if variable == 'maturity' else base_t
+        p.type = qfpy.OptionType.Put if option_type == 'Put' else qfpy.OptionType.Call
+        p.exercise = qfpy.ExerciseType.European
+
+        bs = qfpy.black_scholes(p)
+        y = bs.get(greek, 0)
+        results.append({'x': round(x, 6), 'y': round(y, 8)})
+
+    return jsonify(results)
+
+
+@app.route('/api/model-convergence', methods=['POST'])
+def api_model_convergence():
+    data = request.json or {}
+
+    p = qfpy.OptionParams()
+    p.spot = float(data.get('spot', 100.0))
+    p.strike = float(data.get('strike', 100.0))
+    p.riskFreeRate = float(data.get('r', 0.05))
+    p.dividendYield = float(data.get('q', 0.0))
+    p.volatility = float(data.get('vol', 0.2))
+    p.maturity = float(data.get('t', 1.0))
+    option_type = data.get('optionType', 'Call')
+    p.type = qfpy.OptionType.Put if option_type == 'Put' else qfpy.OptionType.Call
     p.exercise = qfpy.ExerciseType.European
 
-    bs = qfpy.black_scholes(p)
-    bt = qfpy.binomial_tree_price(p, 1000)
-    mc = qfpy.montecarlo_price(p, 200000, seed=123)
-    fd = qfpy.finite_difference_price(p, nS=500, nT=1000, method=qfpy.FDMethod.CrankNicolson)
+    fd_method_map = {
+        'Explicit': qfpy.FDMethod.Explicit,
+        'Implicit': qfpy.FDMethod.Implicit,
+        'CrankNicolson': qfpy.FDMethod.CrankNicolson,
+    }
+    fd_method = fd_method_map.get(data.get('fdMethod', 'CrankNicolson'), qfpy.FDMethod.CrankNicolson)
 
-    if not (fd and fd == fd):  # check nan
-        fd = 0.0
+    bs_ref = qfpy.black_scholes(p)['price']
+
+    binomial = []
+    for steps in range(10, 510, 25):
+        price = qfpy.binomial_tree_price(p, steps)
+        binomial.append({'x': steps, 'y': round(price, 8)})
+
+    montecarlo = []
+    for paths in range(1000, 200001, 10000):
+        price = qfpy.montecarlo_price(p, paths, seed=123)
+        montecarlo.append({'x': paths, 'y': round(price, 8)})
+
+    fd = []
+    for grid in range(20, 520, 25):
+        price = qfpy.finite_difference_price(p, nS=grid, nT=grid * 2, method=fd_method)
+        if price and price == price:  # check nan
+            fd.append({'x': grid, 'y': round(price, 8)})
 
     return jsonify({
-        'black_scholes': bs['price'],
-        'delta': bs['delta'],
-        'gamma': bs['gamma'],
-        'vega': bs['vega'],
-        'theta': bs['theta'],
-        'rho': bs['rho'],
-        'binomial': bt,
-        'montecarlo': mc,
-        'finite_difference': fd
+        'binomial': binomial,
+        'montecarlo': montecarlo,
+        'fd': fd,
+        'bs_reference': round(bs_ref, 8)
     })
+
+
+@app.route('/bonds')
+def bonds():
+    return render_template('bonds.html')
+
+
+@app.route('/api/bond', methods=['POST'])
+def api_bond():
+    data = request.json or {}
+    try:
+        maturities = [float(x) for x in data.get('maturities', [])]
+        zero_rates = [float(x) for x in data.get('zeroRates', [])]
+
+        if len(maturities) < 2 or len(maturities) != len(zero_rates):
+            return jsonify({'error': 'Need at least 2 matching maturity/rate pairs'}), 400
+
+        interp_map = {
+            'Linear': qfpy.InterpolationMethod.Linear,
+            'CubicSpline': qfpy.InterpolationMethod.CubicSpline,
+            'LogLinear': qfpy.InterpolationMethod.LogLinear,
+        }
+        interp = interp_map.get(data.get('interpMethod', 'CubicSpline'), qfpy.InterpolationMethod.CubicSpline)
+
+        curve = qfpy.YieldCurve(maturities, zero_rates, interp)
+        bond = qfpy.Bond(
+            float(data.get('faceValue', 1000)),
+            float(data.get('couponRate', 0.05)),
+            int(data.get('periods', 10)),
+            float(data.get('frequency', 2))
+        )
+
+        return jsonify({
+            'price': bond.price(curve),
+            'duration': bond.duration(curve),
+            'convexity': bond.convexity(curve)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/yield-curve', methods=['POST'])
+def api_yield_curve():
+    data = request.json or {}
+    try:
+        maturities = [float(x) for x in data.get('maturities', [])]
+        zero_rates = [float(x) for x in data.get('zeroRates', [])]
+
+        if len(maturities) < 2 or len(maturities) != len(zero_rates):
+            return jsonify({'error': 'Need at least 2 matching maturity/rate pairs'}), 400
+
+        interp_map = {
+            'Linear': qfpy.InterpolationMethod.Linear,
+            'CubicSpline': qfpy.InterpolationMethod.CubicSpline,
+            'LogLinear': qfpy.InterpolationMethod.LogLinear,
+        }
+        interp = interp_map.get(data.get('interpMethod', 'CubicSpline'), qfpy.InterpolationMethod.CubicSpline)
+
+        curve = qfpy.YieldCurve(maturities, zero_rates, interp)
+
+        lo, hi = min(maturities), max(maturities)
+        n = 100
+        points = []
+        for i in range(n + 1):
+            t = lo + (hi - lo) * i / n
+            if t <= 0:
+                t = 0.001
+            zr = curve.zero_rate(t)
+            df = curve.discount_factor(t)
+            # Forward rate: use a small interval around t
+            t2 = min(t + 0.25, hi)
+            if t2 <= t:
+                t2 = t + 0.01
+            fr = curve.forward_rate(t, t2)
+            points.append({
+                't': round(t, 6),
+                'zeroRate': round(zr, 8),
+                'discountFactor': round(df, 8),
+                'forwardRate': round(fr, 8)
+            })
+
+        return jsonify({'points': points})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/price-heston', methods=['POST'])
+def api_price_heston():
+    data = request.json or {}
+    try:
+        p = qfpy.OptionParams()
+        p.spot = float(data.get('spot', 100.0))
+        p.strike = float(data.get('strike', 100.0))
+        p.riskFreeRate = float(data.get('r', 0.05))
+        p.dividendYield = float(data.get('q', 0.0))
+        p.volatility = float(data.get('vol', 0.2))
+        p.maturity = float(data.get('t', 1.0))
+        option_type = data.get('optionType', 'Call')
+        p.type = qfpy.OptionType.Put if option_type == 'Put' else qfpy.OptionType.Call
+        p.exercise = qfpy.ExerciseType.European
+
+        h = qfpy.HestonParams()
+        h.v0 = float(data.get('v0', 0.04))
+        h.kappa = float(data.get('kappa', 2.0))
+        h.theta = float(data.get('theta', 0.04))
+        h.sigma = float(data.get('sigma', 0.3))
+        h.rho = float(data.get('rho', -0.7))
+
+        analytical = qfpy.heston_price(p, h)
+        mc = qfpy.heston_montecarlo(p, h, nPaths=50000, nSteps=252, seed=123)
+
+        return jsonify({
+            'heston_analytical': analytical,
+            'heston_mc': mc
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/implied-vol', methods=['POST'])
+def api_implied_vol():
+    data = request.json or {}
+    try:
+        p = qfpy.OptionParams()
+        p.spot = float(data.get('spot', 100.0))
+        p.strike = float(data.get('strike', 100.0))
+        p.riskFreeRate = float(data.get('r', 0.05))
+        p.dividendYield = float(data.get('q', 0.0))
+        p.volatility = 0.5  # initial guess
+        p.maturity = float(data.get('t', 1.0))
+        option_type = data.get('optionType', 'Call')
+        p.type = qfpy.OptionType.Put if option_type == 'Put' else qfpy.OptionType.Call
+        p.exercise = qfpy.ExerciseType.European
+
+        market_price = float(data.get('marketPrice', 10.0))
+        iv = qfpy.implied_volatility(p, market_price)
+
+        return jsonify({'impliedVol': iv})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
