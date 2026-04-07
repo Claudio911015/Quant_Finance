@@ -72,7 +72,7 @@ if(Python3_FOUND)
         add_custom_target(run_web_ui
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python_web/app.py
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            COMMENT "Run Python Flask UI (localhost:5000)"
+            COMMENT "Run Python Flask UI (localhost:5001)"
             USES_TERMINAL
         )
     endif()
