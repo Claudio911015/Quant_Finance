@@ -3,6 +3,7 @@
 #include <qf/pricingengines/montecarlo.hpp>
 #include <qf/pricingengines/binomialtree.hpp>
 #include <qf/pricingengines/finite_difference.hpp>
+#include <qf/pricingengines/heston.hpp>
 #include <stdexcept>
 
 namespace qf::pricingengines {
@@ -30,6 +31,15 @@ EngineFactory::makeEquityEngine(const std::string& method,
         return std::make_shared<FDMEngine>(params, std::move(ticker));
     }
     throw std::invalid_argument("EngineFactory: unknown method '" + method + "'");
+}
+
+std::shared_ptr<IPricingEngine>
+EngineFactory::makeHestonEngine(const instruments::OptionParams& params,
+                                const HestonParams& heston,
+                                std::string ticker)
+{
+    if (ticker.empty()) return std::make_shared<HestonEngine>(params, heston);
+    return std::make_shared<HestonEngine>(params, heston, std::move(ticker));
 }
 
 } // namespace qf::pricingengines

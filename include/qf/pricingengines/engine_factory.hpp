@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <qf/pricingengines/ipricing_engine.hpp>
+#include <qf/pricingengines/heston.hpp>
 #include <qf/instruments/option.hpp>
 
 namespace qf::pricingengines {
@@ -18,6 +19,14 @@ public:
                      const instruments::OptionParams& params,
                      int simPaths = 100000,
                      unsigned seed = 42,
+                     std::string ticker = "");
+
+    /// @param params    OptionParams (contractual data + fallback spot/rate)
+    /// @param heston    Calibrated Heston model parameters
+    /// @param ticker    If non-empty, engine reads spot/rate from MarketEnvironment
+    static std::shared_ptr<IPricingEngine>
+    makeHestonEngine(const instruments::OptionParams& params,
+                     const HestonParams& heston,
                      std::string ticker = "");
 };
 

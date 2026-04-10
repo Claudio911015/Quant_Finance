@@ -1,10 +1,13 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <qf/core/market_environment.hpp>
 #include <qf/instruments/bond.hpp>
 #include <qf/instruments/option.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 #include <qf/math/interpolation.hpp>
+#include <qf/pricingengines/ipricing_engine.hpp>
+#include <qf/pricingengines/engine_factory.hpp>
 #include <qf/pricingengines/blackscholes.hpp>
 #include <qf/pricingengines/binomialtree.hpp>
 #include <qf/pricingengines/montecarlo.hpp>
@@ -13,8 +16,60 @@
 
 namespace py = pybind11;
 
+// Trampoline for IPricingEngine subclasses defined in Python
+class PyIPricingEngine : public qf::pricingengines::IPricingEngine {
+public:
+    using qf::pricingengines::IPricingEngine::IPricingEngine;
+    double price(const qf::core::MarketEnvironment& env) const override {
+        PYBIND11_OVERRIDE_PURE(double, qf::pricingengines::IPricingEngine, price, env);
+    }
+    std::string name() const override {
+        PYBIND11_OVERRIDE_PURE(std::string, qf::pricingengines::IPricingEngine, name);
+    }
+};
+
 PYBIND11_MODULE(qfpy, m) {
     m.doc() = "Quant_Finance C++ bindings";
+
+    // ------------------------------------------------------------------ //
+    // MarketEnvironment — container for live market data                  //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::core::MarketEnvironment>(m, "MarketEnvironment")
+        .def(py::init<>())
+        .def(py::init<qf::termstructure::YieldCurve>(), py::arg("defaultCurve"))
+        .def("add_curve",      &qf::core::MarketEnvironment::addCurve,
+             py::arg("name"), py::arg("curve"))
+        .def("set_spot",       &qf::core::MarketEnvironment::setSpot,
+             py::arg("ticker"), py::arg("spot"))
+        .def("set_volatility", &qf::core::MarketEnvironment::setVolatility,
+             py::arg("ticker"), py::arg("vol"))
+        .def("spot",           &qf::core::MarketEnvironment::spot,      py::arg("ticker"))
+        .def("volatility",     &qf::core::MarketEnvironment::volatility, py::arg("ticker"));
+
+    // ------------------------------------------------------------------ //
+    // IPricingEngine — Strategy interface (also usable as Python base)    //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::pricingengines::IPricingEngine,
+               PyIPricingEngine,
+               std::shared_ptr<qf::pricingengines::IPricingEngine>>(m, "IPricingEngine")
+        .def("price", &qf::pricingengines::IPricingEngine::price, py::arg("env"))
+        .def("name",  &qf::pricingengines::IPricingEngine::name);
+
+    // ------------------------------------------------------------------ //
+    // EngineFactory — single entry point; adding a new engine in C++     //
+    // automatically makes it available here without touching this file    //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::pricingengines::EngineFactory>(m, "EngineFactory")
+        .def_static("make_equity_engine",
+                    &qf::pricingengines::EngineFactory::makeEquityEngine,
+                    py::arg("method"), py::arg("params"),
+                    py::arg("simPaths") = 100000, py::arg("seed") = 42,
+                    py::arg("ticker") = "",
+                    "Create a BS/MC/BT/FDM engine. Pass ticker to read market data from MarketEnvironment.")
+        .def_static("make_heston_engine",
+                    &qf::pricingengines::EngineFactory::makeHestonEngine,
+                    py::arg("params"), py::arg("heston"), py::arg("ticker") = "",
+                    "Create a Heston engine. Pass ticker to read spot/rate from MarketEnvironment.");
 
     py::enum_<qf::instruments::OptionType>(m, "OptionType")
         .value("Call", qf::instruments::OptionType::Call)
