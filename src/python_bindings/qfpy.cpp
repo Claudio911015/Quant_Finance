@@ -13,6 +13,7 @@
 #include <qf/pricingengines/montecarlo.hpp>
 #include <qf/pricingengines/finite_difference.hpp>
 #include <qf/pricingengines/heston.hpp>
+#include <qf/instruments/iunderlying.hpp>
 
 namespace py = pybind11;
 
@@ -70,6 +71,37 @@ PYBIND11_MODULE(qfpy, m) {
                     &qf::pricingengines::EngineFactory::makeHestonEngine,
                     py::arg("params"), py::arg("heston"), py::arg("ticker") = "",
                     "Create a Heston engine. Pass ticker to read spot/rate from MarketEnvironment.");
+
+    // ------------------------------------------------------------------ //
+    // IUnderlying hierarchy                                                //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::IUnderlying>>(m, "IUnderlying")
+        .def("id", &qf::instruments::IUnderlying::id);
+
+    py::class_<qf::instruments::EquityUnderlying,
+               qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::EquityUnderlying>>(m, "EquityUnderlying")
+        .def(py::init<std::string>(), py::arg("ticker"))
+        .def("id", &qf::instruments::EquityUnderlying::id);
+
+    py::class_<qf::instruments::RateUnderlying,
+               qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::RateUnderlying>>(m, "RateUnderlying")
+        .def(py::init<std::string>(), py::arg("curve_name"))
+        .def("id", &qf::instruments::RateUnderlying::id);
+
+    py::class_<qf::instruments::FxUnderlying,
+               qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::FxUnderlying>>(m, "FxUnderlying")
+        .def(py::init<std::string>(), py::arg("pair"))
+        .def("id", &qf::instruments::FxUnderlying::id);
+
+    py::class_<qf::instruments::CommodityUnderlying,
+               qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::CommodityUnderlying>>(m, "CommodityUnderlying")
+        .def(py::init<std::string>(), py::arg("code"))
+        .def("id", &qf::instruments::CommodityUnderlying::id);
 
     py::enum_<qf::instruments::OptionType>(m, "OptionType")
         .value("Call", qf::instruments::OptionType::Call)
