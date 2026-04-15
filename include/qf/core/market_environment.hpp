@@ -43,6 +43,12 @@ public:
     /// @param observer  Shared pointer to an IMarketObserver implementation.
     void subscribe(std::weak_ptr<IMarketObserver> observer);
 
+    /// @brief Unsubscribe a specific observer.
+    ///
+    /// No-op if the observer is not currently subscribed or has expired.
+    /// @param observer  The observer to remove.
+    void unsubscribe(const std::shared_ptr<IMarketObserver>& observer);
+
     /// @brief Remove all current subscribers.
     void unsubscribeAll();
 

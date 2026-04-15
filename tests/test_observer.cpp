@@ -114,3 +114,26 @@ TEST(MarketObserver, MultipleObserversAllNotified) {
     EXPECT_EQ(obs1->callCount, 1);
     EXPECT_EQ(obs2->callCount, 1);
 }
+
+/// Subscribing the same observer twice must not cause duplicate callbacks.
+TEST(MarketObserver, DuplicateSubscribeNotifiesOnce) {
+    MarketEnvironment env;
+    auto obs = std::make_shared<CountingObserver>();
+    env.subscribe(obs);
+    env.subscribe(obs);  // duplicate — should be ignored
+    env.setSpot("AAPL", 150.0);
+    EXPECT_EQ(obs->callCount, 1);
+}
+
+/// unsubscribe() removes only the targeted observer; others continue receiving.
+TEST(MarketObserver, UnsubscribeIndividual) {
+    MarketEnvironment env;
+    auto obs1 = std::make_shared<CountingObserver>();
+    auto obs2 = std::make_shared<CountingObserver>();
+    env.subscribe(obs1);
+    env.subscribe(obs2);
+    env.unsubscribe(obs1);
+    env.setSpot("AAPL", 150.0);
+    EXPECT_EQ(obs1->callCount, 0);
+    EXPECT_EQ(obs2->callCount, 1);
+}

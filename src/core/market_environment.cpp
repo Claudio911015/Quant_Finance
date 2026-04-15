@@ -13,7 +13,23 @@ MarketEnvironment::MarketEnvironment(termstructure::YieldCurve defaultCurve) {
 // -----------------------------------------------------------------------------
 
 void MarketEnvironment::subscribe(std::weak_ptr<IMarketObserver> observer) {
+    auto sp = observer.lock();
+    if (!sp) return;  // already expired
+    // Check for duplicates
+    for (auto& wp : observers_) {
+        if (wp.lock() == sp) return;  // already subscribed
+    }
     observers_.push_back(std::move(observer));
+}
+
+void MarketEnvironment::unsubscribe(const std::shared_ptr<IMarketObserver>& observer) {
+    observers_.erase(
+        std::remove_if(observers_.begin(), observers_.end(),
+            [&observer](const std::weak_ptr<IMarketObserver>& wp) {
+                auto sp = wp.lock();
+                return !sp || sp == observer;
+            }),
+        observers_.end());
 }
 
 void MarketEnvironment::unsubscribeAll() {
