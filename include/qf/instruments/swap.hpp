@@ -4,6 +4,7 @@
 #include <qf/instruments/instrument.hpp>
 #include <qf/core/market_environment.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
+#include <qf/math/daycount.hpp>
 
 namespace qf::instruments {
 
@@ -12,10 +13,17 @@ enum class SwapLegType { FixedFloating, FixedFixed, FixedInflation };
 
 class Leg : public Instrument {
 public:
-    /// @param frequency  Payment periods per year (e.g. 2 = semi-annual).
-    ///                   Defaults to 1 (annual) for backward compatibility.
+    /// @brief Construct a Leg with an explicit day-count convention enum.
+    /// @param currency   ISO currency code (e.g. "USD").
+    /// @param dcc        Day-count convention (default ACT_365, the historical library default).
+    /// @param notional   Notional principal (must be > 0).
+    /// @param maturity   Tenor in fractional years (must be > 0).
+    /// @param fixedRate  Fixed coupon rate (annual, used only for fixed legs).
+    /// @param spread     Spread over floating index (used only for floating legs).
+    /// @param floating   True for a floating-rate leg; false for fixed.
+    /// @param frequency  Payment periods per year (default 1 = annual).
     Leg(std::string currency,
-        std::string dayCountConvention,
+        math::DayCountConvention dcc,
         double notional,
         double maturity,
         double fixedRate  = 0.0,
@@ -24,7 +32,7 @@ public:
         double frequency  = 1.0)
         : Instrument(maturity),
           currency_(std::move(currency)),
-          dayCountConvention_(std::move(dayCountConvention)),
+          dcc_(dcc),
           notional_(notional), fixedRate_(fixedRate),
           spread_(spread), floating_(floating), frequency_(frequency)
     {
@@ -33,8 +41,27 @@ public:
         if (frequency_ <= 0.0) throw std::invalid_argument("Leg: frequency must be positive");
     }
 
-    const std::string& currency()            const { return currency_; }
-    const std::string& dayCountConvention()  const { return dayCountConvention_; }
+    /// @brief Backward-compatible constructor that accepts a string convention name.
+    /// @throws std::invalid_argument if the string is not recognised.
+    Leg(std::string currency,
+        std::string_view dccStr,
+        double notional,
+        double maturity,
+        double fixedRate  = 0.0,
+        double spread     = 0.0,
+        bool   floating   = false,
+        double frequency  = 1.0)
+        : Leg(std::move(currency),
+              math::dayCountFromString(dccStr),
+              notional, maturity,
+              fixedRate, spread, floating, frequency)
+    {}
+
+    const std::string& currency()           const { return currency_; }
+    /// @brief Returns the canonical name of the day-count convention (e.g. "ACT/365").
+    const char*        dayCountConvention() const { return math::dayCountName(dcc_); }
+    /// @brief Returns the day-count convention enum.
+    math::DayCountConvention dayCount()     const { return dcc_; }
     double notional()  const { return notional_; }
     double fixedRate() const { return fixedRate_; }
     double frequency() const { return frequency_; }
@@ -43,7 +70,7 @@ public:
 
 private:
     std::string currency_;
-    std::string dayCountConvention_;
+    math::DayCountConvention dcc_;
     double notional_;
     double fixedRate_;
     double spread_;

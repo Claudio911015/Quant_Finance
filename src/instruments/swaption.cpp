@@ -1,5 +1,6 @@
 #include <qf/instruments/swaption.hpp>
 #include <qf/math/statistics.hpp>
+#include <qf/math/daycount.hpp>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -78,11 +79,12 @@ static double hwZCBOption(SwaptionType stype,
 
 Swaption::Swaption(SwaptionType type, double notional, double strike,
                    double expiry, double swapTenor, double frequency,
-                   double hw_a, double hw_sigma)
+                   double hw_a, double hw_sigma,
+                   math::DayCountConvention dcc)
     : Instrument(expiry + swapTenor),
       type_(type), notional_(notional), strike_(strike),
       expiry_(expiry), swapTenor_(swapTenor), frequency_(frequency),
-      hw_a_(hw_a), hw_sigma_(hw_sigma)
+      hw_a_(hw_a), hw_sigma_(hw_sigma), dcc_(dcc)
 {
     if (notional <= 0.0)
         throw std::invalid_argument("Swaption: notional must be positive");
@@ -102,18 +104,22 @@ Swaption::Swaption(SwaptionType type, double notional, double strike,
 
 double Swaption::price(const termstructure::YieldCurve& curve) const
 {
-    int    n   = static_cast<int>(std::round(swapTenor_ * frequency_));
-    double tau = 1.0 / frequency_;
+    int n = static_cast<int>(std::round(swapTenor_ * frequency_));
 
-    // Payment dates of the underlying swap: T_exp + i*tau for i=1..n
+    // dt:  time step between payment dates in calendar years (drives the schedule).
+    // tau: accrual fraction per period for interest calculation (driven by DCC).
+    double dt  = 1.0 / frequency_;
+    double tau = math::periodFraction(frequency_, dcc_);
+
+    // Payment dates of the underlying swap: T_exp + i*dt for i=1..n
     std::vector<double> T(n);
-    std::vector<double> P0T(n);   // P(0, expiry + i*tau)
-    std::vector<double> c(n);     // coupon weights
+    std::vector<double> P0T(n);   // P(0, expiry + i*dt)
+    std::vector<double> c(n);     // coupon weights (use accrual tau for interest)
 
     double P0exp = curve.discountFactor(expiry_);
 
     for (int i = 0; i < n; ++i) {
-        T[i]   = expiry_ + (i + 1) * tau;
+        T[i]   = expiry_ + (i + 1) * dt;
         P0T[i] = curve.discountFactor(T[i]);
         c[i]   = notional_ * strike_ * tau;
     }
@@ -130,7 +136,7 @@ double Swaption::price(const termstructure::YieldCurve& curve) const
     auto swapNPV = [&](double r) -> double {
         double npv = 0.0;
         for (int i = 0; i < n; ++i) {
-            double tau_i = (i + 1) * tau;  // T[i] - T_exp
+            double tau_i = (i + 1) * dt;  // T[i] - T_exp (time interval, not accrual tau)
             double B_i   = hwB(tau_i, hw_a_);
             double F_i   = P0T[i] / P0exp;
             npv += c[i] * F_i * std::exp(-B_i * r);
@@ -172,7 +178,7 @@ double Swaption::price(const termstructure::YieldCurve& curve) const
     // X_i = P_HW(T_exp, T_i | r*) — the bond strike for caplet i
     double total = 0.0;
     for (int i = 0; i < n; ++i) {
-        double tau_i = (i + 1) * tau;
+        double tau_i = (i + 1) * dt;  // time interval from expiry to Ti (for HW formulas)
         double B_i   = hwB(tau_i, hw_a_);
         double F_i   = P0T[i] / P0exp;
         double X_i   = F_i * std::exp(-B_i * r_star);

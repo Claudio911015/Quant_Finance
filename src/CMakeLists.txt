@@ -4,6 +4,7 @@ add_library(qf
     math/rootfinding.cpp
     math/integration.cpp
     math/statistics.cpp
+    math/daycount.cpp
     termstructure/yieldcurve.cpp
     termstructure/bootstrap.cpp
     instruments/instrument.cpp

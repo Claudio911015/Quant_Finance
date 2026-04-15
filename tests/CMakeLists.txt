@@ -20,6 +20,7 @@ if(GTest_FOUND)
         test_portfolio_var.cpp
         test_capfloor.cpp
         test_swaption.cpp
+        test_daycount.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)

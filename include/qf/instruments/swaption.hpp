@@ -2,6 +2,7 @@
 #include <qf/instruments/instrument.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 #include <qf/core/market_environment.hpp>
+#include <qf/math/daycount.hpp>
 
 namespace qf::instruments {
 
@@ -21,10 +22,11 @@ enum class SwaptionType { Payer, Receiver };
 /// short rate at T_exp that makes the underlying swap NPV equal to zero.
 ///
 /// Coupon weights:
-///   c_i = N · K · τ    for i < N   (fixed coupon payments)
-///   c_N = N · (1 + K·τ)             (final coupon + notional)
+///   c_i = N · K · τ        for i < N   (fixed coupon payments)
+///   c_N = N · (1 + K·τ)               (final coupon + notional)
 ///
-/// where τ = 1/frequency is the accrual period.
+/// where τ = periodFraction(frequency, dcc) is the DCC-dependent accrual fraction,
+/// and dt = 1/frequency is the calendar step between payment dates (used in HW formulas).
 class Swaption : public Instrument {
 public:
     /// @brief Construct a European swaption.
@@ -36,9 +38,11 @@ public:
     /// @param frequency   Payment periods per year for the swap, e.g. 2 = semi-annual.
     /// @param hw_a        Hull-White mean-reversion speed a (must be > 0).
     /// @param hw_sigma    Hull-White volatility σ (must be > 0).
+    /// @param dcc         Day-count convention for accrual fractions (default ACT/365).
     Swaption(SwaptionType type, double notional, double strike,
              double expiry, double swapTenor, double frequency,
-             double hw_a, double hw_sigma);
+             double hw_a, double hw_sigma,
+             math::DayCountConvention dcc = math::DayCountConvention::ACT_365);
 
     /// @brief Analytical price via Jamshidian decomposition.
     /// @param curve  Market yield curve used for discounting.
@@ -49,17 +53,18 @@ public:
     double calculatePV(const core::MarketEnvironment& env) const override;
 
     // Accessors
-    SwaptionType type()       const { return type_; }
-    double       notional()   const { return notional_; }
-    double       strike()     const { return strike_; }
-    double       expiry()     const { return expiry_; }
-    double       swapTenor()  const { return swapTenor_; }
-    double       frequency()  const { return frequency_; }
-    double       hwA()        const { return hw_a_; }
-    double       hwSigma()    const { return hw_sigma_; }
+    SwaptionType             type()      const { return type_; }
+    double                   notional()  const { return notional_; }
+    double                   strike()    const { return strike_; }
+    double                   expiry()    const { return expiry_; }
+    double                   swapTenor() const { return swapTenor_; }
+    double                   frequency() const { return frequency_; }
+    double                   hwA()       const { return hw_a_; }
+    double                   hwSigma()   const { return hw_sigma_; }
+    math::DayCountConvention dayCount()  const { return dcc_; }
 
 private:
-    SwaptionType type_;
+    SwaptionType             type_;
     double notional_;
     double strike_;
     double expiry_;
@@ -67,6 +72,7 @@ private:
     double frequency_;
     double hw_a_;
     double hw_sigma_;
+    math::DayCountConvention dcc_;
 };
 
 } // namespace qf::instruments

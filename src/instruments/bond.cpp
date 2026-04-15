@@ -1,16 +1,18 @@
 #include <qf/instruments/bond.hpp>
 #include <qf/core/market_environment.hpp>
 #include <qf/math/rootfinding.hpp>
+#include <qf/math/daycount.hpp>
 #include <cmath>
 #include <stdexcept>
 #include <numeric>
 
 namespace qf::instruments {
 
-Bond::Bond(double faceValue, double couponRate, int periods, double frequency)
+Bond::Bond(double faceValue, double couponRate, int periods, double frequency,
+           math::DayCountConvention dcc)
     : Instrument(static_cast<double>(periods) / frequency),
       faceValue_(faceValue), couponRate_(couponRate),
-      periods_(periods), frequency_(frequency)
+      periods_(periods), frequency_(frequency), dcc_(dcc)
 {
     if (periods <= 0)
         throw std::invalid_argument("Bond: periods must be positive");
@@ -20,7 +22,9 @@ Bond::Bond(double faceValue, double couponRate, int periods, double frequency)
 
 std::vector<double> Bond::cashflows() const
 {
-    double coupon = faceValue_ * couponRate_ / frequency_;
+    // tau: accrual fraction per period, determined by the day-count convention.
+    double tau    = math::periodFraction(frequency_, dcc_);
+    double coupon = faceValue_ * couponRate_ * tau;
     std::vector<double> cf(periods_, coupon);
     cf.back() += faceValue_; // principal at maturity
     return cf;
