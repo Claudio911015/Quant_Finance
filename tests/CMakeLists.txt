@@ -16,6 +16,7 @@ if(GTest_FOUND)
         test_models_interfaces.cpp
         test_pricing_engines_oop.cpp
         test_underlyings.cpp
+        test_observer.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)
