@@ -14,6 +14,8 @@ Bond::Bond(double faceValue, double couponRate, int periods, double frequency,
       faceValue_(faceValue), couponRate_(couponRate),
       periods_(periods), frequency_(frequency), dcc_(dcc)
 {
+    if (faceValue <= 0.0)
+        throw std::invalid_argument("Bond: faceValue must be positive");
     if (periods <= 0)
         throw std::invalid_argument("Bond: periods must be positive");
     if (frequency <= 0.0)

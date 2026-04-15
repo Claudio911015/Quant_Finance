@@ -9,8 +9,13 @@ struct BSResult {
     double price;
     double delta;
     double gamma;
+    /// Change in option price per 1 percentage-point move in implied vol
+    /// (e.g. if vol goes from 20% to 21%). Equals S·e^{-qT}·N'(d₁)·√T / 100.
+    /// @note risk::vega() returns dV/dσ per *unit* vol (100× larger convention).
     double vega;
+    /// Change in option price per calendar day (negative for long options).
     double theta;
+    /// Change in option price per 1 percentage-point move in risk-free rate.
     double rho;
 };
 
