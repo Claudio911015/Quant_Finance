@@ -120,4 +120,54 @@ VaRResult monteCarloVaR(const std::vector<double>& simulatedPnL,
     return {var, cvar};
 }
 
+VaRResult portfolioVaR(const std::vector<PortfolioPosition>& positions,
+                       const std::vector<std::vector<double>>& correlations,
+                       double confidence)
+{
+    const std::size_t n = positions.size();
+    // Validate inputs
+    if (n == 0) throw std::invalid_argument("portfolioVaR: positions must be non-empty");
+    if (correlations.size() != n)
+        throw std::invalid_argument("portfolioVaR: correlation matrix rows != positions.size()");
+    for (const auto& row : correlations)
+        if (row.size() != n)
+            throw std::invalid_argument("portfolioVaR: correlation matrix is not square");
+    if (confidence <= 0.0 || confidence >= 1.0)
+        throw std::invalid_argument("portfolioVaR: confidence must be in (0, 1)");
+
+    // Portfolio mean return (sum of value-weighted means)
+    double portfolioValue = 0.0;
+    double portfolioMean  = 0.0;
+    for (const auto& p : positions) {
+        portfolioValue += p.value;
+        portfolioMean  += p.value * p.meanReturn;
+    }
+    if (portfolioValue <= 0.0)
+        throw std::invalid_argument("portfolioVaR: total portfolio value must be positive");
+
+    // Portfolio variance: sigma_p^2 = sum_i sum_j w_i * w_j * corr_ij * sigma_i * sigma_j
+    // where w_i = positions[i].value (not normalized — we keep dollar terms)
+    double variance = 0.0;
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < n; ++j)
+            variance += positions[i].value * positions[j].value
+                      * correlations[i][j]
+                      * positions[i].stddev * positions[j].stddev;
+
+    // Clamp near-zero or negative variance (e.g. perfectly hedged portfolio)
+    if (variance < 0.0) variance = 0.0;
+    const double sigma = std::sqrt(variance);
+
+    // Edge case: perfectly hedged portfolio — VaR and CVaR are both zero
+    // (or driven purely by the mean, which here would be a gain/loss without vol)
+    if (sigma == 0.0) {
+        double loss = -portfolioMean;  // positive = loss if mean < 0
+        return {loss, loss};
+    }
+
+    // Reuse parametricVaR with the portfolio-level mean and sigma
+    // portfolioValue is already the sum of all positions
+    return parametricVaR(portfolioValue, portfolioMean / portfolioValue, sigma / portfolioValue, confidence);
+}
+
 } // namespace qf::risk
