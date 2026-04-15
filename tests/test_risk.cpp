@@ -1,10 +1,15 @@
 #include <gtest/gtest.h>
 #include <qf/risk/var.hpp>
+#include <qf/risk/greeks.hpp>
+#include <qf/pricingengines/blackscholes.hpp>
+#include <qf/instruments/option.hpp>
 #include <cmath>
 #include <random>
 #include <numeric>
 
 using namespace qf::risk;
+using namespace qf::pricingengines;
+using namespace qf::instruments;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Parametric VaR
@@ -126,4 +131,137 @@ TEST(MonteCarloVaR, VaRPositiveForSymmetricDist) {
 TEST(MonteCarloVaR, InvalidParamsThrow) {
     std::vector<double> empty;
     EXPECT_THROW(monteCarloVaR(empty, 0.99), std::invalid_argument);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Numerical Greeks — validated against Black-Scholes analytical values
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ATM call: S=K=100, r=0.05, q=0, σ=0.20, T=1
+static OptionParams atmCall() {
+    return {100.0, 100.0, 0.05, 0.0, 0.20, 1.0, OptionType::Call, ExerciseType::European};
+}
+
+// Helper: reprice call after perturbing one parameter
+static double bsPrice(OptionParams p) { return blackScholes(p).price; }
+
+TEST(NumericalGreeks, DeltaMatchesBS) {
+    auto p = atmCall();
+    double analytical = blackScholes(p).delta;
+    double numerical  = delta(
+        [&](double S) { auto q = p; q.spot = S; return bsPrice(q); },
+        p.spot, 0.01);
+    EXPECT_NEAR(numerical, analytical, 1e-4);
+}
+
+TEST(NumericalGreeks, GammaMatchesBS) {
+    auto p = atmCall();
+    double analytical = blackScholes(p).gamma;
+    double numerical  = gamma(
+        [&](double S) { auto q = p; q.spot = S; return bsPrice(q); },
+        p.spot, 0.01);
+    EXPECT_NEAR(numerical, analytical, 1e-4);
+}
+
+TEST(NumericalGreeks, VegaMatchesBS) {
+    auto p = atmCall();
+    // BS vega is scaled: dV/dσ / 100 (per 1% vol move).
+    // Numerical vega is raw dV/dσ, so divide by 100 to compare.
+    double analytical = blackScholes(p).vega;
+    double numerical  = vega(
+        [&](double v) { auto q = p; q.volatility = v; return bsPrice(q); },
+        p.volatility, 0.001) / 100.0;
+    EXPECT_NEAR(numerical, analytical, 1e-4);
+}
+
+TEST(NumericalGreeks, ThetaMatchesBS) {
+    auto p = atmCall();
+    // BS theta is per calendar day. Numerical theta with h=1yr is per year;
+    // divide by 365 to convert to per-day units.
+    double analytical = blackScholes(p).theta;
+    double numerical  = theta(
+        [&](double T) { auto q = p; q.maturity = T; return bsPrice(q); },
+        p.maturity, 1.0 / 365.0) / 365.0;
+    EXPECT_NEAR(numerical, analytical, 1e-4);
+}
+
+TEST(NumericalGreeks, RhoMatchesBS) {
+    auto p = atmCall();
+    // BS rho is scaled: dV/dr / 100 (per 100bp move).
+    // Numerical rho is raw dV/dr, so divide by 100 to compare.
+    double analytical = blackScholes(p).rho;
+    double numerical  = rho(
+        [&](double r) { auto q = p; q.riskFreeRate = r; return bsPrice(q); },
+        p.riskFreeRate, 0.0001) / 100.0;
+    EXPECT_NEAR(numerical, analytical, 1e-4);
+}
+
+TEST(NumericalGreeks, DeltaPutBetweenMinusOneAndZero) {
+    auto p = atmCall();
+    p.type = OptionType::Put;
+    double d = delta(
+        [&](double S) { auto q = p; q.spot = S; return bsPrice(q); },
+        p.spot, 0.01);
+    EXPECT_LT(d, 0.0);
+    EXPECT_GT(d, -1.0);
+}
+
+TEST(NumericalGreeks, GammaPositive) {
+    auto p = atmCall();
+    double g = gamma(
+        [&](double S) { auto q = p; q.spot = S; return bsPrice(q); },
+        p.spot, 0.01);
+    EXPECT_GT(g, 0.0);
+}
+
+TEST(NumericalGreeks, VegaPositive) {
+    auto p = atmCall();
+    double v = vega(
+        [&](double vol) { auto q = p; q.volatility = vol; return bsPrice(q); },
+        p.volatility, 0.001);
+    EXPECT_GT(v, 0.0);
+}
+
+TEST(NumericalGreeks, ThetaNegativeForLongCall) {
+    auto p = atmCall();
+    double t = theta(
+        [&](double T) { auto q = p; q.maturity = T; return bsPrice(q); },
+        p.maturity, 1.0 / 365.0);
+    EXPECT_LT(t, 0.0);
+}
+
+TEST(NumericalGreeks, Dv01PositiveForBond) {
+    // Simple zero-coupon bond: P = F * exp(-y * T)
+    // DV01 = (P(y-h) - P(y+h)) / 2 > 0
+    double F = 1000.0, T = 5.0;
+    double y = 0.05;
+    double d = dv01(
+        [&](double yield) { return F * std::exp(-yield * T); },
+        y, 0.0001);
+    EXPECT_GT(d, 0.0);
+}
+
+TEST(NumericalGreeks, Dv01KnownValue) {
+    // ZCB: P = 1000 * exp(-0.05 * 5) = 778.80
+    // dP/dy = -T * P = -5 * 778.80 = -3894
+    // DV01 = -dP/dy * 0.0001 = 0.3894 ... but our formula gives (P(y-h)-P(y+h))/2
+    // = (1000*exp(-0.0499*5) - 1000*exp(-0.0501*5)) / 2 ≈ 0.3894
+    double F = 1000.0, T = 5.0, y = 0.05;
+    double expected = T * F * std::exp(-y * T) * 0.0001;
+    double numerical = dv01(
+        [&](double yield) { return F * std::exp(-yield * T); },
+        y, 0.0001);
+    EXPECT_NEAR(numerical, expected, 1e-6);
+}
+
+TEST(NumericalGreeks, InvalidParamsThrow) {
+    auto fn = [](double x) { return x * x; };
+    EXPECT_THROW(delta(fn, 100.0, -0.01), std::invalid_argument);
+    EXPECT_THROW(delta(fn, -1.0, 0.01),   std::invalid_argument);
+    EXPECT_THROW(gamma(fn, 100.0, 0.0),   std::invalid_argument);
+    EXPECT_THROW(vega(fn, 0.20, -0.001),  std::invalid_argument);
+    EXPECT_THROW(vega(fn, -0.1, 0.001),   std::invalid_argument);
+    EXPECT_THROW(theta(fn, 0.5, 1.0),     std::invalid_argument); // T <= h
+    EXPECT_THROW(rho(fn, 0.05, 0.0),      std::invalid_argument);
+    EXPECT_THROW(dv01(fn, 0.05, -0.0001), std::invalid_argument);
 }
