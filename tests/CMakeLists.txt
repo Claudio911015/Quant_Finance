@@ -18,6 +18,8 @@ if(GTest_FOUND)
         test_underlyings.cpp
         test_observer.cpp
         test_portfolio_var.cpp
+        test_capfloor.cpp
+        test_swaption.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)

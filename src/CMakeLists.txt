@@ -10,6 +10,8 @@ add_library(qf
     instruments/bond.cpp
     instruments/swap.cpp
     instruments/option.cpp
+    instruments/capfloor.cpp
+    instruments/swaption.cpp
     pricingengines/engine_factory.cpp
     pricingengines/blackscholes.cpp
     pricingengines/binomialtree.cpp
