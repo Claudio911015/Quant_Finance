@@ -3,6 +3,7 @@ add_library(qf
     math/interpolation.cpp
     math/rootfinding.cpp
     math/integration.cpp
+    math/statistics.cpp
     termstructure/yieldcurve.cpp
     termstructure/bootstrap.cpp
     instruments/instrument.cpp

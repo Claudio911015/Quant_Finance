@@ -1,4 +1,5 @@
 #include <qf/risk/var.hpp>
+#include <qf/math/statistics.hpp>
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -6,33 +7,8 @@
 
 namespace qf::risk {
 
-// Inverse normal CDF (rational approximation, Abramowitz & Stegun 26.2.23)
-static double normInvCDF(double p)
-{
-    if (p <= 0.0 || p >= 1.0)
-        throw std::invalid_argument("normInvCDF: p must be in (0, 1)");
-
-    // Symmetry: for p < 0.5, use Phi^-1(p) = -Phi^-1(1-p)
-    bool negate = (p < 0.5);
-    if (negate) p = 1.0 - p;
-
-    double t = std::sqrt(-2.0 * std::log(1.0 - p));
-
-    // Rational approximation coefficients
-    const double c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
-    const double d1 = 1.432788, d2 = 0.189269, d3 = 0.001308;
-
-    double x = t - (c0 + c1 * t + c2 * t * t) /
-                    (1.0 + d1 * t + d2 * t * t + d3 * t * t * t);
-
-    return negate ? -x : x;
-}
-
-// Normal PDF
-static double normPDF(double x)
-{
-    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
-}
+using qf::math::normInvCDF;
+using qf::math::normPDF;
 
 VaRResult parametricVaR(double portfolioValue,
                         double meanReturn,

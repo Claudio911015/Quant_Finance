@@ -1,20 +1,14 @@
 #include <qf/pricingengines/blackscholes.hpp>
 #include <qf/pricingengines/detail/env_resolver.hpp>
 #include <qf/math/rootfinding.hpp>
+#include <qf/math/statistics.hpp>
 #include <cmath>
 #include <stdexcept>
 
 namespace qf::pricingengines {
 
-// ── Normal distribution helpers ───────────────────────────────────────────────
-
-static double normCDF(double x) {
-    return 0.5 * std::erfc(-x / std::sqrt(2.0));
-}
-
-static double normPDF(double x) {
-    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
-}
+using qf::math::normCDF;
+using qf::math::normPDF;
 
 // ── Black-Scholes formula ─────────────────────────────────────────────────────
 

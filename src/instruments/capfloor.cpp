@@ -1,15 +1,11 @@
 #include <qf/instruments/capfloor.hpp>
+#include <qf/math/statistics.hpp>
 #include <cmath>
 #include <stdexcept>
 
 namespace qf::instruments {
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-static double normCDF(double x)
-{
-    return 0.5 * std::erfc(-x / std::sqrt(2.0));
-}
+using qf::math::normCDF;
 
 /// Hull-White zero-coupon bond option.
 ///

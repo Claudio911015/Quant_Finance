@@ -1,4 +1,5 @@
 #include <qf/instruments/swaption.hpp>
+#include <qf/math/statistics.hpp>
 #include <cmath>
 #include <stdexcept>
 #include <vector>
@@ -6,12 +7,7 @@
 
 namespace qf::instruments {
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-static double normCDF(double x)
-{
-    return 0.5 * std::erfc(-x / std::sqrt(2.0));
-}
+using qf::math::normCDF;
 
 /// Hull-White zero-coupon bond price P_HW(0, T) = exp(-B(T)*r) * A(T).
 /// At t=0, the model is fitted to the market curve, so P_HW(0,T) = P_mkt(0,T).
