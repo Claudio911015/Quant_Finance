@@ -12,24 +12,32 @@ enum class SwapLegType { FixedFloating, FixedFixed, FixedInflation };
 
 class Leg : public Instrument {
 public:
+    /// @param frequency  Payment periods per year (e.g. 2 = semi-annual).
+    ///                   Defaults to 1 (annual) for backward compatibility.
     Leg(std::string currency,
         std::string dayCountConvention,
         double notional,
         double maturity,
-        double fixedRate = 0.0,
-        double spread = 0.0,
-        bool floating = false)
-        : Instrument(maturity), currency_(std::move(currency)), dayCountConvention_(std::move(dayCountConvention)),
-          notional_(notional), fixedRate_(fixedRate), spread_(spread), floating_(floating)
+        double fixedRate  = 0.0,
+        double spread     = 0.0,
+        bool   floating   = false,
+        double frequency  = 1.0)
+        : Instrument(maturity),
+          currency_(std::move(currency)),
+          dayCountConvention_(std::move(dayCountConvention)),
+          notional_(notional), fixedRate_(fixedRate),
+          spread_(spread), floating_(floating), frequency_(frequency)
     {
-        if (notional_ <= 0.0) throw std::invalid_argument("Leg: notional must be positive");
-        if (maturity <= 0.0) throw std::invalid_argument("Leg: maturity must be positive");
+        if (notional_ <= 0.0)  throw std::invalid_argument("Leg: notional must be positive");
+        if (maturity  <= 0.0)  throw std::invalid_argument("Leg: maturity must be positive");
+        if (frequency_ <= 0.0) throw std::invalid_argument("Leg: frequency must be positive");
     }
 
-    const std::string& currency() const { return currency_; }
-    const std::string& dayCountConvention() const { return dayCountConvention_; }
-    double notional() const { return notional_; }
+    const std::string& currency()            const { return currency_; }
+    const std::string& dayCountConvention()  const { return dayCountConvention_; }
+    double notional()  const { return notional_; }
     double fixedRate() const { return fixedRate_; }
+    double frequency() const { return frequency_; }
 
     double calculatePV(const core::MarketEnvironment& env) const override;
 
@@ -39,7 +47,8 @@ private:
     double notional_;
     double fixedRate_;
     double spread_;
-    bool floating_;
+    bool   floating_;
+    double frequency_;
 };
 
 class Swap : public Instrument {

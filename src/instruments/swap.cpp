@@ -23,22 +23,22 @@ static double discountAnnuity(double maturity, double frequency, const termstruc
 double Leg::calculatePV(const core::MarketEnvironment& env) const
 {
     const auto& curve = env.curve();
+    double tau = 1.0 / frequency_;
+    int    n   = static_cast<int>(std::round(maturity() * frequency_));
+
     if (floating_) {
+        // Floating leg PV = N * (1 - P(0,T)) via the floating-leg replication identity.
+        // Spread payments are each N * spread * tau discounted at each payment date.
         double floatPV = notional_ * (1.0 - curve.discountFactor(maturity()));
-        if (spread_ != 0.0) {
-            double dt = maturity();
-            floatPV += notional_ * spread_ * dt * curve.discountFactor(maturity());
-        }
+        for (int i = 1; i <= n; ++i)
+            floatPV += notional_ * spread_ * tau * curve.discountFactor(i * tau);
         return floatPV;
     }
 
-    // Fixed leg: fixed coupon + notional at maturity
-    int nPayments = static_cast<int>(std::max(1.0, maturity()));
+    // Fixed leg: N * K * tau at each payment date + notional at maturity
     double fixedPV = 0.0;
-    for (int i = 1; i <= nPayments; ++i) {
-        double t = std::min(maturity(), static_cast<double>(i));
-        fixedPV += notional_ * fixedRate_ * curve.discountFactor(t);
-    }
+    for (int i = 1; i <= n; ++i)
+        fixedPV += notional_ * fixedRate_ * tau * curve.discountFactor(i * tau);
     fixedPV += notional_ * curve.discountFactor(maturity());
     return fixedPV;
 }
@@ -47,8 +47,8 @@ InterestRateSwap::InterestRateSwap(double notional, double fixedRate,
                                    double maturity, double frequency,
                                    SwapType type)
     : Swap(
-          Leg("USD", "ACT/365", notional, maturity, fixedRate, 0.0, false),
-          Leg("USD", "ACT/365", notional, maturity, 0.0,       0.0, true),
+          Leg("USD", "ACT/365", notional, maturity, fixedRate, 0.0, false, frequency),
+          Leg("USD", "ACT/365", notional, maturity, 0.0,       0.0, true,  frequency),
           SwapLegType::FixedFloating),
       frequency_(frequency), type_(type)
 {

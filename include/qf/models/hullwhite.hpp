@@ -17,10 +17,9 @@ public:
 
 private:
     double a_, sigma_;
-    const termstructure::YieldCurve& curve_;
+    termstructure::YieldCurve curve_; // owned copy — avoids dangling-reference UB
 
     double B(double T) const;
-    double A(double T) const;
     double theta(double t) const;
 };
 

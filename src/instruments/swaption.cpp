@@ -138,10 +138,14 @@ double Swaption::price(const termstructure::YieldCurve& curve) const
         return npv - notional_;
     };
 
-    // r* is close to the par swap rate; use the forward short rate as centre
-    // Mean of r(T_exp) under Q ≈ f(0, T_exp)  (approximately for small sigma)
-    double eps = 1e-5;
-    double f0  = -std::log(P0exp / curve.discountFactor(expiry_ + eps)) / eps;
+    // r* is close to the par swap rate; use the instantaneous forward rate f(0, T_exp)
+    // as the centre of the bisection bracket.  Centered difference avoids the
+    // one-sided bias that occurs when T_exp lands on a knot of the yield curve.
+    double eps = 1e-4;
+    double lo_t = std::max(expiry_ - eps, 1e-6);
+    double f0   = -std::log(curve.discountFactor(expiry_ + eps)
+                          / curve.discountFactor(lo_t))
+                / (expiry_ + eps - lo_t);
     double variance = hwVariance(expiry_, hw_a_, hw_sigma_);
     double rStd     = std::sqrt(variance);
 

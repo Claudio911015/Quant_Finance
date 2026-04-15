@@ -62,9 +62,14 @@ double Bond::yield(double marketPrice) const
         return pv - marketPrice;
     };
 
-    // Bracket: search for sign change
-    double lo = 1e-6, hi = 1.0;
-    while (priceFn(hi) > 0.0 && hi < 10.0) hi += 0.1;
+    // Bracket: covers negative yields (distressed/sovereign) and very high yields.
+    double lo = -0.30, hi = 0.10;
+    // Extend hi until we bracket the root (price fn changes sign)
+    while (priceFn(hi) > 0.0 && hi < 50.0) hi += 0.10;
+    // Extend lo downward if needed (very negative yields)
+    while (priceFn(lo) < 0.0 && lo > -5.0) lo -= 0.10;
+    if (priceFn(lo) * priceFn(hi) > 0.0)
+        throw std::runtime_error("Bond::yield: failed to bracket root — check market price");
 
     return math::brent(priceFn, lo, hi);
 }
@@ -80,9 +85,11 @@ double Bond::duration(const termstructure::YieldCurve& curve) const
         pv       += cf[i] * df;
         weighted += t[i] * cf[i] * df;
     }
-    double macaulay = weighted / pv;
-    double ytm = yield(pv);
-    return macaulay / (1.0 + ytm / frequency_); // modified duration
+    // Under continuous compounding (the convention used throughout this library),
+    // modified duration equals Macaulay duration: D_mod = D_mac / exp(y*dt) ≈ D_mac.
+    // The periodic-compounding divisor (1 + y/freq) would mix conventions and
+    // introduce a systematic error proportional to y/freq.
+    return weighted / pv; // modified duration = macaulay duration (cc)
 }
 
 double Bond::convexity(const termstructure::YieldCurve& curve) const
