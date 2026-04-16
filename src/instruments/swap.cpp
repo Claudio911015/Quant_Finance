@@ -142,6 +142,9 @@ ScheduledLeg::ScheduledLeg(double fixedRate, bool paysFixed, std::vector<PeriodS
     for (const auto& p : schedule_)
         if (p.notional <= 0.0)
             throw std::invalid_argument("ScheduledLeg: all notionals must be positive");
+    for (std::size_t i = 1; i < schedule_.size(); ++i)
+        if (schedule_[i].payTime <= schedule_[i-1].payTime)
+            throw std::invalid_argument("ScheduledLeg: payTime must be strictly increasing");
 }
 
 ScheduledLeg::ScheduledLeg(double fixedRate, bool paysFixed, double spread,
@@ -154,11 +157,13 @@ ScheduledLeg::ScheduledLeg(double fixedRate, bool paysFixed, double spread,
     for (const auto& p : schedule_)
         if (p.notional <= 0.0)
             throw std::invalid_argument("ScheduledLeg: all notionals must be positive");
+    for (std::size_t i = 1; i < schedule_.size(); ++i)
+        if (schedule_[i].payTime <= schedule_[i-1].payTime)
+            throw std::invalid_argument("ScheduledLeg: payTime must be strictly increasing");
 }
 
 ScheduledLeg ScheduledLeg::makeFixed(double notional, double fixedRate,
-                                      const std::vector<double>& paymentTimes,
-                                      math::DayCountConvention /*dcc*/)
+                                      const std::vector<double>& paymentTimes)
 {
     if (paymentTimes.empty())
         throw std::invalid_argument("ScheduledLeg::makeFixed: paymentTimes must not be empty");
@@ -176,8 +181,7 @@ ScheduledLeg ScheduledLeg::makeFixed(double notional, double fixedRate,
 }
 
 ScheduledLeg ScheduledLeg::makeFloating(double notional, double spread,
-                                         const std::vector<double>& paymentTimes,
-                                         math::DayCountConvention /*dcc*/)
+                                         const std::vector<double>& paymentTimes)
 {
     if (paymentTimes.empty())
         throw std::invalid_argument("ScheduledLeg::makeFloating: paymentTimes must not be empty");
@@ -211,6 +215,8 @@ double ScheduledLeg::calculatePV(const core::MarketEnvironment& env) const
         //   PV = N_0 - Σᵢ (N_i − N_{i+1}) · P(0,tᵢ) − N_n · P(0,t_n)
         //       + Σᵢ spread · N_i · τᵢ · P(0,tᵢ)
         // For constant N this collapses to the standard: N · (1 − P(0,T)).
+        // Replication identity assumes t = 0 is today (P(0,0) = 1).
+        // The initial notional is received at t=0 (no discounting).
         double pv = schedule_[0].notional;  // notional received at t = 0
         for (std::size_t i = 0; i < n; ++i) {
             const auto& p = schedule_[i];

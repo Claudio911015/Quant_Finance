@@ -168,23 +168,16 @@ public:
     /// @param schedule   Ordered list of periods.
     ScheduledLeg(double fixedRate, bool paysFixed, double spread, std::vector<PeriodSpec> schedule);
 
-    /// @brief Build a fixed leg from a list of payment times and a constant notional.
-    /// @param notional      Notional (same for all periods).
-    /// @param fixedRate     Fixed coupon rate.
-    /// @param paymentTimes  Ordered payment times in years.
-    /// @param dcc           Day-count convention for accrual fractions.
+    /// @brief Build a fixed leg from payment times. Accrual fractions are computed as
+    /// actual year fractions (payTime_i - payTime_{i-1}). For specific DCC, build
+    /// PeriodSpec manually.
     static ScheduledLeg makeFixed(double notional, double fixedRate,
-                                   const std::vector<double>& paymentTimes,
-                                   math::DayCountConvention dcc = math::DayCountConvention::ACT_365);
+                                   const std::vector<double>& paymentTimes);
 
-    /// @brief Build a floating leg from payment times and a constant notional.
-    /// @param notional      Notional (same for all periods).
-    /// @param spread        Spread over floating index.
-    /// @param paymentTimes  Ordered payment times in years.
-    /// @param dcc           Day-count convention for accrual fractions.
+    /// @brief Build a floating leg from payment times. Accrual fractions are actual
+    /// year fractions. For specific DCC, build PeriodSpec manually.
     static ScheduledLeg makeFloating(double notional, double spread,
-                                      const std::vector<double>& paymentTimes,
-                                      math::DayCountConvention dcc = math::DayCountConvention::ACT_365);
+                                      const std::vector<double>& paymentTimes);
 
     /// @brief Present value of this leg.
     double calculatePV(const core::MarketEnvironment& env) const;

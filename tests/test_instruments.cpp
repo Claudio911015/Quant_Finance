@@ -235,7 +235,7 @@ TEST(ScheduledLeg, RegularEqualsIRS) {
     ScheduledLeg leg = ScheduledLeg::makeFixed(1e6, 0.04, times);
     double scheduled_pv = leg.calculatePV(env);
 
-    EXPECT_NEAR(scheduled_pv, ref_pv, 1.0); // within $1
+    EXPECT_NEAR(scheduled_pv, ref_pv, 1e-4); // tight tolerance
 }
 
 TEST(ScheduledLeg, BrokenFirstPeriod) {
@@ -286,4 +286,20 @@ TEST(ScheduledLeg, Amortizing) {
     expected += notionals[4] * curve.discountFactor(5.0);  // final notional
 
     EXPECT_NEAR(pv, expected, 1.0);  // within $1
+}
+
+TEST(ScheduledLeg, AmortizingFloating) {
+    // Floating amortizing leg: constant notional → should equal N*(1 - P(0,T))
+    using namespace qf::instruments;
+    using namespace qf::termstructure;
+    YieldCurve curve({1,2,3,4,5}, {0.04,0.04,0.04,0.04,0.04});
+    qf::core::MarketEnvironment env(curve);
+
+    std::vector<double> times = {1.0, 2.0, 3.0, 4.0, 5.0};
+    ScheduledLeg leg = ScheduledLeg::makeFloating(1e6, /*spread=*/0.0, times);
+    double pv = leg.calculatePV(env);
+
+    // For constant notional floating leg: PV = N * (1 - P(0,T))
+    double expected = 1e6 * (1.0 - curve.discountFactor(5.0));
+    EXPECT_NEAR(pv, expected, 1.0); // within $1
 }
