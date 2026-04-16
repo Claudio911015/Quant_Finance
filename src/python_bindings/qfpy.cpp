@@ -45,7 +45,10 @@ PYBIND11_MODULE(qfpy, m) {
         .def("set_volatility", &qf::core::MarketEnvironment::setVolatility,
              py::arg("ticker"), py::arg("vol"))
         .def("spot",           &qf::core::MarketEnvironment::spot,      py::arg("ticker"))
-        .def("volatility",     &qf::core::MarketEnvironment::volatility, py::arg("ticker"));
+        .def("volatility",     &qf::core::MarketEnvironment::volatility, py::arg("ticker"))
+        .def("curve",          &qf::core::MarketEnvironment::curve,
+             py::arg("name") = "default",
+             py::return_value_policy::reference_internal);
 
     // ------------------------------------------------------------------ //
     // IPricingEngine — Strategy interface (also usable as Python base)    //
