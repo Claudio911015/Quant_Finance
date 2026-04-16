@@ -166,3 +166,10 @@ TEST(HullWhiteConditionalBondPrice, HigherRateLowerPrice) {
     double P_high = hw.conditionalBondPrice(1.0, 5.0, 0.08);
     EXPECT_GT(P_low, P_high);
 }
+
+TEST(HullWhiteConditionalBondPrice, InvalidArgThrowsWhenTNotGreaterThan_t) {
+    YieldCurve curve({0.5,1,2,5,10}, {0.04,0.04,0.04,0.04,0.04});
+    HullWhite hw(0.1, 0.01, curve);
+    EXPECT_THROW(hw.conditionalBondPrice(5.0, 5.0, 0.04), std::invalid_argument); // T == t
+    EXPECT_THROW(hw.conditionalBondPrice(5.0, 3.0, 0.04), std::invalid_argument); // T < t
+}
