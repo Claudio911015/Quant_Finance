@@ -110,7 +110,7 @@ TEST(CVACalculator, ZeroLGDGivesZeroCVA) {
 
 // ── TEST 2: Deep ITM receiver swap → CVA > 0 ───────────────────────────────
 
-TEST(CVACalculator, DeepITMPayerSwapPositiveCVA) {
+TEST(CVACalculator, DeepITMReceiverSwapPositiveCVA) {
     // Receiver paying 4% float, receiving 10% fixed on a 4% flat curve → deeply ITM
     auto curve = flatCurve(0.04);
     qf::models::HullWhite hw(0.1, 0.005, curve); // low vol for stable EPE
