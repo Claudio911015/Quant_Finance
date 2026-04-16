@@ -73,3 +73,79 @@ TEST(NettingSet, InvalidMaturityThrows) {
     qf::xva::NettingSet ns;
     EXPECT_THROW(ns.add(1e6, 0.05, -1.0, 1.0, SwapType::Payer), std::invalid_argument);
 }
+
+#include <qf/xva/cva_calculator.hpp>
+#include <qf/models/hullwhite.hpp>
+
+// ── Shared helpers ──────────────────────────────────────────────────────────
+
+static qf::termstructure::YieldCurve flatCurve(double r) {
+    return qf::termstructure::YieldCurve(
+        {0.5, 1.0, 2.0, 5.0, 10.0}, {r, r, r, r, r});
+}
+
+static std::vector<double> quarterlyDates(double maturity) {
+    std::vector<double> d;
+    for (double t = 0.25; t <= maturity + 1e-9; t += 0.25)
+        d.push_back(t);
+    return d;
+}
+
+// ── TEST 1: Zero LGD → CVA == 0 ────────────────────────────────────────────
+
+TEST(CVACalculator, ZeroLGDGivesZeroCVA) {
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.01, curve);
+    qf::xva::FlatHazardRate credit(0.02);
+    qf::xva::SimParams params{1000, quarterlyDates(5.0), 42u};
+    qf::xva::CVACalculator calc(hw, credit, /*lgd=*/0.0, params);
+
+    qf::xva::NettingSet ns;
+    ns.add(1e6, 0.05, 5.0, 1.0, qf::instruments::SwapType::Payer);
+
+    qf::core::MarketEnvironment env(curve);
+    auto result = calc.compute(ns, env);
+    EXPECT_NEAR(result.cva, 0.0, 1e-10);
+}
+
+// ── TEST 2: Deep ITM receiver swap → CVA > 0 ───────────────────────────────
+
+TEST(CVACalculator, DeepITMPayerSwapPositiveCVA) {
+    // Receiver paying 4% float, receiving 10% fixed on a 4% flat curve → deeply ITM
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.005, curve); // low vol for stable EPE
+    qf::xva::FlatHazardRate credit(0.02);
+    qf::xva::SimParams params{5000, quarterlyDates(5.0), 42u};
+    qf::xva::CVACalculator calc(hw, credit, /*lgd=*/0.6, params);
+
+    qf::xva::NettingSet ns;
+    ns.add(1e6, 0.10, 5.0, 1.0, qf::instruments::SwapType::Receiver);
+
+    qf::core::MarketEnvironment env(curve);
+    auto result = calc.compute(ns, env);
+
+    EXPECT_GT(result.cva, 0.0);
+    for (const auto& step : result.profile)
+        EXPECT_GE(step.contribution, -1e-8);
+    EXPECT_GT(result.cva, 3000.0);
+    EXPECT_LT(result.cva, 50000.0);
+}
+
+// ── TEST 3: Netting — payer + receiver same params → CVA ≈ 0 ───────────────
+
+TEST(CVACalculator, NettingReducesExposureToNearZero) {
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.01, curve);
+    qf::xva::FlatHazardRate credit(0.02);
+    qf::xva::SimParams params{2000, quarterlyDates(5.0), 42u};
+    qf::xva::CVACalculator calc(hw, credit, /*lgd=*/0.6, params);
+
+    qf::xva::NettingSet ns;
+    ns.add(1e6, 0.05, 5.0, 1.0, qf::instruments::SwapType::Payer);
+    ns.add(1e6, 0.05, 5.0, 1.0, qf::instruments::SwapType::Receiver);
+
+    qf::core::MarketEnvironment env(curve);
+    auto result = calc.compute(ns, env);
+
+    EXPECT_NEAR(result.cva, 0.0, 500.0); // tolerance for MC noise on near-zero EPE
+}
