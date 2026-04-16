@@ -1,0 +1,9 @@
+build/
+.worktrees/
+docs/
+graphify-out/
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.gif

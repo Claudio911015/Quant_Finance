@@ -1,0 +1,1 @@
+{"nodes": [{"id": "var", "label": "var.hpp", "file_type": "code", "source_file": "/home/claudio/Git/Quant_Finance/include/qf/risk/var.hpp", "source_location": "L1"}], "edges": [{"source": "var", "target": "vector", "relation": "imports", "confidence": "EXTRACTED", "source_file": "/home/claudio/Git/Quant_Finance/include/qf/risk/var.hpp", "source_location": "L2", "weight": 1.0}]}

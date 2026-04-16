@@ -241,10 +241,16 @@ TEST(BlackScholes, ImpliedVolITMPut) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 TEST(BlackScholes, InvalidParamsThrow) {
-    EXPECT_THROW(blackScholes(makeCall(0.0,  100, 0.05, 0.0, 0.20, 1.0)), std::invalid_argument);
-    EXPECT_THROW(blackScholes(makeCall(100,  0.0, 0.05, 0.0, 0.20, 1.0)), std::invalid_argument);
-    EXPECT_THROW(blackScholes(makeCall(100, 100,  0.05, 0.0, 0.0,  1.0)), std::invalid_argument);
-    EXPECT_THROW(blackScholes(makeCall(100, 100,  0.05, 0.0, 0.20, 0.0)), std::invalid_argument);
+    // spot <= 0 and maturity <= 0 must throw
+    EXPECT_THROW(blackScholes(makeCall(0.0, 100, 0.05, 0.0, 0.20, 1.0)), std::invalid_argument);
+    EXPECT_THROW(blackScholes(makeCall(100, 100, 0.05, 0.0, 0.20, 0.0)), std::invalid_argument);
+    // strike = 0 is valid: call = S*exp(-qT), put = 0
+    EXPECT_NO_THROW(blackScholes(makeCall(100, 0.0, 0.05, 0.0, 0.20, 1.0)));
+    // vol = 0 is valid: returns forward intrinsic
+    EXPECT_NO_THROW(blackScholes(makeCall(100, 100, 0.05, 0.0, 0.0,  1.0)));
+    // negative inputs must throw
+    EXPECT_THROW(blackScholes(makeCall(100, -1.0, 0.05, 0.0, 0.20, 1.0)), std::invalid_argument);
+    EXPECT_THROW(blackScholes(makeCall(100, 100, 0.05, 0.0, -0.01, 1.0)), std::invalid_argument);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

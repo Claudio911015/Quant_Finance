@@ -19,18 +19,6 @@ double HullWhite::B(double T) const
     return (1.0 - std::exp(-a_ * T)) / a_;
 }
 
-double HullWhite::A(double T) const
-{
-    // Hull-White at t=0 is calibrated to match the market curve exactly:
-    //   P_HW(0,T) = A(T) * exp(-B(T) * r0)
-    // where r0 is the short rate from the market curve.
-    // A(T) = P_market(0,T) * exp(B(T) * f(0,0) - sigma^2/(4a) * (1-exp(-2a*0)) * B(T)^2)
-    // At t=0 the variance correction term vanishes, giving:
-    //   A(T) = P_market(0,T) * exp(B(T) * r0)
-    double r0 = curve_.zeroRate(1e-4);  // instantaneous rate approximation
-    return curve_.discountFactor(T) * std::exp(B(T) * r0);
-}
-
 double HullWhite::bondPrice(double T) const
 {
     if (T <= 0.0)
@@ -72,6 +60,33 @@ std::vector<double> HullWhite::simulate(double T, int steps, unsigned seed) cons
         path[i + 1] = path[i] + (theta(t) - a_ * path[i]) * dt + sigma_ * sqdt * N(rng);
     }
     return path;
+}
+
+double HullWhite::conditionalBondPrice(double t, double T, double r_t) const
+{
+    if (T <= t)
+        throw std::invalid_argument(
+            "HullWhite::conditionalBondPrice: T must be > t");
+
+    // Special case: at t≈0 the model reproduces the initial curve exactly
+    if (t < 1e-6)
+        return curve_.discountFactor(T);
+
+    double tau   = T - t;
+    double B_tT  = (1.0 - std::exp(-a_ * tau)) / a_;
+
+    // Instantaneous forward rate from the initial market curve at t
+    const double eps = 1e-5;
+    double t0 = std::max(t, eps);
+    double f0t = curve_.forwardRate(t0, t0 + eps);
+
+    // ln A(t,T) — deterministic part of the H-W bond price formula
+    double lnA = std::log(curve_.discountFactor(T) / curve_.discountFactor(t))
+               + B_tT * f0t
+               - (sigma_ * sigma_ / (4.0 * a_))
+                 * B_tT * B_tT * (1.0 - std::exp(-2.0 * a_ * t));
+
+    return std::exp(lnA - B_tT * r_t);
 }
 
 } // namespace qf::models

@@ -55,12 +55,15 @@ MonteCarloEngine::MonteCarloEngine(instruments::OptionParams params, std::string
 
 double MonteCarloEngine::price(const core::MarketEnvironment& env) const {
     if (model_) {
-        // Model-driven: resolve params then simulate via model
+        // Model-driven: resolve params then simulate via model.
+        // Seeds are derived from a single parent RNG so consecutive seeds don't
+        // carry MT19937's known short-range correlations.
         auto p = detail::resolveEquityParams(params_, ticker_, env);
+        std::mt19937 seeder(seed_);
         double sum = 0.0;
         for (int i = 0; i < N_; ++i) {
             auto path = model_->simulate(p.spot, p.maturity, nSteps_,
-                                         seed_ + static_cast<unsigned>(i));
+                                         seeder());
             double ST = path.back();
             double payoff = (p.type == instruments::OptionType::Call)
                           ? std::max(ST - p.strike, 0.0)

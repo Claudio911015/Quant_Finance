@@ -13,6 +13,8 @@
 #include <qf/pricingengines/montecarlo.hpp>
 #include <qf/pricingengines/finite_difference.hpp>
 #include <qf/pricingengines/heston.hpp>
+#include <qf/instruments/iunderlying.hpp>
+#include <qf/models/hullwhite.hpp>
 
 namespace py = pybind11;
 
@@ -44,7 +46,10 @@ PYBIND11_MODULE(qfpy, m) {
         .def("set_volatility", &qf::core::MarketEnvironment::setVolatility,
              py::arg("ticker"), py::arg("vol"))
         .def("spot",           &qf::core::MarketEnvironment::spot,      py::arg("ticker"))
-        .def("volatility",     &qf::core::MarketEnvironment::volatility, py::arg("ticker"));
+        .def("volatility",     &qf::core::MarketEnvironment::volatility, py::arg("ticker"))
+        .def("curve",          &qf::core::MarketEnvironment::curve,
+             py::arg("name") = "default",
+             py::return_value_policy::reference_internal);
 
     // ------------------------------------------------------------------ //
     // IPricingEngine — Strategy interface (also usable as Python base)    //
@@ -70,6 +75,37 @@ PYBIND11_MODULE(qfpy, m) {
                     &qf::pricingengines::EngineFactory::makeHestonEngine,
                     py::arg("params"), py::arg("heston"), py::arg("ticker") = "",
                     "Create a Heston engine. Pass ticker to read spot/rate from MarketEnvironment.");
+
+    // ------------------------------------------------------------------ //
+    // IUnderlying hierarchy                                                //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::IUnderlying>>(m, "IUnderlying")
+        .def("id", &qf::instruments::IUnderlying::id);
+
+    py::class_<qf::instruments::EquityUnderlying,
+               qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::EquityUnderlying>>(m, "EquityUnderlying")
+        .def(py::init<std::string>(), py::arg("ticker"))
+        .def("id", &qf::instruments::EquityUnderlying::id);
+
+    py::class_<qf::instruments::RateUnderlying,
+               qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::RateUnderlying>>(m, "RateUnderlying")
+        .def(py::init<std::string>(), py::arg("curve_name"))
+        .def("id", &qf::instruments::RateUnderlying::id);
+
+    py::class_<qf::instruments::FxUnderlying,
+               qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::FxUnderlying>>(m, "FxUnderlying")
+        .def(py::init<std::string>(), py::arg("pair"))
+        .def("id", &qf::instruments::FxUnderlying::id);
+
+    py::class_<qf::instruments::CommodityUnderlying,
+               qf::instruments::IUnderlying,
+               std::shared_ptr<qf::instruments::CommodityUnderlying>>(m, "CommodityUnderlying")
+        .def(py::init<std::string>(), py::arg("code"))
+        .def("id", &qf::instruments::CommodityUnderlying::id);
 
     py::enum_<qf::instruments::OptionType>(m, "OptionType")
         .value("Call", qf::instruments::OptionType::Call)
@@ -154,4 +190,18 @@ PYBIND11_MODULE(qfpy, m) {
           py::arg("opt"), py::arg("heston"));
     m.def("heston_montecarlo", &qf::pricingengines::hestonMonteCarlo, "Heston Monte Carlo price",
           py::arg("opt"), py::arg("heston"), py::arg("nPaths") = 100000, py::arg("nSteps") = 252, py::arg("seed") = 42);
+
+    // ------------------------------------------------------------------ //
+    // HullWhite — short-rate model (needed by CVACalculator in qfxva)    //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::models::HullWhite>(m, "HullWhite")
+        .def(py::init<double, double, const qf::termstructure::YieldCurve&>(),
+             py::arg("a"), py::arg("sigma"), py::arg("curve"),
+             "Hull-White short-rate model. a = mean-reversion speed, sigma = volatility.")
+        .def("bond_price",  &qf::models::HullWhite::bondPrice,  py::arg("T"))
+        .def("zero_rate",   &qf::models::HullWhite::zeroRate,   py::arg("T"))
+        .def("simulate",    &qf::models::HullWhite::simulate,
+             py::arg("T"), py::arg("steps"), py::arg("seed") = 42)
+        .def("conditional_bond_price", &qf::models::HullWhite::conditionalBondPrice,
+             py::arg("t"), py::arg("T"), py::arg("r_t"));
 }

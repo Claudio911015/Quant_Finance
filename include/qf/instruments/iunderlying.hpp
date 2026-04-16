@@ -53,4 +53,40 @@ private:
     std::string curveName_;
 };
 
+/// @brief IUnderlying implementation for a foreign-exchange spot rate.
+///
+/// The id() returns "BASE/QUOTE" (e.g. "EUR/USD"), which must match the key
+/// used in MarketEnvironment::setSpot() for the FX spot rate.
+class FxUnderlying : public IUnderlying {
+public:
+    /// @brief Construct an FX underlying.
+    /// @param pair  Currency pair in "BASE/QUOTE" format (e.g. "EUR/USD").
+    explicit FxUnderlying(std::string pair);
+
+    /// @brief Return the currency pair string.
+    /// @return  Currency pair string passed at construction.
+    std::string id() const override;
+
+private:
+    std::string pair_;
+};
+
+/// @brief IUnderlying implementation for a physical commodity.
+///
+/// The id() returns the commodity code (e.g. "GOLD", "WTI"), which must match
+/// the key used in MarketEnvironment::setSpot() and setVolatility().
+class CommodityUnderlying : public IUnderlying {
+public:
+    /// @brief Construct a commodity underlying.
+    /// @param code  Commodity code (e.g. "GOLD", "WTI", "BRENT").
+    explicit CommodityUnderlying(std::string code);
+
+    /// @brief Return the commodity code.
+    /// @return  Commodity code string passed at construction.
+    std::string id() const override;
+
+private:
+    std::string code_;
+};
+
 } // namespace qf::instruments

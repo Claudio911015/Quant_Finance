@@ -1,36 +1,64 @@
 #include <qf/pricingengines/blackscholes.hpp>
 #include <qf/pricingengines/detail/env_resolver.hpp>
 #include <qf/math/rootfinding.hpp>
+#include <qf/math/statistics.hpp>
 #include <cmath>
 #include <stdexcept>
 
 namespace qf::pricingengines {
 
-// ── Normal distribution helpers ───────────────────────────────────────────────
-
-static double normCDF(double x) {
-    return 0.5 * std::erfc(-x / std::sqrt(2.0));
-}
-
-static double normPDF(double x) {
-    return std::exp(-0.5 * x * x) / std::sqrt(2.0 * M_PI);
-}
+using qf::math::normCDF;
+using qf::math::normPDF;
 
 // ── Black-Scholes formula ─────────────────────────────────────────────────────
 
 BSResult blackScholes(const instruments::OptionParams& p)
 {
-    if (p.volatility <= 0.0 || p.maturity <= 0.0 || p.spot <= 0.0 || p.strike <= 0.0)
-        throw std::invalid_argument("BlackScholes: invalid parameters");
+    if (p.maturity <= 0.0 || p.spot <= 0.0)
+        throw std::invalid_argument("BlackScholes: spot and maturity must be positive");
+    if (p.strike < 0.0)
+        throw std::invalid_argument("BlackScholes: strike must be non-negative");
+    if (p.volatility < 0.0)
+        throw std::invalid_argument("BlackScholes: volatility must be non-negative");
 
-    const double S    = p.spot;
-    const double K    = p.strike;
-    const double r    = p.riskFreeRate;
-    const double q    = p.dividendYield;
-    const double sig  = p.volatility;
-    const double T    = p.maturity;
+    const double S   = p.spot;
+    const double K   = p.strike;
+    const double r   = p.riskFreeRate;
+    const double q   = p.dividendYield;
+    const double sig = p.volatility;
+    const double T   = p.maturity;
+    const double eqT = std::exp(-q * T);
+    const double erT = std::exp(-r * T);
+    const bool isCall = (p.type == instruments::OptionType::Call);
+
+    // ── vol = 0: intrinsic value only ─────────────────────────────────────────
+    // When σ = 0 there is no optionality; the option is worth its forward intrinsic.
+    // The formula diverges (d₁ = ±∞) so we handle this case explicitly.
+    if (sig == 0.0) {
+        BSResult res{};
+        double fwd = S * eqT - K * erT; // forward intrinsic (positive if ITM call)
+        res.price = isCall ? std::max(fwd, 0.0) : std::max(-fwd, 0.0);
+        // Delta is a step function; at-the-money we use 0.5 * e^{-qT} by convention.
+        res.delta = isCall
+            ? (fwd > 0.0 ? eqT : (fwd < 0.0 ? 0.0 : 0.5 * eqT))
+            : (fwd < 0.0 ? -eqT : (fwd > 0.0 ? 0.0 : -0.5 * eqT));
+        res.gamma = 0.0;
+        res.vega  = 0.0;
+        // Theta: decay of the forward intrinsic only for ITM options.
+        if (isCall && fwd > 0.0)
+            res.theta = (-q * S * eqT + r * K * erT) / 365.0;
+        else if (!isCall && fwd < 0.0)
+            res.theta = (q * S * eqT - r * K * erT) / 365.0;
+        else
+            res.theta = 0.0;
+        // Rho: rate sensitivity of forward intrinsic (ITM options only, /100 for 1% convention).
+        res.rho = isCall
+            ? (fwd > 0.0 ?  K * T * erT / 100.0 : 0.0)
+            : (fwd < 0.0 ? -K * T * erT / 100.0 : 0.0);
+        return res;
+    }
+
     const double sqT  = std::sqrt(T);
-
     const double d1 = (std::log(S / K) + (r - q + 0.5 * sig * sig) * T) / (sig * sqT);
     const double d2 = d1 - sig * sqT;
 
@@ -40,12 +68,7 @@ BSResult blackScholes(const instruments::OptionParams& p)
     const double Nnd2 = normCDF(-d2);
     const double nd1  = normPDF(d1);
 
-    const double eqT  = std::exp(-q * T);
-    const double erT  = std::exp(-r * T);
-
     BSResult res{};
-
-    bool isCall = (p.type == instruments::OptionType::Call);
 
     // Price
     if (isCall)

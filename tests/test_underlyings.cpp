@@ -51,6 +51,26 @@ TEST(Option, NewConstructorPricingViaEngine) {
     EXPECT_NEAR(p, qf::pricingengines::blackScholes(params).price, 1e-6);
 }
 
+TEST(IUnderlying, FxUnderlyingId) {
+    FxUnderlying u("EUR/USD");
+    EXPECT_EQ(u.id(), "EUR/USD");
+}
+
+TEST(IUnderlying, CommodityUnderlyingId) {
+    CommodityUnderlying u("GOLD");
+    EXPECT_EQ(u.id(), "GOLD");
+}
+
+TEST(IUnderlying, PolymorphicFx) {
+    std::shared_ptr<IUnderlying> u = std::make_shared<FxUnderlying>("GBP/JPY");
+    EXPECT_EQ(u->id(), "GBP/JPY");
+}
+
+TEST(IUnderlying, PolymorphicCommodity) {
+    std::shared_ptr<IUnderlying> u = std::make_shared<CommodityUnderlying>("WTI");
+    EXPECT_EQ(u->id(), "WTI");
+}
+
 TEST(Option, LegacyConstructorStillWorks) {
     Option opt;
     opt.spot = 100.0; opt.strike = 100.0; opt.riskFreeRate = 0.05;

@@ -41,7 +41,10 @@ static void glNodesWeights(int n, std::vector<double>& nodes, std::vector<double
                 p1 = p2;
             }
             // p1 = P_n(x), p0 = P_{n-1}(x)
-            double dp = n * (x * p1 - p0) / (x * x - 1.0);
+            double denom = x * x - 1.0;
+            if (std::abs(denom) < 1e-14)
+                denom = std::copysign(1e-14, denom);
+            double dp = n * (x * p1 - p0) / denom;
             double dx = -p1 / dp;
             x += dx;
             if (std::abs(dx) < 1e-15) break;
