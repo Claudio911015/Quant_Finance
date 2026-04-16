@@ -1,4 +1,5 @@
 #include <qf/xva/cva_calculator.hpp>
+#include <qf/models/irate_model.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 #include <qf/math/interpolation.hpp>
 #include <algorithm>
@@ -8,11 +9,11 @@
 
 namespace qf::xva {
 
-CVACalculator::CVACalculator(const qf::models::HullWhite& hw,
+CVACalculator::CVACalculator(const qf::models::IRateModel& model,
                              const ICreditCurve& credit,
                              double lgd,
                              SimParams params)
-    : hw_(hw), credit_(credit), lgd_(lgd), params_(std::move(params))
+    : model_(model), credit_(credit), lgd_(lgd), params_(std::move(params))
 {
     if (lgd < 0.0 || lgd > 1.0)
         throw std::invalid_argument("CVACalculator: LGD must be in [0,1]");
@@ -50,7 +51,7 @@ CVAResult CVACalculator::compute(const NettingSet& ns,
 
     for (std::size_t p = 0; p < params_.nPaths; ++p) {
         // Simulate one HW short-rate path over [0, T_max]; returns steps+1 values
-        auto path = hw_.simulate(T_max, totalSteps, seed + static_cast<unsigned>(p));
+        auto path = model_.simulate(T_max, totalSteps, seed + static_cast<unsigned>(p));
 
         for (std::size_t k = 0; k < nDates; ++k) {
             double t_k = dates[k];
@@ -65,7 +66,7 @@ CVAResult CVACalculator::compute(const NettingSet& ns,
             tenors.reserve(baseTenors.size());
             zeroRates.reserve(baseTenors.size());
             for (double tau : baseTenors) {
-                double P = hw_.conditionalBondPrice(t_k, t_k + tau, r_tk);
+                double P = model_.conditionalBondPrice(t_k, t_k + tau, r_tk);
                 if (P > 0.0 && P < 1.0) {
                     tenors.push_back(tau);
                     zeroRates.push_back(-std::log(P) / tau);

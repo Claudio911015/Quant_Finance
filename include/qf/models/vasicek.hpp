@@ -19,6 +19,8 @@ public:
     // returns vector of rates at each time step
     std::vector<double> simulate(double T, int steps, unsigned seed = 42) const override;
 
+    double conditionalBondPrice(double t, double T, double r_t) const override;
+
 private:
     double a_, b_, sigma_, r0_;
 };

@@ -76,6 +76,7 @@ TEST(NettingSet, InvalidMaturityThrows) {
 
 #include <qf/xva/cva_calculator.hpp>
 #include <qf/models/hullwhite.hpp>
+#include <qf/models/vasicek.hpp>
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -166,4 +167,16 @@ TEST(CVACalculator, NettingReducesExposureToNearZero) {
     auto result = calc.compute(ns, env);
 
     EXPECT_NEAR(result.cva, 0.0, 1e-6); // payer+receiver cancel exactly at every path
+}
+
+TEST(Vasicek, ConditionalBondPricePositive) {
+    qf::models::Vasicek v(0.1, 0.05, 0.01, 0.04);
+    double P = v.conditionalBondPrice(1.0, 5.0, 0.04);
+    EXPECT_GT(P, 0.0);
+    EXPECT_LT(P, 1.0);
+}
+
+TEST(Vasicek, ConditionalBondPriceInvalidThrows) {
+    qf::models::Vasicek v(0.1, 0.05, 0.01, 0.04);
+    EXPECT_THROW(v.conditionalBondPrice(5.0, 3.0, 0.04), std::invalid_argument);
 }

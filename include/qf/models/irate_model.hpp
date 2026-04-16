@@ -28,6 +28,13 @@ public:
     /// @param seed  RNG seed for reproducibility.
     /// @return      Vector of size (@p steps + 1): path[0] = r(0).
     virtual std::vector<double> simulate(double T, int steps, unsigned seed = 42) const = 0;
+
+    /// @brief Compute the conditional zero-coupon bond price P(t,T) given r(t).
+    /// @param t    Observation time in years (must be < T).
+    /// @param T    Maturity in years.
+    /// @param r_t  Short rate at time t.
+    /// @return     Conditional discount factor P(t,T|r(t)).
+    virtual double conditionalBondPrice(double t, double T, double r_t) const = 0;
 };
 
 } // namespace qf::models

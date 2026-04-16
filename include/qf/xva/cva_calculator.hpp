@@ -1,7 +1,7 @@
 #pragma once
 #include <optional>
 #include <vector>
-#include <qf/models/hullwhite.hpp>
+#include <qf/models/irate_model.hpp>
 #include <qf/xva/credit_curve.hpp>
 #include <qf/xva/netting_set.hpp>
 #include <qf/xva/cva_result.hpp>
@@ -18,11 +18,11 @@ struct SimParams {
 class CVACalculator {
 public:
     /// @brief Construct the CVA engine.
-    /// @param hw      Hull-White model (calibrated to the initial yield curve).
+    /// @param model   Interest rate model implementing IRateModel.
     /// @param credit  Counterparty credit curve.
     /// @param lgd     Loss Given Default in [0,1] (e.g. 0.6 = 40% recovery).
     /// @param params  Simulation parameters.
-    CVACalculator(const qf::models::HullWhite& hw,
+    CVACalculator(const qf::models::IRateModel& model,
                   const ICreditCurve& credit,
                   double lgd,
                   SimParams params);
@@ -34,7 +34,7 @@ public:
                       const qf::core::MarketEnvironment& env) const;
 
 private:
-    const qf::models::HullWhite& hw_;
+    const qf::models::IRateModel& model_;
     const ICreditCurve& credit_;
     double lgd_;
     SimParams params_;

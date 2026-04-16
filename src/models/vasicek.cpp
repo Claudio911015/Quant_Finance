@@ -55,4 +55,13 @@ std::vector<double> Vasicek::simulate(double T, int steps, unsigned seed) const
     return path;
 }
 
+double Vasicek::conditionalBondPrice(double t, double T, double r_t) const {
+    if (T <= t) throw std::invalid_argument("Vasicek::conditionalBondPrice: T must be > t");
+    double tau = T - t;
+    double B   = (1.0 - std::exp(-a_ * tau)) / a_;
+    double lnA = ((B - tau) * (a_ * a_ * b_ - 0.5 * sigma_ * sigma_)) / (a_ * a_)
+               - (sigma_ * sigma_ * B * B) / (4.0 * a_);
+    return std::exp(lnA - B * r_t);
+}
+
 } // namespace qf::models

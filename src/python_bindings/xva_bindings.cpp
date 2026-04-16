@@ -100,10 +100,12 @@ PYBIND11_MODULE(qfxva, m) {
 
     // ── CVACalculator ─────────────────────────────────────────────
     py::class_<CVACalculator>(m, "CVACalculator")
-        .def(py::init<const qf::models::HullWhite&,
-                      const ICreditCurve&,
-                      double,
-                      SimParams>(),
+        .def(py::init([](const qf::models::HullWhite& hw,
+                         const ICreditCurve& credit,
+                         double lgd,
+                         SimParams params) {
+                 return new CVACalculator(hw, credit, lgd, std::move(params));
+             }),
              py::arg("hw"), py::arg("credit"), py::arg("lgd"), py::arg("params"),
              py::keep_alive<1,2>(),   // calculator keeps hw alive
              py::keep_alive<1,3>())   // calculator keeps credit alive

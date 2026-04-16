@@ -20,7 +20,7 @@ public:
     /// @param T    Maturity in years.
     /// @param r_t  Simulated short rate at time t.
     /// @return     Risk-neutral conditional discount factor P(t,T|r(t)).
-    double conditionalBondPrice(double t, double T, double r_t) const;
+    double conditionalBondPrice(double t, double T, double r_t) const override;
 
 private:
     double a_, sigma_;
