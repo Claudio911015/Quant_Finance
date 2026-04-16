@@ -303,3 +303,47 @@ TEST(ScheduledLeg, AmortizingFloating) {
     double expected = 1e6 * (1.0 - curve.discountFactor(5.0));
     EXPECT_NEAR(pv, expected, 1.0); // within $1
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ScheduledSwap tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(ScheduledSwap, NPVZeroAtParRate) {
+    // At par rate, NPV of a fixed-for-floating swap = 0
+    using namespace qf::instruments;
+    using namespace qf::termstructure;
+    YieldCurve curve({1,2,3,4,5}, {0.04,0.04,0.04,0.04,0.04});
+    qf::core::MarketEnvironment env(curve);
+
+    // Par rate for 5Y annual on flat 4% curve
+    double parRate = InterestRateSwap::parRate(5.0, 1.0, env);
+
+    std::vector<double> times = {1.0, 2.0, 3.0, 4.0, 5.0};
+    ScheduledLeg fixedLeg  = ScheduledLeg::makeFixed(1e6, parRate, times);
+    ScheduledLeg floatLeg  = ScheduledLeg::makeFloating(1e6, 0.0, times);
+
+    // Payer swap: pay fixed, receive float
+    ScheduledSwap sw(fixedLeg, floatLeg);  // pay fixed, receive floating
+    EXPECT_NEAR(sw.npv(env), 0.0, 1.0);  // NPV ≈ $0 at par rate
+}
+
+TEST(ScheduledSwap, CashFlowsLength) {
+    // Cash flows vector has correct number of entries
+    using namespace qf::instruments;
+    using namespace qf::termstructure;
+    YieldCurve curve({1,2,3,4,5}, {0.04,0.04,0.04,0.04,0.04});
+    qf::core::MarketEnvironment env(curve);
+
+    std::vector<double> times = {1.0, 2.0, 3.0, 4.0, 5.0};
+    ScheduledLeg fixedLeg = ScheduledLeg::makeFixed(1e6, 0.04, times);
+    ScheduledLeg floatLeg = ScheduledLeg::makeFloating(1e6, 0.0, times);
+
+    ScheduledSwap sw(fixedLeg, floatLeg);
+    auto cfs = sw.cashFlows(env);
+
+    // Both legs share the same dates → 5 unique dates
+    EXPECT_EQ(cfs.size(), 5u);
+    // Dates should be in ascending order
+    for (std::size_t i = 1; i < cfs.size(); ++i)
+        EXPECT_LT(cfs[i-1].first, cfs[i].first);
+}

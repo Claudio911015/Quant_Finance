@@ -179,17 +179,56 @@ public:
     static ScheduledLeg makeFloating(double notional, double spread,
                                       const std::vector<double>& paymentTimes);
 
-    /// @brief Present value of this leg.
+    /// @brief Present value of this leg (fixed: coupons + final notional; floating: replication identity).
     double calculatePV(const core::MarketEnvironment& env) const;
+
+    /// @brief Present value of coupon cash flows only, excluding notional exchange.
+    ///
+    /// For fixed legs this is N·K·Σ(τᵢ·P(0,tᵢ)); for floating legs it equals
+    /// N·(1−P(0,T)) (replication identity, which is already coupon-only).
+    double calculateCouponPV(const core::MarketEnvironment& env) const;
 
     /// @brief The explicit schedule used by this leg.
     const std::vector<PeriodSpec>& schedule() const { return schedule_; }
+
+    double fixedRate()  const { return fixedRate_; }
+    double spread()     const { return spread_; }
+    bool   paysFixed()  const { return paysFixed_; }
 
 private:
     double fixedRate_;
     double spread_{0.0};
     bool paysFixed_;
     std::vector<PeriodSpec> schedule_;
+};
+
+/// @brief A swap built from two explicit ScheduledLeg objects.
+///
+/// The pay leg is what the portfolio pays; the receive leg is what it receives.
+/// Supports any combination of fixed and floating legs, amortizing notionals,
+/// and broken periods.
+class ScheduledSwap {
+public:
+    /// @param payLeg      Leg whose cash flows are paid (outflows).
+    /// @param receiveLeg  Leg whose cash flows are received (inflows).
+    ScheduledSwap(ScheduledLeg payLeg, ScheduledLeg receiveLeg);
+
+    /// @brief Net present value: PV(receive) - PV(pay).
+    double npv(const core::MarketEnvironment& env) const;
+
+    /// @brief Undiscounted net cash flows per unique payment date.
+    ///
+    /// Returns a vector of (time, net_cashflow) pairs covering all payment
+    /// dates from both legs. Dates that appear in only one leg have zero on
+    /// the other. Positive values = net receipt; negative = net payment.
+    std::vector<std::pair<double, double>> cashFlows(const core::MarketEnvironment& env) const;
+
+    const ScheduledLeg& payLeg()     const { return payLeg_; }
+    const ScheduledLeg& receiveLeg() const { return receiveLeg_; }
+
+private:
+    ScheduledLeg payLeg_;
+    ScheduledLeg receiveLeg_;
 };
 
 } // namespace qf::instruments

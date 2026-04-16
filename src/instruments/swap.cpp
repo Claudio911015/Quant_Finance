@@ -2,6 +2,7 @@
 #include <qf/core/market_environment.hpp>
 #include <qf/math/daycount.hpp>
 #include <cmath>
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -226,6 +227,92 @@ double ScheduledLeg::calculatePV(const core::MarketEnvironment& env) const
         }
         return pv;
     }
+}
+
+double ScheduledLeg::calculateCouponPV(const core::MarketEnvironment& env) const
+{
+    const auto& curve = env.curve();
+    if (paysFixed_) {
+        // Fixed leg coupon PV: Σ N_i * K * tau_i * P(0, t_i)  (no final notional)
+        double pv = 0.0;
+        for (const auto& p : schedule_)
+            pv += p.notional * fixedRate_ * p.accrualFrac * curve.discountFactor(p.payTime);
+        return pv;
+    } else {
+        // Floating leg via replication: N*(1 - P(0,T)) + spread terms.
+        // This is already coupon-only (no notional exchange).
+        return calculatePV(env);
+    }
+}
+
+// ─── ScheduledSwap ───────────────────────────────────────────────────────────
+
+ScheduledSwap::ScheduledSwap(ScheduledLeg payLeg, ScheduledLeg receiveLeg)
+    : payLeg_(std::move(payLeg)), receiveLeg_(std::move(receiveLeg))
+{}
+
+double ScheduledSwap::npv(const core::MarketEnvironment& env) const
+{
+    // Use coupon-only PVs (no notional exchange) so that fixed and floating legs
+    // are on equal footing. This mirrors the InterestRateSwap::npv() convention:
+    //   NPV = PV(receive coupons) - PV(pay coupons)
+    // For floating legs, calculateCouponPV() == calculatePV() (replication identity).
+    // For fixed legs, calculateCouponPV() strips out the final notional repayment.
+    return receiveLeg_.calculateCouponPV(env) - payLeg_.calculateCouponPV(env);
+}
+
+namespace {
+
+/// Compute the undiscounted coupon cash flow for period i of a ScheduledLeg.
+///
+/// Fixed leg period i:  CF = N_i * K * tau_i
+/// Floating leg period i: CF = N_i * (P(t_{i-1}) / P(t_i) - 1) + N_i * spread * tau_i
+///   where P(t_{i-1})/P(t_i) - 1 is the forward accrual implied by the curve.
+/// In both cases the final notional exchange is excluded (coupon only).
+double periodCouponCF(const ScheduledLeg& leg, std::size_t i,
+                      const termstructure::YieldCurve& curve)
+{
+    const auto& sched = leg.schedule();
+    const auto& p     = sched[i];
+    const double N    = p.notional;
+    const double tau  = p.accrualFrac;
+
+    if (leg.paysFixed()) {
+        return N * leg.fixedRate() * tau;
+    } else {
+        // Floating: forward accrual = P(t_{i-1}) / P(t_i) - 1
+        // P(0,0) = 1 by definition (no curve lookup needed to avoid T=0 rejection).
+        double t_prev = (i == 0) ? 0.0 : sched[i - 1].payTime;
+        double P_prev = (i == 0) ? 1.0 : curve.discountFactor(t_prev);
+        double P_i    = curve.discountFactor(p.payTime);
+        double fwdAccrual = P_prev / P_i - 1.0;
+        return N * (fwdAccrual + leg.spread() * tau);
+    }
+}
+
+} // anonymous namespace
+
+std::vector<std::pair<double, double>>
+ScheduledSwap::cashFlows(const core::MarketEnvironment& env) const
+{
+    // Undiscounted coupon cash flows (no notional exchange) netted across both legs.
+    // Positive = net receipt (receive > pay); negative = net payment.
+    const auto& curve = env.curve();
+    std::map<double, double> netFlows;
+
+    const auto& paySched = payLeg_.schedule();
+    for (std::size_t i = 0; i < paySched.size(); ++i)
+        netFlows[paySched[i].payTime] -= periodCouponCF(payLeg_, i, curve);
+
+    const auto& recSched = receiveLeg_.schedule();
+    for (std::size_t i = 0; i < recSched.size(); ++i)
+        netFlows[recSched[i].payTime] += periodCouponCF(receiveLeg_, i, curve);
+
+    std::vector<std::pair<double, double>> result;
+    result.reserve(netFlows.size());
+    for (const auto& [t, cf] : netFlows)
+        result.emplace_back(t, cf);
+    return result;
 }
 
 } // namespace qf::instruments
