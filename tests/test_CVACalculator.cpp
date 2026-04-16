@@ -22,3 +22,12 @@ TEST(FlatHazardRate, ZeroLambdaAlwaysOne) {
     for (double t : {0.0, 1.0, 10.0})
         EXPECT_NEAR(cr.survivalProbability(t), 1.0, 1e-12);
 }
+
+TEST(FlatHazardRate, NegativeLambdaThrows) {
+    EXPECT_THROW(FlatHazardRate(-0.01), std::invalid_argument);
+}
+
+TEST(FlatHazardRate, NegativeTimeThrows) {
+    FlatHazardRate cr(0.02);
+    EXPECT_THROW(cr.survivalProbability(-1.0), std::invalid_argument);
+}
