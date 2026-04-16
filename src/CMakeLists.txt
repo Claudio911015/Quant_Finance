@@ -26,6 +26,9 @@ add_library(qf
     models/bs_model.cpp
     risk/greeks.cpp
     risk/var.cpp
+    xva/credit_curve.cpp
+    xva/netting_set.cpp
+    xva/cva_calculator.cpp
 )
 
 target_include_directories(qf
@@ -47,4 +50,13 @@ if(pybind11_FOUND)
     set_target_properties(qfpy PROPERTIES PREFIX "")
 else()
     message(WARNING "pybind11 not found. Python bindings will not be built.")
+endif()
+
+if(pybind11_FOUND)
+    pybind11_add_module(qfxva
+        python_bindings/xva_bindings.cpp
+    )
+    target_link_libraries(qfxva PRIVATE qf)
+    target_include_directories(qfxva PRIVATE ${CMAKE_SOURCE_DIR}/include)
+    set_target_properties(qfxva PROPERTIES PREFIX "")
 endif()
