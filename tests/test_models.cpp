@@ -132,3 +132,37 @@ TEST(HullWhite, InvalidParamsThrow) {
     EXPECT_THROW(HullWhite(0.0, 0.015, curve), std::invalid_argument);
     EXPECT_THROW(HullWhite(0.1, 0.0, curve), std::invalid_argument);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HullWhite::conditionalBondPrice
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(HullWhiteConditionalBondPrice, AtT0MatchesInitialCurve) {
+    YieldCurve curve({0.5,1,2,5,10}, {0.04,0.04,0.04,0.04,0.04});
+    HullWhite hw(0.1, 0.01, curve);
+    // At t≈0, conditionalBondPrice should equal bondPrice (initial curve)
+    for (double T : {1.0, 3.0, 5.0, 10.0}) {
+        EXPECT_NEAR(hw.conditionalBondPrice(0.0, T, 0.04),
+                    hw.bondPrice(T), 1e-8);
+    }
+}
+
+TEST(HullWhiteConditionalBondPrice, PositiveAndLessThanOne) {
+    YieldCurve curve({0.5,1,2,5,10}, {0.04,0.04,0.04,0.04,0.04});
+    HullWhite hw(0.1, 0.01, curve);
+    for (double t : {1.0, 2.0, 3.0}) {
+        for (double T : {t+0.5, t+2.0, t+5.0}) {
+            double P = hw.conditionalBondPrice(t, T, 0.04);
+            EXPECT_GT(P, 0.0) << "t=" << t << " T=" << T;
+            EXPECT_LT(P, 1.0) << "t=" << t << " T=" << T;
+        }
+    }
+}
+
+TEST(HullWhiteConditionalBondPrice, HigherRateLowerPrice) {
+    YieldCurve curve({0.5,1,2,5,10}, {0.04,0.04,0.04,0.04,0.04});
+    HullWhite hw(0.1, 0.01, curve);
+    double P_low  = hw.conditionalBondPrice(1.0, 5.0, 0.02);
+    double P_high = hw.conditionalBondPrice(1.0, 5.0, 0.08);
+    EXPECT_GT(P_low, P_high);
+}

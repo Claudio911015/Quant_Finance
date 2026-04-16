@@ -62,4 +62,31 @@ std::vector<double> HullWhite::simulate(double T, int steps, unsigned seed) cons
     return path;
 }
 
+double HullWhite::conditionalBondPrice(double t, double T, double r_t) const
+{
+    if (T <= t)
+        throw std::invalid_argument(
+            "HullWhite::conditionalBondPrice: T must be > t");
+
+    // Special case: at t≈0 the model reproduces the initial curve exactly
+    if (t < 1e-6)
+        return curve_.discountFactor(T);
+
+    double tau   = T - t;
+    double B_tT  = (1.0 - std::exp(-a_ * tau)) / a_;
+
+    // Instantaneous forward rate from the initial market curve at t
+    const double eps = 1e-5;
+    double t0 = std::max(t, eps);
+    double f0t = curve_.forwardRate(t0, t0 + eps);
+
+    // ln A(t,T) — deterministic part of the H-W bond price formula
+    double lnA = std::log(curve_.discountFactor(T) / curve_.discountFactor(t))
+               + B_tT * f0t
+               - (sigma_ * sigma_ / (4.0 * a_))
+                 * B_tT * B_tT * (1.0 - std::exp(-2.0 * a_ * t));
+
+    return std::exp(lnA - B_tT * r_t);
+}
+
 } // namespace qf::models
