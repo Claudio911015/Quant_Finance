@@ -15,6 +15,7 @@
 #include <qf/pricingengines/heston.hpp>
 #include <qf/instruments/iunderlying.hpp>
 #include <qf/models/hullwhite.hpp>
+#include <qf/instruments/swap.hpp>
 
 namespace py = pybind11;
 
@@ -204,4 +205,81 @@ PYBIND11_MODULE(qfpy, m) {
              py::arg("T"), py::arg("steps"), py::arg("seed") = 42)
         .def("conditional_bond_price", &qf::models::HullWhite::conditionalBondPrice,
              py::arg("t"), py::arg("T"), py::arg("r_t"));
+
+    // ── SwapType enum ─────────────────────────────────────────────────────
+    py::enum_<qf::instruments::SwapType>(m, "SwapType")
+        .value("Payer",    qf::instruments::SwapType::Payer)
+        .value("Receiver", qf::instruments::SwapType::Receiver)
+        .export_values();
+
+    // ── InterestRateSwap ───────────────────────────────────────────────────
+    py::class_<qf::instruments::InterestRateSwap>(m, "InterestRateSwap")
+        .def(py::init<double, double, double, double, qf::instruments::SwapType>(),
+             py::arg("notional"), py::arg("fixed_rate"),
+             py::arg("maturity"), py::arg("frequency"), py::arg("swap_type"),
+             "Vanilla fixed-for-floating IRS with uniform payment schedule.\n"
+             "swap_type: SwapType.Payer (pay fixed) or SwapType.Receiver (receive fixed).")
+        .def("npv",
+             static_cast<double (qf::instruments::InterestRateSwap::*)
+                         (const qf::core::MarketEnvironment&) const>(
+                 &qf::instruments::InterestRateSwap::npv),
+             py::arg("env"), "Net present value from the swap_type perspective.")
+        .def_static("par_rate",
+             static_cast<double (*)(double, double, const qf::core::MarketEnvironment&)>(
+                 &qf::instruments::InterestRateSwap::parRate),
+             py::arg("maturity"), py::arg("frequency"), py::arg("env"),
+             "Par (fair) fixed rate at which NPV = 0.")
+        .def_static("annuity",
+             static_cast<double (*)(double, double, const qf::core::MarketEnvironment&)>(
+                 &qf::instruments::InterestRateSwap::annuity),
+             py::arg("maturity"), py::arg("frequency"), py::arg("env"),
+             "Annuity (DV01 per unit notional) of the swap.");
+
+    // ── PeriodSpec ─────────────────────────────────────────────────────────
+    py::class_<qf::instruments::PeriodSpec>(m, "PeriodSpec")
+        .def(py::init([](double pay_time, double accrual_frac, double notional) {
+                 return qf::instruments::PeriodSpec{pay_time, accrual_frac, notional};
+             }),
+             py::arg("pay_time"), py::arg("accrual_frac"), py::arg("notional"),
+             "Single coupon period: pay_time in years, accrual_frac (τᵢ), notional.")
+        .def_readwrite("pay_time",     &qf::instruments::PeriodSpec::payTime)
+        .def_readwrite("accrual_frac", &qf::instruments::PeriodSpec::accrualFrac)
+        .def_readwrite("notional",     &qf::instruments::PeriodSpec::notional);
+
+    // ── ScheduledLeg ───────────────────────────────────────────────────────
+    py::class_<qf::instruments::ScheduledLeg>(m, "ScheduledLeg")
+        .def(py::init<double, bool, std::vector<qf::instruments::PeriodSpec>>(),
+             py::arg("fixed_rate"), py::arg("pays_fixed"), py::arg("schedule"),
+             "ScheduledLeg from explicit PeriodSpec list.\n"
+             "fixed_rate: coupon rate (ignored for floating legs).\n"
+             "pays_fixed: True = fixed coupon; False = floating (replication identity).")
+        .def_static("make_fixed",
+             &qf::instruments::ScheduledLeg::makeFixed,
+             py::arg("notional"), py::arg("fixed_rate"), py::arg("payment_times"),
+             "Build a fixed leg from payment times (accrual = year fractions).")
+        .def_static("make_floating",
+             &qf::instruments::ScheduledLeg::makeFloating,
+             py::arg("notional"), py::arg("spread"), py::arg("payment_times"),
+             "Build a floating leg from payment times.")
+        .def("calculate_pv",
+             &qf::instruments::ScheduledLeg::calculatePV,
+             py::arg("env"), "Present value of this leg.")
+        .def("schedule",
+             &qf::instruments::ScheduledLeg::schedule,
+             "Returns the list of PeriodSpec entries.");
+
+    // ── ScheduledSwap ──────────────────────────────────────────────────────
+    py::class_<qf::instruments::ScheduledSwap>(m, "ScheduledSwap")
+        .def(py::init<qf::instruments::ScheduledLeg,
+                      qf::instruments::ScheduledLeg>(),
+             py::arg("pay_leg"), py::arg("receive_leg"),
+             "ScheduledSwap: pay_leg = what you pay, receive_leg = what you receive.")
+        .def("npv",
+             &qf::instruments::ScheduledSwap::npv,
+             py::arg("env"), "Net present value: PV(receive) - PV(pay).")
+        .def("cash_flows",
+             &qf::instruments::ScheduledSwap::cashFlows,
+             py::arg("env"),
+             "Undiscounted net cash flows: list of (time, net_cf) sorted by time.\n"
+             "Positive = net receipt; negative = net payment.");
 }
