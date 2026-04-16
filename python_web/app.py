@@ -197,6 +197,11 @@ def bonds():
     return render_template('bonds.html')
 
 
+@app.route('/swaps')
+def swaps():
+    return render_template('swaps.html', active='swaps')
+
+
 @app.route('/api/bond', methods=['POST'])
 def api_bond():
     data = request.json or {}
@@ -227,6 +232,101 @@ def api_bond():
             'duration': bond.duration(curve),
             'convexity': bond.convexity(curve)
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/swap', methods=['POST'])
+def api_swap():
+    """Price an IRS or ScheduledSwap.
+
+    Request JSON (mode='regular'):
+    {
+        "mode": "regular",
+        "notional": 1000000,
+        "fixed_rate": 0.04,
+        "maturity": 5.0,
+        "frequency": 1.0,
+        "swap_type": "payer",
+        "curve_tenors": [1, 2, 3, 4, 5],
+        "curve_rates":  [0.04, 0.04, 0.04, 0.04, 0.04]
+    }
+
+    Request JSON (mode='scheduled'):
+    {
+        "mode": "scheduled",
+        "fixed_rate": 0.04,
+        "schedule": [
+            {"pay_time": 0.25, "accrual_frac": 0.25, "notional": 1000000},
+            ...
+        ],
+        "curve_tenors": [1, 2, 3, 4, 5],
+        "curve_rates":  [0.04, 0.04, 0.04, 0.04, 0.04]
+    }
+    """
+    data = request.get_json(force=True)
+    mode = data.get('mode', 'regular')
+
+    tenors = data.get('curve_tenors', [1, 2, 3, 5, 10])
+    rates  = data.get('curve_rates',  [0.04] * len(tenors))
+
+    try:
+        curve = qfpy.YieldCurve(tenors, rates, qfpy.InterpolationMethod.Linear)
+        env   = qfpy.MarketEnvironment(curve)
+
+        if mode == 'regular':
+            notional   = float(data['notional'])
+            fixed_rate = float(data['fixed_rate'])
+            maturity   = float(data['maturity'])
+            frequency  = float(data.get('frequency', 1.0))
+            st = qfpy.SwapType.Payer if data.get('swap_type', 'payer') == 'payer' \
+                 else qfpy.SwapType.Receiver
+
+            sw  = qfpy.InterestRateSwap(notional, fixed_rate, maturity, frequency, st)
+            npv = sw.npv(env)
+
+            # par rate
+            par = qfpy.InterestRateSwap.par_rate(maturity, frequency, env)
+
+            # DV01: bump fixed rate by 1bp and recompute
+            sw_bump = qfpy.InterestRateSwap(notional, fixed_rate + 1e-4, maturity, frequency, st)
+            dv01 = abs(sw_bump.npv(env) - npv)
+
+            # generate schedule for display
+            dt = 1.0 / frequency
+            n  = int(round(maturity * frequency))
+            schedule = [{'pay_time': round((i + 1) * dt, 6),
+                         'accrual_frac': round(dt, 6),
+                         'notional': notional} for i in range(n)]
+
+            return jsonify({
+                'npv': round(npv, 2),
+                'par_rate': round(par * 100, 4),
+                'dv01': round(dv01, 2),
+                'schedule': schedule,
+            })
+
+        elif mode == 'scheduled':
+            fixed_rate = float(data['fixed_rate'])
+            raw_sched  = data['schedule']
+            specs = [qfpy.PeriodSpec(p['pay_time'], p['accrual_frac'], p['notional'])
+                     for p in raw_sched]
+
+            fixed_leg = qfpy.ScheduledLeg(fixed_rate, True, specs)
+            float_leg = qfpy.ScheduledLeg(0.0, False, specs)
+
+            ssw = qfpy.ScheduledSwap(fixed_leg, float_leg)
+            npv = ssw.npv(env)
+            cfs = ssw.cash_flows(env)
+
+            return jsonify({
+                'npv': round(npv, 2),
+                'cash_flows': [{'t': round(t, 4), 'cf': round(cf, 2)} for t, cf in cfs],
+            })
+
+        else:
+            return jsonify({'error': f'Unknown mode: {mode}'}), 400
+
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
