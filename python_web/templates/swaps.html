@@ -8,8 +8,173 @@
         <p>IRS pricing and cash flow analysis powered by C++</p>
       </header>
 
-      <div class="panel">
-        <h3>Swap Parameters</h3>
-        <p style="color: var(--text-muted, #888);">Full UI coming in Task 5. Use the API endpoint directly at <code>/api/swap</code>.</p>
+      <!-- Mode toggle -->
+      <div class="controls-row" style="margin-bottom:1rem;">
+        <div class="toggle-group">
+          <span class="toggle-label">Mode</span>
+          <div class="toggle-buttons">
+            <label class="toggle-btn" id="lbl-regular">
+              <input type="radio" name="swapMode" value="regular" checked onchange="setMode('regular')">
+              <span>Regular IRS</span>
+            </label>
+            <label class="toggle-btn" id="lbl-scheduled">
+              <input type="radio" name="swapMode" value="scheduled" onchange="setMode('scheduled')">
+              <span>Custom Schedule</span>
+            </label>
+          </div>
+        </div>
       </div>
+
+      <!-- ── REGULAR MODE ── -->
+      <div id="section-regular">
+        <div class="panel" style="margin-bottom:1rem;">
+          <h3>Swap Parameters</h3>
+          <div class="grid">
+            <div class="field">
+              <label>Notional</label>
+              <input type="number" id="sw-notional" value="1000000" step="100000" min="1">
+            </div>
+            <div class="field">
+              <label>Fixed Rate (%)</label>
+              <input type="number" id="sw-fixed-rate" value="4.0" step="0.01" min="0">
+            </div>
+            <div class="field">
+              <label>Maturity (years)</label>
+              <input type="number" id="sw-maturity" value="5" step="0.25" min="0.25">
+            </div>
+            <div class="field">
+              <label>Frequency (per year)</label>
+              <input type="number" id="sw-frequency" value="1" step="1" min="1">
+            </div>
+            <div class="field field--select">
+              <label>Type</label>
+              <select id="sw-type">
+                <option value="payer">Payer (pay fixed)</option>
+                <option value="receiver">Receiver (receive fixed)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-bottom:1rem;">
+          <h3>Yield Curve</h3>
+          <p style="color:var(--muted);font-size:0.85rem;margin-top:0;">Enter zero rates (%) for each tenor (years).</p>
+          <table class="result-table" id="curve-table" style="max-width:360px;">
+            <thead><tr><th>Tenor (Y)</th><th>Zero Rate (%)</th></tr></thead>
+            <tbody id="curve-body">
+              <tr><td>1</td><td><input type="number" class="curve-rate" value="3.80" step="0.01"></td></tr>
+              <tr><td>2</td><td><input type="number" class="curve-rate" value="3.90" step="0.01"></td></tr>
+              <tr><td>3</td><td><input type="number" class="curve-rate" value="4.00" step="0.01"></td></tr>
+              <tr><td>5</td><td><input type="number" class="curve-rate" value="4.10" step="0.01"></td></tr>
+              <tr><td>10</td><td><input type="number" class="curve-rate" value="4.20" step="0.01"></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <button type="button" onclick="priceRegular()">
+          <span class="btn-text">Price Swap</span>
+          <span class="spinner" hidden></span>
+        </button>
+      </div>
+
+      <!-- ── SCHEDULED MODE ── -->
+      <div id="section-scheduled" style="display:none;">
+        <div class="panel" style="margin-bottom:1rem;">
+          <h3>Schedule Generator</h3>
+          <div class="grid">
+            <div class="field">
+              <label>Notional</label>
+              <input type="number" id="sched-notional" value="1000000" step="100000" min="1">
+            </div>
+            <div class="field">
+              <label>Fixed Rate (%)</label>
+              <input type="number" id="sched-fixed-rate" value="4.0" step="0.01" min="0">
+            </div>
+            <div class="field">
+              <label>First Pay Date (Y)</label>
+              <input type="number" id="sched-first-pay" value="0.5" step="0.25" min="0.01"
+                     title="Use a broken stub, e.g. 0.5 for a 6-month first period">
+            </div>
+            <div class="field">
+              <label>Frequency (per year)</label>
+              <input type="number" id="sched-freq" value="1" step="1" min="1">
+            </div>
+            <div class="field">
+              <label>Total Maturity (Y)</label>
+              <input type="number" id="sched-maturity" value="5.5" step="0.25" min="0.25">
+            </div>
+          </div>
+          <button type="button" class="btn-sm" onclick="generateSchedule()" style="margin-top:0.5rem;">Generate Schedule</button>
+        </div>
+
+        <div class="panel" style="margin-bottom:1rem;">
+          <h3>Payment Schedule <span style="font-size:0.8rem;color:var(--muted);">(editable)</span></h3>
+          <table class="result-table" id="sched-table">
+            <thead><tr><th>Pay Time (Y)</th><th>Accrual Frac</th><th>Notional</th></tr></thead>
+            <tbody id="sched-body"></tbody>
+          </table>
+          <button type="button" class="btn-sm" onclick="addScheduleRow()" style="margin-top:0.5rem;">+ Add Row</button>
+        </div>
+
+        <div class="panel" style="margin-bottom:1rem;">
+          <h3>Yield Curve</h3>
+          <table class="result-table" id="curve-table-s" style="max-width:360px;">
+            <thead><tr><th>Tenor (Y)</th><th>Zero Rate (%)</th></tr></thead>
+            <tbody id="curve-body-s">
+              <tr><td>1</td><td><input type="number" class="curve-rate-s" value="3.80" step="0.01"></td></tr>
+              <tr><td>2</td><td><input type="number" class="curve-rate-s" value="3.90" step="0.01"></td></tr>
+              <tr><td>3</td><td><input type="number" class="curve-rate-s" value="4.00" step="0.01"></td></tr>
+              <tr><td>5</td><td><input type="number" class="curve-rate-s" value="4.10" step="0.01"></td></tr>
+              <tr><td>10</td><td><input type="number" class="curve-rate-s" value="4.20" step="0.01"></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <button type="button" onclick="priceScheduled()">
+          <span class="btn-text">Price Scheduled Swap</span>
+          <span class="spinner" hidden></span>
+        </button>
+      </div>
+
+      <!-- ── ERROR BANNER ── -->
+      <div class="error-banner" id="sw-error-banner" hidden></div>
+
+      <!-- ── RESULTS ── -->
+      <div id="sw-results" style="display:none; margin-top:1.5rem;">
+        <div class="resultado">
+          <div class="result-grid result-grid--3" style="margin-bottom:1rem;">
+            <div class="metric-card">
+              <div class="metric-label">NPV</div>
+              <div class="metric-value" id="res-npv">—</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Par Rate</div>
+              <div class="metric-value" id="res-par">—</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">DV01</div>
+              <div class="metric-value" id="res-dv01">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:1rem;">
+          <h3>Net Cash Flows</h3>
+          <div id="cashflow-chart" class="chart-container"></div>
+        </div>
+
+        <div class="panel" style="margin-top:1rem;">
+          <h3>Payment Schedule</h3>
+          <table class="result-table" id="res-schedule-table">
+            <thead><tr><th>Pay Date (Y)</th><th>Accrual Frac</th><th>Notional</th></tr></thead>
+            <tbody id="res-schedule-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="foot">Calculations powered by C++ via qfpy</div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/swaps.js') }}"></script>
 {% endblock %}
