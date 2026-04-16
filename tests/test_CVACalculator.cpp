@@ -91,6 +91,24 @@ static std::vector<double> quarterlyDates(double maturity) {
     return d;
 }
 
+// ── Constructor validation ──────────────────────────────────────────────────
+
+TEST(CVACalculator, UnsortedDatesThrows) {
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.01, curve);
+    qf::xva::FlatHazardRate credit(0.02);
+    qf::xva::SimParams params{100, {5.0, 1.0, 2.0}, 42u}; // unsorted
+    EXPECT_THROW(qf::xva::CVACalculator(hw, credit, 0.6, params), std::invalid_argument);
+}
+
+TEST(CVACalculator, NonPositiveDateThrows) {
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.01, curve);
+    qf::xva::FlatHazardRate credit(0.02);
+    qf::xva::SimParams params{100, {-1.0, 1.0, 2.0}, 42u}; // negative first date
+    EXPECT_THROW(qf::xva::CVACalculator(hw, credit, 0.6, params), std::invalid_argument);
+}
+
 // ── TEST 1: Zero LGD → CVA == 0 ────────────────────────────────────────────
 
 TEST(CVACalculator, ZeroLGDGivesZeroCVA) {
@@ -147,5 +165,5 @@ TEST(CVACalculator, NettingReducesExposureToNearZero) {
     qf::core::MarketEnvironment env(curve);
     auto result = calc.compute(ns, env);
 
-    EXPECT_NEAR(result.cva, 0.0, 500.0); // tolerance for MC noise on near-zero EPE
+    EXPECT_NEAR(result.cva, 0.0, 1e-6); // payer+receiver cancel exactly at every path
 }

@@ -12,11 +12,21 @@ namespace py = pybind11;
 using namespace qf::xva;
 using namespace qf::instruments;
 
+// ── Trampoline so Python subclasses can override survivalProbability ──────
+class PyICreditCurve : public ICreditCurve {
+public:
+    using ICreditCurve::ICreditCurve;
+    double survivalProbability(double t) const override {
+        PYBIND11_OVERRIDE_PURE(double, ICreditCurve, survivalProbability, t);
+    }
+};
+
 PYBIND11_MODULE(qfxva, m) {
     m.doc() = "qf::xva — CVA calculator Python bindings";
 
-    // ── ICreditCurve (abstract base) ──────────────────────────────
-    py::class_<ICreditCurve>(m, "ICreditCurve")
+    // ── ICreditCurve (abstract base — subclassable from Python) ──────────
+    py::class_<ICreditCurve, PyICreditCurve>(m, "ICreditCurve")
+        .def(py::init<>())
         .def("survival_probability", &ICreditCurve::survivalProbability, py::arg("t"));
 
     // ── FlatHazardRate ────────────────────────────────────────────

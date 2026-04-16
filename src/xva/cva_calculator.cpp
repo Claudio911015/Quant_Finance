@@ -20,6 +20,10 @@ CVACalculator::CVACalculator(const qf::models::HullWhite& hw,
         throw std::invalid_argument("CVACalculator: monitorDates must not be empty");
     if (params_.nPaths == 0)
         throw std::invalid_argument("CVACalculator: nPaths must be > 0");
+    if (params_.monitorDates.front() <= 0.0)
+        throw std::invalid_argument("CVACalculator: all monitorDates must be positive");
+    if (!std::is_sorted(params_.monitorDates.begin(), params_.monitorDates.end()))
+        throw std::invalid_argument("CVACalculator: monitorDates must be sorted ascending");
 }
 
 CVAResult CVACalculator::compute(const NettingSet& ns,
