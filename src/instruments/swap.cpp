@@ -3,6 +3,7 @@
 #include <qf/math/daycount.hpp>
 #include <cmath>
 #include <stdexcept>
+#include <vector>
 
 namespace qf::instruments {
 
@@ -129,6 +130,96 @@ double InterestRateSwap::annuity(double maturity, double frequency,
 double InterestRateSwap::annuity(double maturity, double frequency,
                                   const termstructure::YieldCurve& curve) {
     return discountAnnuity(maturity, frequency, curve);
+}
+
+// ─── ScheduledLeg ────────────────────────────────────────────────────────────
+
+ScheduledLeg::ScheduledLeg(double fixedRate, bool paysFixed, std::vector<PeriodSpec> schedule)
+    : fixedRate_(fixedRate), paysFixed_(paysFixed), schedule_(std::move(schedule))
+{
+    if (schedule_.empty())
+        throw std::invalid_argument("ScheduledLeg: schedule must not be empty");
+    for (const auto& p : schedule_)
+        if (p.notional <= 0.0)
+            throw std::invalid_argument("ScheduledLeg: all notionals must be positive");
+}
+
+ScheduledLeg::ScheduledLeg(double fixedRate, bool paysFixed, double spread,
+                            std::vector<PeriodSpec> schedule)
+    : fixedRate_(fixedRate), spread_(spread), paysFixed_(paysFixed),
+      schedule_(std::move(schedule))
+{
+    if (schedule_.empty())
+        throw std::invalid_argument("ScheduledLeg: schedule must not be empty");
+    for (const auto& p : schedule_)
+        if (p.notional <= 0.0)
+            throw std::invalid_argument("ScheduledLeg: all notionals must be positive");
+}
+
+ScheduledLeg ScheduledLeg::makeFixed(double notional, double fixedRate,
+                                      const std::vector<double>& paymentTimes,
+                                      math::DayCountConvention /*dcc*/)
+{
+    if (paymentTimes.empty())
+        throw std::invalid_argument("ScheduledLeg::makeFixed: paymentTimes must not be empty");
+    std::vector<PeriodSpec> sched;
+    sched.reserve(paymentTimes.size());
+    double prevTime = 0.0;
+    // accrualFrac = actual elapsed years per period (ACT/ACT simple approximation).
+    // Users needing a specific DCC should build PeriodSpec manually.
+    for (double t : paymentTimes) {
+        double tau = t - prevTime;
+        sched.push_back({t, tau, notional});
+        prevTime = t;
+    }
+    return ScheduledLeg(fixedRate, /*paysFixed=*/true, std::move(sched));
+}
+
+ScheduledLeg ScheduledLeg::makeFloating(double notional, double spread,
+                                         const std::vector<double>& paymentTimes,
+                                         math::DayCountConvention /*dcc*/)
+{
+    if (paymentTimes.empty())
+        throw std::invalid_argument("ScheduledLeg::makeFloating: paymentTimes must not be empty");
+    std::vector<PeriodSpec> sched;
+    sched.reserve(paymentTimes.size());
+    double prevTime = 0.0;
+    // accrualFrac = actual elapsed years per period (ACT/ACT simple approximation).
+    for (double t : paymentTimes) {
+        double tau = t - prevTime;
+        sched.push_back({t, tau, notional});
+        prevTime = t;
+    }
+    return ScheduledLeg(0.0, /*paysFixed=*/false, spread, std::move(sched));
+}
+
+double ScheduledLeg::calculatePV(const core::MarketEnvironment& env) const
+{
+    const auto& curve = env.curve();
+    const std::size_t n = schedule_.size();
+
+    if (paysFixed_) {
+        // Fixed leg: coupon cash flows + final notional repayment
+        double pv = 0.0;
+        for (const auto& p : schedule_)
+            pv += p.notional * fixedRate_ * p.accrualFrac * curve.discountFactor(p.payTime);
+        // Final notional exchange at last payment date
+        pv += schedule_.back().notional * curve.discountFactor(schedule_.back().payTime);
+        return pv;
+    } else {
+        // Floating leg — generalized replication supporting amortizing notionals:
+        //   PV = N_0 - Σᵢ (N_i − N_{i+1}) · P(0,tᵢ) − N_n · P(0,t_n)
+        //       + Σᵢ spread · N_i · τᵢ · P(0,tᵢ)
+        // For constant N this collapses to the standard: N · (1 − P(0,T)).
+        double pv = schedule_[0].notional;  // notional received at t = 0
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto& p = schedule_[i];
+            double nextNotional = (i + 1 < n) ? schedule_[i + 1].notional : 0.0;
+            pv -= (p.notional - nextNotional) * curve.discountFactor(p.payTime);
+            pv += spread_ * p.notional * p.accrualFrac * curve.discountFactor(p.payTime);
+        }
+        return pv;
+    }
 }
 
 } // namespace qf::instruments

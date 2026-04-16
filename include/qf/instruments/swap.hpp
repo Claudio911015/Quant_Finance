@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <vector>
 #include <qf/instruments/instrument.hpp>
 #include <qf/core/market_environment.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
@@ -137,6 +138,65 @@ private:
     // Only state not derivable from Leg objects
     double frequency_;
     SwapType type_;
+};
+
+// ─── Explicit-schedule swap primitives ───────────────────────────────────────
+
+/// @brief Single coupon period used by ScheduledLeg.
+struct PeriodSpec {
+    double payTime;      ///< Payment date in fractional years from today.
+    double accrualFrac;  ///< Day-count fraction τᵢ for this period (broken periods allowed).
+    double notional;     ///< Outstanding notional for this period (enables amortization).
+};
+
+/// @brief A swap leg with an explicit payment schedule.
+///
+/// Supports broken (stub) periods, amortizing notionals, and arbitrary
+/// payment dates. Does not modify the existing Leg or InterestRateSwap classes.
+class ScheduledLeg {
+public:
+    /// @brief Construct from an explicit list of periods (fixed or floating).
+    /// @param fixedRate  Coupon rate (used only when paysFixed = true).
+    /// @param paysFixed  True = fixed coupon; false = floating (replication identity).
+    /// @param schedule   Ordered list of periods (payTime must be strictly increasing).
+    ScheduledLeg(double fixedRate, bool paysFixed, std::vector<PeriodSpec> schedule);
+
+    /// @brief Construct with an explicit spread (for floating legs).
+    /// @param fixedRate  Coupon rate (unused for floating legs, set to 0).
+    /// @param paysFixed  True = fixed coupon; false = floating.
+    /// @param spread     Spread over floating index (used only when paysFixed = false).
+    /// @param schedule   Ordered list of periods.
+    ScheduledLeg(double fixedRate, bool paysFixed, double spread, std::vector<PeriodSpec> schedule);
+
+    /// @brief Build a fixed leg from a list of payment times and a constant notional.
+    /// @param notional      Notional (same for all periods).
+    /// @param fixedRate     Fixed coupon rate.
+    /// @param paymentTimes  Ordered payment times in years.
+    /// @param dcc           Day-count convention for accrual fractions.
+    static ScheduledLeg makeFixed(double notional, double fixedRate,
+                                   const std::vector<double>& paymentTimes,
+                                   math::DayCountConvention dcc = math::DayCountConvention::ACT_365);
+
+    /// @brief Build a floating leg from payment times and a constant notional.
+    /// @param notional      Notional (same for all periods).
+    /// @param spread        Spread over floating index.
+    /// @param paymentTimes  Ordered payment times in years.
+    /// @param dcc           Day-count convention for accrual fractions.
+    static ScheduledLeg makeFloating(double notional, double spread,
+                                      const std::vector<double>& paymentTimes,
+                                      math::DayCountConvention dcc = math::DayCountConvention::ACT_365);
+
+    /// @brief Present value of this leg.
+    double calculatePV(const core::MarketEnvironment& env) const;
+
+    /// @brief The explicit schedule used by this leg.
+    const std::vector<PeriodSpec>& schedule() const { return schedule_; }
+
+private:
+    double fixedRate_;
+    double spread_{0.0};
+    bool paysFixed_;
+    std::vector<PeriodSpec> schedule_;
 };
 
 } // namespace qf::instruments

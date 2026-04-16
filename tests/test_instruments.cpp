@@ -214,3 +214,76 @@ TEST(Swap, LegAndSwapPV) {
     EXPECT_NEAR(swap.npv(curve), expected, 1e-8);
     EXPECT_NEAR(swap.pv(curve), expected, 1e-8);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ScheduledLeg tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(ScheduledLeg, RegularEqualsIRS) {
+    // 5Y annual fixed leg at 4% on flat 4% curve.
+    // ScheduledLeg::calculatePV (fixed) includes coupon CFs + final notional.
+    // Leg::calculatePV (fixed) does the same — compare them directly.
+    YieldCurve curve({0.5,1,2,3,4,5}, {0.04,0.04,0.04,0.04,0.04,0.04});
+    qf::core::MarketEnvironment env(curve);
+
+    // Reference: Leg fixed PV (includes notional at maturity, ACT/365 → tau=1.0 annual)
+    Leg ref("USD", DayCountConvention::ACT_365, 1e6, 5.0, 0.04, 0.0, false, 1.0);
+    double ref_pv = ref.calculatePV(env);
+
+    // ScheduledLeg with same regular schedule (tau = 1.0 per annual period)
+    std::vector<double> times = {1.0, 2.0, 3.0, 4.0, 5.0};
+    ScheduledLeg leg = ScheduledLeg::makeFixed(1e6, 0.04, times);
+    double scheduled_pv = leg.calculatePV(env);
+
+    EXPECT_NEAR(scheduled_pv, ref_pv, 1.0); // within $1
+}
+
+TEST(ScheduledLeg, BrokenFirstPeriod) {
+    // First period 0.25Y (broken stub), then 5 full annual periods → total 5.25Y
+    YieldCurve curve({0.5,1,2,3,4,5,6}, {0.04,0.04,0.04,0.04,0.04,0.04,0.04});
+    qf::core::MarketEnvironment env(curve);
+
+    // Explicit schedule with broken first period
+    std::vector<PeriodSpec> sched = {
+        {0.25, 0.25, 1e6},   // broken: 3-month stub
+        {1.25, 1.0,  1e6},
+        {2.25, 1.0,  1e6},
+        {3.25, 1.0,  1e6},
+        {4.25, 1.0,  1e6},
+        {5.25, 1.0,  1e6},
+    };
+    ScheduledLeg leg(0.04, /*paysFixed=*/true, sched);
+    double pv = leg.calculatePV(env);
+
+    // PV should be positive (fixed leg value) and roughly near par on flat curve
+    EXPECT_GT(pv, 0.0);
+    EXPECT_NEAR(pv / 1e6, 1.0, 0.05);  // should be close to 1 (notional value ≈ par)
+}
+
+TEST(ScheduledLeg, Amortizing) {
+    // Notional steps down 20% per year: 1M, 800k, 600k, 400k, 200k
+    YieldCurve curve({1,2,3,4,5}, {0.04,0.04,0.04,0.04,0.04});
+    qf::core::MarketEnvironment env(curve);
+
+    std::vector<PeriodSpec> sched = {
+        {1.0, 1.0, 1e6},
+        {2.0, 1.0, 8e5},
+        {3.0, 1.0, 6e5},
+        {4.0, 1.0, 4e5},
+        {5.0, 1.0, 2e5},
+    };
+    ScheduledLeg fixed_leg(0.04, /*paysFixed=*/true, sched);
+    double pv = fixed_leg.calculatePV(env);
+
+    // Manual check: PV = Σᵢ Nᵢ×K×τᵢ×P(0,tᵢ) + N_last×P(0,T)
+    double expected = 0.0;
+    double K = 0.04;
+    std::vector<double> notionals = {1e6, 8e5, 6e5, 4e5, 2e5};
+    for (int i = 0; i < 5; ++i) {
+        double t = i + 1.0;
+        expected += notionals[i] * K * 1.0 * curve.discountFactor(t);
+    }
+    expected += notionals[4] * curve.discountFactor(5.0);  // final notional
+
+    EXPECT_NEAR(pv, expected, 1.0);  // within $1
+}
