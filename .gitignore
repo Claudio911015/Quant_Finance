@@ -28,3 +28,14 @@ docs/doxygen/html/
 # OS
 .DS_Store
 Thumbs.db
+
+# Graphify
+graphify-out/
+graphify
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Misc generated
+sys
