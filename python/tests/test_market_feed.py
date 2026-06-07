@@ -229,3 +229,155 @@ def test_builder_manual_spot_overrides_fetched(monkeypatch):
         .build(verbose=False)
     )
     assert env.spot("MSFT") == pytest.approx(999.0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests para fetch_equity — casos edge de la mejora de robustez
+# ─────────────────────────────────────────────────────────────────────────────
+
+from market_feed import fetch_equity  # noqa: E402
+import numpy as np  # noqa: E402 (ya importado arriba, pero explícito para claridad)
+
+
+def _make_ticker_mock(spot_val, options=(), option_chain_side_effect=None):
+    """Crea un mock de yf.Ticker con spot y opciones configurables."""
+    tk = MagicMock()
+    tk.fast_info.previous_close = spot_val
+    tk.options = options
+    if option_chain_side_effect is not None:
+        tk.option_chain.side_effect = option_chain_side_effect
+    return tk
+
+
+def test_fetch_equity_uses_hv30_when_no_options():
+    """Si no hay opciones disponibles, usa HV30 como vol."""
+    import pandas as pd
+
+    tk_mock = _make_ticker_mock(spot_val=150.0, options=())
+
+    # Datos históricos suficientes para calcular HV30
+    dates = pd.date_range("2026-01-01", periods=40, freq="B")
+    prices = 150.0 * np.exp(np.cumsum(np.random.default_rng(42).normal(0, 0.01, 40)))
+    hist_df = pd.DataFrame({"Close": prices}, index=dates)
+
+    with patch("market_feed.yf.Ticker", return_value=tk_mock), \
+         patch("market_feed.yf.download", return_value=hist_df):
+        spot, iv = fetch_equity("FAKE")
+
+    assert spot == pytest.approx(150.0)
+    assert iv > 0.0
+    assert not np.isnan(iv)
+
+
+def test_fetch_equity_raises_when_hv30_hist_empty():
+    """Si el hist para HV30 está vacío, RuntimeError claro."""
+    import pandas as pd
+
+    tk_mock = _make_ticker_mock(spot_val=100.0, options=())
+    empty_hist = pd.DataFrame()
+
+    with patch("market_feed.yf.Ticker", return_value=tk_mock), \
+         patch("market_feed.yf.download", return_value=empty_hist):
+        with pytest.raises(RuntimeError, match="sin datos históricos"):
+            fetch_equity("FAKE")
+
+
+def test_fetch_equity_raises_when_hv30_insufficient_rows():
+    """Si el hist tiene solo 1 fila, no se puede calcular retorno — RuntimeError."""
+    import pandas as pd
+
+    tk_mock = _make_ticker_mock(spot_val=100.0, options=())
+    single_row = pd.DataFrame({"Close": [100.0]},
+                              index=pd.DatetimeIndex(["2026-06-06"]))
+
+    with patch("market_feed.yf.Ticker", return_value=tk_mock), \
+         patch("market_feed.yf.download", return_value=single_row):
+        with pytest.raises(RuntimeError, match="insuficientes"):
+            fetch_equity("FAKE")
+
+
+def test_fetch_equity_option_chain_empty_falls_back_to_hv30():
+    """Chain con DataFrames vacíos → advertencia + fallback a HV30."""
+    import pandas as pd
+
+    # Chain vacío
+    empty_calls = pd.DataFrame(columns=["strike", "impliedVolatility"])
+    empty_puts  = pd.DataFrame(columns=["strike", "impliedVolatility"])
+    chain_mock = MagicMock()
+    chain_mock.calls = empty_calls
+    chain_mock.puts  = empty_puts
+
+    tk_mock = _make_ticker_mock(spot_val=200.0, options=("2026-07-18",))
+    tk_mock.option_chain.return_value = chain_mock
+
+    dates = pd.date_range("2026-01-01", periods=40, freq="B")
+    prices = 200.0 * np.exp(np.cumsum(np.random.default_rng(7).normal(0, 0.01, 40)))
+    hist_df = pd.DataFrame({"Close": prices}, index=dates)
+
+    with patch("market_feed.yf.Ticker", return_value=tk_mock), \
+         patch("market_feed.yf.download", return_value=hist_df):
+        spot, iv = fetch_equity("FAKE")
+
+    assert spot == pytest.approx(200.0)
+    assert iv > 0.0
+
+
+def test_fetch_equity_option_iv_nan_falls_back_to_hv30():
+    """IV NaN en el chain → fallback a HV30 en lugar de devolver NaN."""
+    import pandas as pd
+
+    calls = pd.DataFrame({"strike": [200.0], "impliedVolatility": [float("nan")]})
+    puts  = pd.DataFrame({"strike": [200.0], "impliedVolatility": [float("nan")]})
+    chain_mock = MagicMock()
+    chain_mock.calls = calls
+    chain_mock.puts  = puts
+
+    tk_mock = _make_ticker_mock(spot_val=200.0, options=("2026-07-18",))
+    tk_mock.option_chain.return_value = chain_mock
+
+    dates = pd.date_range("2026-01-01", periods=40, freq="B")
+    prices = 200.0 * np.exp(np.cumsum(np.random.default_rng(13).normal(0, 0.01, 40)))
+    hist_df = pd.DataFrame({"Close": prices}, index=dates)
+
+    with patch("market_feed.yf.Ticker", return_value=tk_mock), \
+         patch("market_feed.yf.download", return_value=hist_df):
+        spot, iv = fetch_equity("FAKE")
+
+    assert spot == pytest.approx(200.0)
+    assert iv > 0.0
+    assert not np.isnan(iv)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test: YF curve no contiene el ticker 2Y incorrecto
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_treasury_tickers_no_duplicate_tyх():
+    """^TYX no debe aparecer en dos maturities distintas (bug anterior: 2Y y 30Y)."""
+    from market_feed import _TREASURY_TICKERS
+    ticker_vals = list(_TREASURY_TICKERS.values())
+    # Todos los tickers deben ser únicos (no más de 1 entrada por ticker)
+    assert len(ticker_vals) == len(set(ticker_vals)), \
+        f"Tickers duplicados en _TREASURY_TICKERS: {ticker_vals}"
+
+
+def test_fred_url_uses_observation_params():
+    """La URL de FRED debe usar observation_start/end, no vintage_date."""
+    captured_urls = []
+
+    def fake_get(url, **kwargs):
+        captured_urls.append(url)
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.text = "DATE,VALUE\n2026-06-06,4.50"
+        return mock_resp
+
+    with patch("market_feed.requests.get", side_effect=fake_get):
+        market_feed.fetch_treasury_curve_fred()
+
+    assert len(captured_urls) > 0, "No se hizo ninguna llamada a requests.get"
+    for url in captured_urls:
+        assert "vintage_date" not in url, \
+            f"URL usa vintage_date (parámetro incorrecto): {url}"
+        assert "observation_start" in url, \
+            f"URL no contiene observation_start: {url}"
