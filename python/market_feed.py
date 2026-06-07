@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import yfinance as yf
 import requests
 
@@ -36,9 +37,10 @@ import qfpy                                          # noqa: E402  (local C++ ex
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Tickers de Yahoo Finance para Treasury yields (en porcentaje anual)
+# Nota: Yahoo Finance no publica un ticker de 2Y; se omite para evitar
+# que ^TYX (30Y) quede mapeado a la maturity incorrecta.
 _TREASURY_TICKERS = {
     0.25:  "^IRX",   # 13-week T-Bill
-    2.0:   "^TYX",   # proxy; YF no tiene 2Y directamente
     5.0:   "^FVX",   # 5-year
     10.0:  "^TNX",   # 10-year
     30.0:  "^TYX",   # 30-year
@@ -115,7 +117,9 @@ def fetch_treasury_curve_fred() -> qfpy.YieldCurve:
     maturities, rates = [], []
     for T, series in sorted(_FRED_SERIES.items()):
         try:
-            url = f"{base_url}?id={series}&vintage_date={today}"
+            # Parámetros correctos del endpoint CSV de FRED: observation_start/end
+            url = (f"{base_url}?id={series}"
+                   f"&observation_start={start}&observation_end={today}")
             resp = requests.get(url, timeout=10)
             resp.raise_for_status()
             lines = [l for l in resp.text.strip().split("\n") if not l.startswith("DATE")]
@@ -183,22 +187,52 @@ def fetch_equity(ticker: str,
             calls = chain.calls
             puts  = chain.puts
 
+            # Guard: chain vacío o sin datos de IV
+            if calls.empty or puts.empty:
+                raise ValueError("option chain vacío")
+
             # ATM = strike más cercano al spot
             atm_call = calls.iloc[(calls["strike"] - spot).abs().argsort()[:1]]
             atm_put  = puts.iloc[(puts["strike"] - spot).abs().argsort()[:1]]
 
+            if atm_call.empty or atm_put.empty:
+                raise ValueError("no se encontró strike ATM")
+
             iv_c = float(atm_call["impliedVolatility"].values[0])
             iv_p = float(atm_put["impliedVolatility"].values[0])
+
+            # Guard: IV puede ser NaN si Yahoo no la reporta
+            if np.isnan(iv_c) or np.isnan(iv_p):
+                raise ValueError(f"IV NaN en chain ({iv_c=}, {iv_p=})")
+
             iv = (iv_c + iv_p) / 2.0
     except Exception as e:
         warnings.warn(f"{ticker}: no se pudo obtener IV de opciones ({e}), usando HV30")
 
     # Fallback: volatilidad histórica de 30 días
-    if iv is None or iv <= 0.0:
+    if iv is None or iv <= 0.0 or np.isnan(iv):
         hist = yf.download(ticker, period="60d", progress=False, auto_adjust=True)
-        close = hist["Close"].squeeze()   # yfinance 1.x MultiIndex → Series
+        if hist.empty:
+            raise RuntimeError(
+                f"fetch_equity: sin datos históricos para calcular HV30 de {ticker}"
+            )
+        close_raw = hist["Close"].squeeze()   # yfinance 1.x MultiIndex → Series
+        # squeeze() sobre 1 fila devuelve float64 escalar; necesitamos Series
+        if not isinstance(close_raw, pd.Series):
+            close_raw = pd.Series([close_raw])
+        close = close_raw.dropna()
+        if len(close) < 2:
+            raise RuntimeError(
+                f"fetch_equity: datos históricos insuficientes para HV30 de {ticker} "
+                f"({len(close)} observaciones)"
+            )
         log_ret = np.log(close / close.shift(1)).dropna()
-        iv = float(log_ret.std() * np.sqrt(252))
+        hv = float(log_ret.std() * np.sqrt(252))
+        if np.isnan(hv) or hv <= 0.0:
+            raise RuntimeError(
+                f"fetch_equity: HV30 inválida ({hv}) para {ticker}"
+            )
+        iv = hv
 
     return float(spot), float(iv)
 
