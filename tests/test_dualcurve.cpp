@@ -79,6 +79,40 @@ TEST(DualCurve, DefaultKeysReplicateReplicationIdentity) {
     EXPECT_NEAR(irs.npv(env), floatLeg - fixedLeg, 1e-6);
 }
 
+TEST(DualCurve, KeyEqualMatchesSingleCurveForFractionalMaturities) {
+    // Regression: the dual floating loop once used round(mat·freq) periods while the fixed
+    // annuity / par rate truncated, so on a NON-period-aligned maturity the dual NPV
+    // diverged from the single-curve NPV (~44% at mat=4.75) instead of matching to ~1e-13.
+    // The projection grid now ends exactly at `mat`, so equivalence holds for any maturity.
+    MarketEnvironment env(oisCurve());
+    env.addCurve("USD.OIS", oisCurve());
+    env.addCurve("USD.3M", oisCurve());   // identical data ⇒ zero basis
+
+    for (double mat : {0.4, 4.6, 4.75, 7.3}) {
+        InterestRateSwap single(1'000'000, 0.035, mat, 2.0, SwapType::Payer);
+        InterestRateSwap dual  (1'000'000, 0.035, mat, 2.0, SwapType::Payer,
+                                CurveKeys{"USD.OIS", "USD.3M"});
+        EXPECT_NEAR(dual.npv(env), single.npv(env),
+                    std::abs(single.npv(env)) * 1e-11 + 1e-6)
+            << "mat=" << mat;
+    }
+}
+
+TEST(DualCurve, DualParRateZeroesDualNpvForFractionalMaturity) {
+    // A swap struck at the dual par rate must have ~zero dual NPV — even off the period
+    // grid. This pins the npv/parRate period-count consistency (they share one grid and
+    // one discount annuity).
+    MarketEnvironment env = makeEnv(25.0);   // real 25 bp basis, keys differ
+    const CurveKeys keys{"USD.OIS", "USD.3M"};
+    for (double mat : {4.6, 4.75, 7.3}) {
+        const double par = InterestRateSwap::parRate(mat, 2.0, env, "USD.OIS", "USD.3M");
+        InterestRateSwap atPar(1'000'000, par, mat, 2.0, SwapType::Payer, keys);
+        // Scale tolerance by a representative leg magnitude, not the (near-zero) NPV.
+        const double annuityScale = 1'000'000 * InterestRateSwap::annuity(mat, 2.0, env, "USD.OIS");
+        EXPECT_NEAR(atPar.npv(env), 0.0, annuityScale * 1e-10) << "mat=" << mat;
+    }
+}
+
 // ─── P5a: InterestRateSwap::calculatePV wart fix ──────────────────────────────
 
 TEST(DualCurve, InstrumentPvEqualsEconomicNpv_Payer) {

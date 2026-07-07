@@ -30,6 +30,33 @@ static double discountAnnuity(double maturity, double frequency,
     return sum;
 }
 
+/// @brief Floating-leg projection grid: regular dt-spaced dates plus an exact-maturity end.
+///
+/// Returns the payment times {dt, 2dt, …, ⌊mat·freq⌋·dt} and, when the regular grid stops
+/// short of @p maturity (a fractional maturity), a final (stub) date placed exactly at
+/// @p maturity. Placing the last date at @p maturity is what makes the dual-curve floating
+/// sum telescope back to the single-curve replication identity `N·(1 − P(0, maturity))`
+/// when projection == discount: with identical curves,
+///   Σ (P(t_{i-1}) − P(t_i)) = 1 − P(t_last) = 1 − P(maturity).
+/// The dual `npv` floating loop and the dual `parRate` numerator MUST share this grid so
+/// that (a) they agree with the single-curve path to ~1e-13 on identical curves and
+/// (b) a swap struck at the dual par rate has zero dual NPV — neither holds if one path
+/// truncates (⌊·⌋) while the other rounds. See swap.cpp review notes.
+static std::vector<double> projectionPayTimes(double maturity, double frequency)
+{
+    const double dt = 1.0 / frequency;
+    const int    n  = static_cast<int>(maturity * frequency);  // full regular periods (⌊·⌋)
+    std::vector<double> times;
+    times.reserve(static_cast<std::size_t>(n) + 1);
+    for (int i = 1; i <= n; ++i)
+        times.push_back(i * dt);
+    // Append the exact maturity when the regular grid ended before it (stub period). The
+    // 1e-9 guard avoids a duplicate near-zero-length period on period-aligned maturities.
+    if (times.empty() || maturity - times.back() > 1e-9)
+        times.push_back(maturity);
+    return times;
+}
+
 namespace {
 
 /// Undiscounted coupon cash flow for period @p i of a ScheduledLeg.
@@ -136,18 +163,19 @@ double InterestRateSwap::npv(const core::MarketEnvironment& env) const {
     } else {
         // Dual-curve: project forwards off the projection curve, discount off the
         // discount curve — Σ N·(P_proj(t_{i-1})/P_proj(tᵢ) − 1)·P_dis(tᵢ). Spread is
-        // zero for a vanilla IRS. When both curves carry the same pillar data this
-        // telescopes back to N·(1 − P(0,T)), matching the replication path to ~1e-13.
+        // zero for a vanilla IRS. The payment grid ends exactly at `mat` (see
+        // projectionPayTimes), so when both curves carry the same pillar data this
+        // telescopes back to N·(1 − P(0,mat)), matching the replication path to ~1e-13 —
+        // including for fractional maturities. The running P_proj(t_{i-1}) is carried
+        // across iterations so the (possibly stub) final period is handled correctly.
         const auto& projCurve = env.curve(keys_.projectionKey);
-        const double dt = 1.0 / frequency_;
-        const int    n  = static_cast<int>(std::round(mat * frequency_));
         floatingLeg = 0.0;
-        for (int i = 1; i <= n; ++i) {
-            const double t     = i * dt;
-            const double tPrev = (i - 1) * dt;
-            const double Pprev = (i == 1) ? 1.0 : projCurve.discountFactor(tPrev);
-            const double fwd   = Pprev / projCurve.discountFactor(t) - 1.0;
+        double Pprev = 1.0;                       // P_proj(0) = 1
+        for (double t : projectionPayTimes(mat, frequency_)) {
+            const double Pcur = projCurve.discountFactor(t);
+            const double fwd  = Pprev / Pcur - 1.0;
             floatingLeg += notional * fwd * discCurve.discountFactor(t);
+            Pprev = Pcur;
         }
     }
 
@@ -206,21 +234,20 @@ double InterestRateSwap::parRate(double maturity, double frequency,
 
     const auto& disc = env.curve(discountKey);
     const auto& proj = env.curve(projectionKey);
-    const double dt = 1.0 / frequency;
-    const int nPayments = static_cast<int>(maturity * frequency);
 
-    double floatPV    = 0.0;   // Σ fwd_proj · P_dis
-    double annuitySum = 0.0;   // Σ dt · P_dis
-    for (int i = 1; i <= nPayments; ++i) {
-        const double t     = i * dt;
-        const double tPrev = (i - 1) * dt;
-        const double Pprev = (i == 1) ? 1.0 : proj.discountFactor(tPrev);
-        const double fwd   = Pprev / proj.discountFactor(t) - 1.0;
-        const double Pdis  = disc.discountFactor(t);
-        floatPV    += fwd * Pdis;
-        annuitySum += dt * Pdis;
+    // Floating PV per unit notional on EXACTLY the grid npv() uses (last date = maturity),
+    // so parRate is the K that zeroes the dual npv: npv = N·floatPV − K·N·discountAnnuity.
+    double floatPV = 0.0;      // Σ fwd_proj · P_dis
+    double Pprev   = 1.0;      // P_proj(0) = 1
+    for (double t : projectionPayTimes(maturity, frequency)) {
+        const double Pcur = proj.discountFactor(t);
+        const double fwd  = Pprev / Pcur - 1.0;
+        floatPV += fwd * disc.discountFactor(t);
+        Pprev = Pcur;
     }
-    return floatPV / annuitySum;
+    // Denominator is the SAME discount annuity the fixed leg uses in npv(), so a swap
+    // struck at this par rate has zero dual NPV to machine precision (consistency fix).
+    return floatPV / discountAnnuity(maturity, frequency, disc);
 }
 
 double InterestRateSwap::annuity(double maturity, double frequency,

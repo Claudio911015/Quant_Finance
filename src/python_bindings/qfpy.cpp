@@ -418,8 +418,12 @@ PYBIND11_MODULE(qfpy, m) {
                  &qf::instruments::InterestRateSwap::npv),
              py::arg("env"), "Net present value from the swap_type perspective.")
         .def("curve_keys", &qf::instruments::InterestRateSwap::curveKeys,
-             py::return_value_policy::reference_internal,
-             "The discount/projection curve keys this swap prices against.")
+             // COPY, not reference_internal: CurveKeys fields are def_readwrite, and pybind
+             // drops the C++ const, so a reference would let Python mutate the swap's
+             // internal pricing keys (swap.curve_keys().projection_key = ... silently
+             // repoints the mark). A copy of two small strings is cheap and safe.
+             py::return_value_policy::copy,
+             "The discount/projection curve keys this swap prices against (a copy).")
         .def_static("par_rate",
              static_cast<double (*)(double, double, const qf::core::MarketEnvironment&)>(
                  &qf::instruments::InterestRateSwap::parRate),
@@ -484,8 +488,10 @@ PYBIND11_MODULE(qfpy, m) {
              &qf::instruments::ScheduledLeg::calculatePV,
              py::arg("env"), "Present value of this leg.")
         .def("curve_keys", &qf::instruments::ScheduledLeg::curveKeys,
-             py::return_value_policy::reference_internal,
-             "The discount/projection curve keys this leg prices against.")
+             // COPY, not reference_internal — see InterestRateSwap.curve_keys above:
+             // def_readwrite fields + dropped const would let Python mutate internal keys.
+             py::return_value_policy::copy,
+             "The discount/projection curve keys this leg prices against (a copy).")
         .def("schedule",
              &qf::instruments::ScheduledLeg::schedule,
              "Returns the list of PeriodSpec entries.");

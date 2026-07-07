@@ -207,3 +207,51 @@ are deliberately **out of scope** and must not be mistaken for shipped capabilit
 
 **Roadmap-drift check:** nothing shipped in P2–P4 touched swap pricing or curve
 consumption, so P5 is neither redundant nor blocked by earlier work.
+
+---
+
+## 7. Post-Review Corrections (fixes to the first P5 implementation)
+
+Two defects found in review of commit `a6693ab` are fixed here without changing the design:
+
+### 7.1 Period-count consistency on fractional maturities (high)
+
+The first implementation used **inconsistent** floating-period counts across the dual
+path: `InterestRateSwap::npv`'s dual loop used `round(mat·freq)` periods on a `i·dt` grid
+whose last date was `round(mat·freq)·dt`, while `discountAnnuity` and dual `parRate`
+truncated with `⌊mat·freq⌋`. For period-aligned maturities (all shipped tests used
+3.0/5.0/7.0) `round == ⌊·⌋` and the last grid date already equalled `mat`, so nothing
+broke. For a documented-valid **fractional** maturity (header: "Tenor in fractional years
+(> 0)") it did:
+
+- The dual NPV diverged from the single-curve NPV by up to ~44% on identical curves
+  (e.g. mat=4.75: single 20009.06 vs dual 28894.58), violating the ~1e-13 equivalence claim.
+- The floating leg projected a coupon **past** the swap's maturity (mat=4.75, freq=2 →
+  round(9.5)=10 → last pay at t=5.0) while the fixed leg truncated to t=4.5.
+- Dual `parRate` was inconsistent with dual `npv`, so a swap struck at the dual par rate
+  had materially non-zero dual NPV.
+
+**Fix:** a single shared grid helper `projectionPayTimes(maturity, frequency)` returns the
+regular `dt`-spaced dates **plus a final (stub) date placed exactly at `maturity`** when
+the regular grid stops short. The dual `npv` floating loop and the dual `parRate` numerator
+both consume this grid, and dual `parRate` divides by the **same** `discountAnnuity` the
+fixed leg uses in `npv`. Consequences, now pinned by tests:
+
+- With identical pillar data under two names, the telescoping ends at `mat` →
+  dual NPV == single NPV to ~1e-13 for **any** maturity (`KeyEqualMatchesSingleCurveForFractionalMaturities`).
+- A swap struck at the dual par rate has zero dual NPV to machine precision
+  (`DualParRateZeroesDualNpvForFractionalMaturity`).
+
+The single-curve path (`N·(1−P(0,mat))`) and `discountAnnuity` are **untouched**, so every
+existing period-aligned result stays bit-identical.
+
+### 7.2 pybind const-correctness leak on `curve_keys()` (medium)
+
+`InterestRateSwap::curve_keys()` and `ScheduledLeg::curve_keys()` returned
+`const CurveKeys&` with `return_value_policy::reference_internal`. pybind drops the C++
+`const`, and `CurveKeys` fields are `def_readwrite`, so
+`swap.curve_keys().projection_key = "…"` silently mutated the object's internal pricing
+keys from Python (subsequent `npv()` then raised curve-not-found, or — worse — a
+valid-but-wrong name would silently change the mark). **Fix:** both accessors now use
+`return_value_policy::copy` (two small strings); Python receives a detached copy. Pinned by
+`test_curve_keys_accessor_is_a_copy_not_an_internal_reference`.

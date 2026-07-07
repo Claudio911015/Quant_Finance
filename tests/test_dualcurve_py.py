@@ -120,6 +120,30 @@ class DualCurveBindings(unittest.TestCase):
         self.assertGreater(dual_par, single_par)
         self.assertAlmostEqual(dual_par - single_par, 30e-4, delta=30e-4 * 0.10)
 
+    def test_curve_keys_accessor_is_a_copy_not_an_internal_reference(self):
+        # Regression: curve_keys() once returned reference_internal on def_readwrite fields,
+        # so mutating the returned object silently repointed the swap's internal pricing
+        # keys (and broke/altered subsequent npv()). It must hand back a detached copy.
+        env = self._env(25.0)
+        irs = qfpy.InterestRateSwap(
+            1_000_000, 0.035, 5.0, 2.0, qfpy.SwapType.Payer,
+            qfpy.CurveKeys("USD.OIS", "USD.3M"),
+        )
+        npv_before = irs.npv(env)
+        # Attempt to vandalise the internal keys through the accessor.
+        irs.curve_keys().projection_key = "NOPE"
+        irs.curve_keys().discount_key = "NOPE"
+        # The swap must be unaffected: keys unchanged and NPV identical.
+        self.assertEqual(irs.curve_keys().projection_key, "USD.3M")
+        self.assertEqual(irs.curve_keys().discount_key, "USD.OIS")
+        self.assertEqual(irs.npv(env), npv_before)
+
+        # Same guarantee for ScheduledLeg.
+        leg = qfpy.ScheduledLeg.make_floating(
+            1_000_000, 0.0, [0.5, 1.0], qfpy.CurveKeys("USD.OIS", "USD.3M"))
+        leg.curve_keys().projection_key = "NOPE"
+        self.assertEqual(leg.curve_keys().projection_key, "USD.3M")
+
     def test_instrument_pv_equals_npv(self):
         # The P5a wart fix, visible from Python via the Instrument.pv() base method.
         env = self._env(0.0)
