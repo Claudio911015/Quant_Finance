@@ -85,3 +85,7 @@ Update `CMakeLists.txt` if adding new source files or test targets.
 ## Plans & Specs
 
 Implementation plans and design specs live in `docs/superpowers/plans/` and `docs/superpowers/specs/`. Read the relevant spec before working on any existing feature area. Active plan: `2026-04-19-quantengine-merge.md` (merging QF + MarketDataFeed into QuantEngine).
+
+## Maintenance log
+
+- 2026-07-07: repo audit — fixed `.gitignore`/tracking inconsistency for `graphify-out/` (324 tracked files), removed overly broad `*.cmake`/`Makefile` ignore lines, anchored `sys` to `/sys`, deleted a stray empty `CMakeFiles/` dir, and moved `docs/plans/2026-06-07-market-feed-tests.md` into `docs/superpowers/plans/` for convention consistency (commit `0f81591`).
