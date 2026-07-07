@@ -24,6 +24,7 @@ if(GTest_FOUND)
         test_CVACalculator.cpp
         test_scenario.cpp
         test_calibration.cpp
+        test_volsurface.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)

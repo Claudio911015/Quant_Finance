@@ -7,6 +7,7 @@ add_library(qf
     math/daycount.cpp
     math/optimization.cpp
     termstructure/yieldcurve.cpp
+    termstructure/volsurface.cpp
     termstructure/bootstrap.cpp
     instruments/instrument.cpp
     instruments/iunderlying.cpp
