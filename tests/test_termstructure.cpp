@@ -203,3 +203,46 @@ TEST(Bootstrap, UnsortedInstrumentsThrows) {
     };
     EXPECT_THROW(bootstrap(unsorted), std::invalid_argument);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Pillar access + bump construction (P2a)
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(YieldCurve, PillarRoundTrip) {
+    std::vector<double> mats  = {0.5, 1.0, 2.0, 5.0, 10.0};
+    std::vector<double> rates = {0.03, 0.035, 0.04, 0.05, 0.06};
+    YieldCurve curve(mats, rates, InterpolationMethod::Linear);
+    EXPECT_EQ(curve.maturities(), mats);
+    EXPECT_EQ(curve.rates(), rates);
+    EXPECT_EQ(curve.interpolationMethod(), InterpolationMethod::Linear);
+}
+
+TEST(YieldCurve, ParallelBumpShiftsZeroRateUniformly) {
+    auto base = slopedCurve();                 // CubicSpline sloped curve
+    auto up   = base.parallelBump(10.0);       // +10 bp = +0.001 in rate
+    for (double T : {0.5, 1.0, 2.0, 5.0, 10.0}) {
+        EXPECT_NEAR(up.zeroRate(T), base.zeroRate(T) + 0.001, 1e-12);
+    }
+    // Original curve is untouched (non-mutating).
+    EXPECT_NEAR(base.zeroRate(5.0), 0.05, 1e-10);
+}
+
+TEST(YieldCurve, SinglePillarBumpIsLocalUnderLinear) {
+    std::vector<double> mats  = {0.5, 1.0, 2.0, 5.0, 10.0};
+    std::vector<double> rates = {0.03, 0.035, 0.04, 0.05, 0.06};
+    YieldCurve base(mats, rates, InterpolationMethod::Linear);
+    const std::size_t k = 3;                   // 5Y pillar
+    auto bumped = base.bumped(k, 5.0);         // +5 bp at 5Y only
+
+    // The bumped pillar moves by exactly 5 bp.
+    EXPECT_NEAR(bumped.zeroRate(mats[k]), base.zeroRate(mats[k]) + 0.0005, 1e-12);
+    // A far-away pillar (0.5Y) is untouched under Linear interpolation.
+    EXPECT_NEAR(bumped.zeroRate(mats[0]), base.zeroRate(mats[0]), 1e-12);
+    // The other pillars themselves are unchanged.
+    EXPECT_NEAR(bumped.zeroRate(mats[1]), base.zeroRate(mats[1]), 1e-12);
+}
+
+TEST(YieldCurve, BumpedRejectsBadPillarIndex) {
+    auto curve = flatCurve();
+    EXPECT_THROW(curve.bumped(99, 1.0), std::out_of_range);
+}
