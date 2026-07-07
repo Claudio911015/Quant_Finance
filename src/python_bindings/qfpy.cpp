@@ -382,28 +382,69 @@ PYBIND11_MODULE(qfpy, m) {
         .value("Receiver", qf::instruments::SwapType::Receiver)
         .export_values();
 
+    // ── CurveKeys (dual-curve, P5) ─────────────────────────────────────────
+    py::class_<qf::instruments::CurveKeys>(m, "CurveKeys")
+        .def(py::init([](std::string discount_key, std::string projection_key) {
+                 return qf::instruments::CurveKeys{std::move(discount_key),
+                                                   std::move(projection_key)};
+             }),
+             py::arg("discount_key") = "default",
+             py::arg("projection_key") = "default",
+             "Named discount + projection curves a swap prices against (dual-curve).\n"
+             "Both default to 'default' → single-curve, output bit-identical to legacy.")
+        .def_readwrite("discount_key",   &qf::instruments::CurveKeys::discountKey)
+        .def_readwrite("projection_key", &qf::instruments::CurveKeys::projectionKey)
+        .def("keys_equal", &qf::instruments::CurveKeys::keysEqual);
+
     // ── InterestRateSwap ───────────────────────────────────────────────────
-    py::class_<qf::instruments::InterestRateSwap>(m, "InterestRateSwap")
+    // Declares the Instrument base so an IRS can be passed to the bound
+    // ScenarioEngine (which takes a const Instrument&) — impossible before P5.
+    py::class_<qf::instruments::InterestRateSwap, qf::instruments::Instrument>(m, "InterestRateSwap")
         .def(py::init<double, double, double, double, qf::instruments::SwapType>(),
              py::arg("notional"), py::arg("fixed_rate"),
              py::arg("maturity"), py::arg("frequency"), py::arg("swap_type"),
              "Vanilla fixed-for-floating IRS with uniform payment schedule.\n"
              "swap_type: SwapType.Payer (pay fixed) or SwapType.Receiver (receive fixed).")
+        .def(py::init<double, double, double, double, qf::instruments::SwapType,
+                      qf::instruments::CurveKeys>(),
+             py::arg("notional"), py::arg("fixed_rate"),
+             py::arg("maturity"), py::arg("frequency"), py::arg("swap_type"),
+             py::arg("curve_keys"),
+             "Dual-curve IRS: project floating off curve_keys.projection_key,\n"
+             "discount off curve_keys.discount_key.")
         .def("npv",
              static_cast<double (qf::instruments::InterestRateSwap::*)
                          (const qf::core::MarketEnvironment&) const>(
                  &qf::instruments::InterestRateSwap::npv),
              py::arg("env"), "Net present value from the swap_type perspective.")
+        .def("curve_keys", &qf::instruments::InterestRateSwap::curveKeys,
+             py::return_value_policy::reference_internal,
+             "The discount/projection curve keys this swap prices against.")
         .def_static("par_rate",
              static_cast<double (*)(double, double, const qf::core::MarketEnvironment&)>(
                  &qf::instruments::InterestRateSwap::parRate),
              py::arg("maturity"), py::arg("frequency"), py::arg("env"),
-             "Par (fair) fixed rate at which NPV = 0.")
+             "Par (fair) fixed rate at which NPV = 0 (single-curve).")
+        .def_static("par_rate",
+             static_cast<double (*)(double, double, const qf::core::MarketEnvironment&,
+                                    const std::string&, const std::string&)>(
+                 &qf::instruments::InterestRateSwap::parRate),
+             py::arg("maturity"), py::arg("frequency"), py::arg("env"),
+             py::arg("discount_key"), py::arg("projection_key"),
+             "Dual-curve par rate: floating projected off projection_key,\n"
+             "discounted off discount_key; annuity off discount_key.")
         .def_static("annuity",
              static_cast<double (*)(double, double, const qf::core::MarketEnvironment&)>(
                  &qf::instruments::InterestRateSwap::annuity),
              py::arg("maturity"), py::arg("frequency"), py::arg("env"),
-             "Annuity (DV01 per unit notional) of the swap.");
+             "Annuity (DV01 per unit notional) of the swap (single-curve).")
+        .def_static("annuity",
+             static_cast<double (*)(double, double, const qf::core::MarketEnvironment&,
+                                    const std::string&)>(
+                 &qf::instruments::InterestRateSwap::annuity),
+             py::arg("maturity"), py::arg("frequency"), py::arg("env"),
+             py::arg("discount_key"),
+             "Dual-curve annuity off the discount curve discount_key.");
 
     // ── PeriodSpec ─────────────────────────────────────────────────────────
     py::class_<qf::instruments::PeriodSpec>(m, "PeriodSpec")
@@ -423,27 +464,41 @@ PYBIND11_MODULE(qfpy, m) {
              "ScheduledLeg from explicit PeriodSpec list.\n"
              "fixed_rate: coupon rate (ignored for floating legs).\n"
              "pays_fixed: True = fixed coupon; False = floating (replication identity).")
+        .def(py::init<double, bool, std::vector<qf::instruments::PeriodSpec>,
+                      qf::instruments::CurveKeys>(),
+             py::arg("fixed_rate"), py::arg("pays_fixed"), py::arg("schedule"),
+             py::arg("curve_keys"),
+             "Dual-curve ScheduledLeg: project floating off curve_keys.projection_key,\n"
+             "discount off curve_keys.discount_key.")
         .def_static("make_fixed",
              &qf::instruments::ScheduledLeg::makeFixed,
              py::arg("notional"), py::arg("fixed_rate"), py::arg("payment_times"),
+             py::arg("curve_keys") = qf::instruments::CurveKeys{},
              "Build a fixed leg from payment times (accrual = year fractions).")
         .def_static("make_floating",
              &qf::instruments::ScheduledLeg::makeFloating,
              py::arg("notional"), py::arg("spread"), py::arg("payment_times"),
+             py::arg("curve_keys") = qf::instruments::CurveKeys{},
              "Build a floating leg from payment times.")
         .def("calculate_pv",
              &qf::instruments::ScheduledLeg::calculatePV,
              py::arg("env"), "Present value of this leg.")
+        .def("curve_keys", &qf::instruments::ScheduledLeg::curveKeys,
+             py::return_value_policy::reference_internal,
+             "The discount/projection curve keys this leg prices against.")
         .def("schedule",
              &qf::instruments::ScheduledLeg::schedule,
              "Returns the list of PeriodSpec entries.");
 
     // ── ScheduledSwap ──────────────────────────────────────────────────────
-    py::class_<qf::instruments::ScheduledSwap>(m, "ScheduledSwap")
+    // Declares the Instrument base so a ScheduledSwap (amortizing/stub schedules)
+    // can be passed to the bound ScenarioEngine — impossible before P5.
+    py::class_<qf::instruments::ScheduledSwap, qf::instruments::Instrument>(m, "ScheduledSwap")
         .def(py::init<qf::instruments::ScheduledLeg,
                       qf::instruments::ScheduledLeg>(),
              py::arg("pay_leg"), py::arg("receive_leg"),
-             "ScheduledSwap: pay_leg = what you pay, receive_leg = what you receive.")
+             "ScheduledSwap: pay_leg = what you pay, receive_leg = what you receive.\n"
+             "Instrument maturity = max over both legs' final payment dates.")
         .def("npv",
              &qf::instruments::ScheduledSwap::npv,
              py::arg("env"), "Net present value: PV(receive) - PV(pay).")

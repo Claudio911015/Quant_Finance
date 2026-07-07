@@ -83,10 +83,13 @@ TEST(ScenarioEngine, KeyRateLadderSumsToParallelUnderLinear) {
 //
 // NOTE: the engine reprices whatever Instrument::pv() returns. For a fixed Leg,
 // pv() is the economically correct discounted-coupon-plus-notional value, so a
-// closed-form DV01 is a genuine independent cross-check. (An InterestRateSwap is
-// deliberately NOT used here: Instrument::pv() on it dispatches to the base
-// Swap::npv leg-difference, which mixes notional conventions and is not the
-// swap's economic NPV — a pre-existing wart flagged for a separate fix.)
+// closed-form DV01 is a genuine independent cross-check.
+//
+// (Historical wart, now fixed in P5a: Instrument::pv() on an InterestRateSwap used
+// to dispatch to the base Swap::npv leg-difference — mixing notional conventions and
+// ignoring Payer/Receiver — instead of the swap's economic NPV. InterestRateSwap now
+// overrides calculatePV to delegate to InterestRateSwap::npv, so IRS objects can also
+// be repriced correctly through the ScenarioEngine; see the dual-curve swap tests.)
 // ═══════════════════════════════════════════════════════════════════════════
 
 TEST(ScenarioEngine, FixedLegDV01MatchesAnalyticDerivative) {
