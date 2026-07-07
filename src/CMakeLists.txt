@@ -26,6 +26,7 @@ add_library(qf
     models/bs_model.cpp
     risk/greeks.cpp
     risk/var.cpp
+    risk/scenario.cpp
     xva/credit_curve.cpp
     xva/netting_set.cpp
     xva/cva_calculator.cpp

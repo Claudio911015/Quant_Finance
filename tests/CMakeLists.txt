@@ -22,6 +22,7 @@ if(GTest_FOUND)
         test_swaption.cpp
         test_daycount.cpp
         test_CVACalculator.cpp
+        test_scenario.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)

@@ -150,10 +150,17 @@ documented as approximate.
 - **Bond parallel DV01 == `duration(curve)·price(curve)·1e-4`** (tight, exact to O(h²)).
 - **Bond KRD ladder sums to parallel DV01 under Linear** (tight, ~1e-6 relative);
   ladder maturities equal the curve pillars.
-- **Par payer-swap parallel DV01 matches `annuity·notional·1bp` in magnitude** with a
-  documented ~5 % tolerance (they are related but distinct measures — annuity is the
-  fixed-rate PV01, the engine reports the parallel-curve DV01; ratio ≈ −1.025 for a flat
-  5 % 5Y swap), and its sign is negative for a payer.
+- **Fixed swap-leg parallel DV01 == closed-form analytic derivative**
+  (`1e-4·[Σ N·K·τ·tᵢ·DF(tᵢ) + N·T·DF(T)]`), tight tolerance. A fixed `Leg` is used
+  rather than an `InterestRateSwap` because of a **pre-existing wart discovered during
+  implementation**: `Instrument::pv()` on an `InterestRateSwap` dispatches to the base
+  `Swap::npv` (a leg difference that mixes notional conventions — the fixed leg carries
+  the notional repayment while the floating leg uses the replication identity), which is
+  *not* the swap's economic NPV given by `InterestRateSwap::npv`. The engine faithfully
+  reprices whatever `pv()` returns; fixing that dispatch is out of scope for P2 and is
+  flagged for a separate change. (The annuity relationship — annuity·notional·1bp ≈
+  |parallel DV01| for a par swap — only holds against `InterestRateSwap::npv`, so it is
+  documented here rather than asserted through `pv()`.)
 - **`runScenario` P&L identity**: `pnl == scenarioPV − basePV`; a size-mismatched shift
   vector throws.
 - **Steepener vs flattener** produce opposite-signed P&L on a directional book;
