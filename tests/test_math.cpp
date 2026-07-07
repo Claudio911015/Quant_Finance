@@ -51,6 +51,24 @@ TEST(Interpolation, CubicSplineSmoothBetweenKnots) {
     EXPECT_NEAR(interp(2.5), 6.25, 0.05);   // 2.5^2 = 6.25
 }
 
+TEST(Interpolation, CubicSplineTwoPointsIsLinear) {
+    // Regression: with exactly 2 points the cubic setup had m = n-2 = 0 interior nodes and
+    // requested a vector of size m-1 = SIZE_MAX, throwing a spurious length_error. A natural
+    // cubic spline over 2 points is just the straight line between them.
+    Interpolator interp({1.0, 3.0}, {10.0, 30.0}, InterpolationMethod::CubicSpline);
+    EXPECT_NEAR(interp(1.0), 10.0, 1e-12);
+    EXPECT_NEAR(interp(3.0), 30.0, 1e-12);
+    EXPECT_NEAR(interp(2.0), 20.0, 1e-12);   // linear midpoint
+}
+
+TEST(Interpolation, CubicSplineThreePointsWorks) {
+    // n=3 → m=1 interior node: exercised the m-1=0 empty-band boundary too.
+    Interpolator interp({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0}, InterpolationMethod::CubicSpline);
+    EXPECT_NEAR(interp(0.0), 0.0, 1e-12);
+    EXPECT_NEAR(interp(1.0), 1.0, 1e-12);
+    EXPECT_NEAR(interp(2.0), 4.0, 1e-12);
+}
+
 TEST(Interpolation, LogLinearExactAtKnots) {
     std::vector<double> x = {1.0, 2.0, 3.0};
     std::vector<double> y = {1.0, std::exp(1.0), std::exp(2.0)};

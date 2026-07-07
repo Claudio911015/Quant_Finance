@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <map>
 #include <stdexcept>
 #include <utility>
 
@@ -87,9 +86,35 @@ double VolSurface::vol(double strike, double maturity) const
         totalVar[i] = sigma * sigma * maturities_[i];
     }
 
-    // 2. Term structure: interpolate total variance linearly in maturity (flat
-    //    extrapolation on w beyond the pillars), then back out the vol.
-    math::Interpolator tvar(maturities_, totalVar, math::InterpolationMethod::Linear);
+    // 2. Term structure: interpolate total variance linearly in maturity, but with
+    //    calendar-consistent extrapolation at BOTH ends rather than flat-in-w (which would
+    //    explode σ = √(w/T) as T→0 below the first pillar and collapse it above the last):
+    //
+    //      • Short end: anchor the curve at (T=0, w=0). Linear-in-w between (0,0) and the
+    //        first pillar (T₀, w₀) is exactly flat-in-VOL — a sub-pillar option marks at the
+    //        first pillar's vol, the standard short-end treatment (cf. QuantLib
+    //        BlackVarianceCurve inserting the (0,0) node). Still calendar-consistent.
+    //      • Long end: extrapolate flat-in-VOL, i.e. hold σ at the last pillar's level so
+    //        w = σ_last²·T keeps growing linearly. A long option marks at the last pillar's
+    //        vol instead of decaying toward zero.
+    const double Tmax = maturities_.back();
+    if (maturity >= Tmax) {
+        const double sigmaMax = std::sqrt(totalVar.back() / Tmax);
+        return sigmaMax;  // flat-in-vol beyond the last maturity pillar
+    }
+
+    std::vector<double> matNodes;
+    std::vector<double> varNodes;
+    matNodes.reserve(maturities_.size() + 1);
+    varNodes.reserve(maturities_.size() + 1);
+    matNodes.push_back(0.0);
+    varNodes.push_back(0.0);  // (T=0, w=0) anchor: flat-in-vol at the short end
+    for (std::size_t i = 0; i < maturities_.size(); ++i) {
+        matNodes.push_back(maturities_[i]);
+        varNodes.push_back(totalVar[i]);
+    }
+
+    math::Interpolator tvar(matNodes, varNodes, math::InterpolationMethod::Linear);
     double w = tvar(maturity);
     if (w < 0.0) w = 0.0;  // guard against tiny negative from extrapolation edge cases
     return std::sqrt(w / maturity);
@@ -102,19 +127,39 @@ VolSurface VolSurface::fromQuotes(double spot, double r, double q,
     if (quotes.empty())
         throw std::invalid_argument("VolSurface::fromQuotes: no quotes");
 
-    // Distinct, sorted maturity and strike pillars found in the chain.
-    std::map<double, std::size_t> matIndex;
-    std::map<double, std::size_t> strikeIndex;
-    for (const auto& qt : quotes) {
-        matIndex.emplace(qt.maturity, 0);
-        strikeIndex.emplace(qt.strike, 0);
-    }
-    std::vector<double> maturities;
-    maturities.reserve(matIndex.size());
-    for (auto& kv : matIndex) { kv.second = maturities.size(); maturities.push_back(kv.first); }
-    std::vector<double> strikes;
-    strikes.reserve(strikeIndex.size());
-    for (auto& kv : strikeIndex) { kv.second = strikes.size(); strikes.push_back(kv.first); }
+    // Distinct, sorted maturity and strike pillars found in the chain, merged with a
+    // relative tolerance so that two quotes whose pillar differs only by floating-point
+    // noise (e.g. a maturity computed as a day-count fraction via two different code paths,
+    // 0.5 vs 0.5000000000000001) collapse to one pillar instead of spawning a phantom column
+    // that then fails the complete-grid check on an economically full chain.
+    constexpr double kPillarTol = 1e-9;  // relative
+    auto samePillar = [](double a, double b) {
+        return std::abs(a - b) <= kPillarTol * std::max(1.0, std::max(std::abs(a), std::abs(b)));
+    };
+    auto distinctPillars = [&](std::vector<double> vals) {
+        std::sort(vals.begin(), vals.end());
+        std::vector<double> pillars;
+        for (double v : vals)
+            if (pillars.empty() || !samePillar(v, pillars.back()))
+                pillars.push_back(v);
+        return pillars;
+    };
+    // Nearest pillar to v (pillars sorted); merge tolerance guarantees an exact hit.
+    auto pillarIndex = [](const std::vector<double>& pillars, double v) -> std::size_t {
+        auto it = std::lower_bound(pillars.begin(), pillars.end(), v);
+        std::size_t idx = (it == pillars.end()) ? pillars.size() - 1
+                                                : static_cast<std::size_t>(it - pillars.begin());
+        if (idx > 0 && std::abs(pillars[idx - 1] - v) <= std::abs(pillars[idx] - v))
+            --idx;
+        return idx;
+    };
+
+    std::vector<double> allMats, allStrikes;
+    allMats.reserve(quotes.size());
+    allStrikes.reserve(quotes.size());
+    for (const auto& qt : quotes) { allMats.push_back(qt.maturity); allStrikes.push_back(qt.strike); }
+    std::vector<double> maturities = distinctPillars(std::move(allMats));
+    std::vector<double> strikes    = distinctPillars(std::move(allStrikes));
 
     const std::size_t nMat = maturities.size();
     const std::size_t nStrike = strikes.size();
@@ -124,8 +169,8 @@ VolSurface VolSurface::fromQuotes(double spot, double r, double q,
     std::vector<std::vector<bool>>   filled(nMat, std::vector<bool>(nStrike, false));
 
     for (const auto& qt : quotes) {
-        const std::size_t i = matIndex.at(qt.maturity);
-        const std::size_t j = strikeIndex.at(qt.strike);
+        const std::size_t i = pillarIndex(maturities, qt.maturity);
+        const std::size_t j = pillarIndex(strikes, qt.strike);
         if (filled[i][j])
             throw std::invalid_argument(
                 "VolSurface::fromQuotes: duplicate quote for a (strike, maturity) cell");

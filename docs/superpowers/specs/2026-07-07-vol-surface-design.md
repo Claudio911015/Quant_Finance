@@ -49,11 +49,25 @@ Lives next to `YieldCurve` (module convention: hpp/cpp/test triple). Two constru
 1. Per maturity pillar `i`, interpolate the smile in strike (`strikeMethod`, linear/cubic,
    flat extrapolation) → a vol at the requested strike for that pillar.
 2. Convert each to **total variance** `w_i = σ_i² · T_i` and interpolate `w` **linearly in
-   maturity** (flat extrapolation on `w`). Return `σ = √(w(T) / T)`.
+   maturity**. Return `σ = √(w(T) / T)`.
 
 Interpolating in total variance rather than raw vol is the standard choice that avoids the
 calendar-arbitrage artifacts of interpolating vols directly, and makes an interpolated
 mid-curve mark auditable when risk control asks where it came from.
+
+**Maturity extrapolation is flat-in-VOL, not flat-in-`w`** (review correction — flat-in-`w`
+mismarks the most common desk instrument, short-dated listed options):
+
+- **Short end (`T < T₀`):** anchor the total-variance curve at `(T=0, w=0)`. Linear-in-`w`
+  between `(0,0)` and `(T₀, w₀)` is *exactly* flat-in-vol, so a sub-first-pillar option marks
+  at the first pillar's vol — matching QuantLib's `BlackVarianceCurve`, which inserts the
+  `(0,0)` node. (Flat-in-`w` instead would give `σ = √(w₀/T) → ∞` as `T→0`: a 1-week option on
+  a 6M-first-pillar 20% surface would mark at 100%.)
+- **Long end (`T > T_max`):** hold `σ` flat at the last pillar's level (so `w = σ_max²·T` keeps
+  growing linearly). A 10Y option on a 2Y-max surface marks at ~`σ_max`, not `√(w_max/T)` which
+  would decay it toward zero.
+
+Both ends remain calendar-consistent (`w` non-decreasing in `T`).
 
 **Construction guards** (throw `std::invalid_argument`, consistent with how `hestonPrice`
 validates its inputs):
@@ -120,3 +134,21 @@ round as one small commit once a trusted-bump path is designed. P4a/b/c stand al
   identical to today; observer notification fires on `setVolSurface`.
 - **P4c** (`tests/test_volsurface_py.py`): grid round-trip and `surface_from_heston` smoke.
 - Full suite green via `cd build && ctest --output-on-failure` before each commit.
+
+### 6.1 Review-fix regressions (post-P4c)
+
+Three defects found in review of the first P4 landing, fixed with regression coverage:
+
+1. **Maturity extrapolation was flat-in-`w`** (`src/termstructure/volsurface.cpp`), mismarking
+   short- and long-dated options fed to all four engines. Fixed to flat-in-vol at both ends
+   (§2). Regressions `VolSurface.MaturityExtrapolationIsFlatInVol`,
+   `VolSurface.ShortEndAnchorReturnsFirstPillarVol`.
+2. **`Interpolator` cubic setup underflowed with exactly 2 points** (`src/math/interpolation.cpp`,
+   `m = n-2 = 0` → `vector(m-1)` = `vector(SIZE_MAX)`), reachable via a `CubicSpline` `VolSurface`
+   built from the documented 2-strike minimum. Fixed at the root cause: 2 points degenerate to
+   the straight line (natural BC). Regressions `Interpolation.CubicSplineTwoPointsIsLinear`,
+   `Interpolation.CubicSplineThreePointsWorks`, `VolSurface.CubicSplineWithTwoStrikesIsLinear`.
+3. **`fromQuotes` deduplicated pillars by exact double equality** (`src/termstructure/volsurface.cpp`),
+   splitting floating-point-noisy-but-equal maturities/strikes into phantom columns that then
+   failed the complete-grid check. Fixed with a relative-tolerance (`1e-9`) pillar merge.
+   Regression `VolSurface.FromQuotesMergesFloatingPointNoisyPillars`.

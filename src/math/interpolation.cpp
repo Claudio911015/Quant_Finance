@@ -24,33 +24,42 @@ Interpolator::Interpolator(std::vector<double> x, std::vector<double> y,
     // Cubic spline: compute second derivatives via Thomas algorithm (natural BC)
     if (method_ == InterpolationMethod::CubicSpline) {
         std::size_t n = x_.size();
-        std::vector<double> h(n - 1);
-        for (std::size_t i = 0; i < n - 1; ++i)
-            h[i] = x_[i+1] - x_[i];
-
-        std::size_t m = n - 2; // interior nodes
-        std::vector<double> diag(m), upper(m-1), lower(m-1), rhs(m);
-
-        for (std::size_t i = 0; i < m; ++i) {
-            diag[i] = 2.0 * (h[i] + h[i+1]);
-            rhs[i]  = 6.0 * ((y_[i+2] - y_[i+1]) / h[i+1]
-                            - (y_[i+1] - y_[i])   / h[i]);
-        }
-        for (std::size_t i = 0; i < m - 1; ++i)
-            upper[i] = lower[i] = h[i+1];
-
-        // Forward sweep
-        for (std::size_t i = 1; i < m; ++i) {
-            double w = lower[i-1] / diag[i-1];
-            diag[i] -= w * upper[i-1];
-            rhs[i]  -= w * rhs[i-1];
-        }
-
-        // Back substitution
+        // Natural boundary conditions pin the endpoint second derivatives to zero.
+        // With exactly 2 points there are no interior nodes (m = n-2 = 0), the tridiagonal
+        // system is empty, and the "spline" degenerates to the straight line between the two
+        // points — so leaving spline_M_ all-zero is correct. Guarding on n >= 3 also avoids a
+        // size_t underflow in `upper(m-1)` / `lower(m-1)` when m == 0 (was requesting SIZE_MAX
+        // elements and throwing a spurious length_error), which VolSurface reaches whenever a
+        // CubicSpline smile is built from the documented minimum of 2 strike pillars.
         spline_M_.resize(n, 0.0); // natural BC: M[0] = M[n-1] = 0
-        spline_M_[m] = rhs[m-1] / diag[m-1];
-        for (int i = (int)m - 2; i >= 0; --i)
-            spline_M_[i+1] = (rhs[i] - upper[i] * spline_M_[i+2]) / diag[i];
+        if (n >= 3) {
+            std::vector<double> h(n - 1);
+            for (std::size_t i = 0; i < n - 1; ++i)
+                h[i] = x_[i+1] - x_[i];
+
+            std::size_t m = n - 2; // interior nodes
+            std::vector<double> diag(m), upper(m-1), lower(m-1), rhs(m);
+
+            for (std::size_t i = 0; i < m; ++i) {
+                diag[i] = 2.0 * (h[i] + h[i+1]);
+                rhs[i]  = 6.0 * ((y_[i+2] - y_[i+1]) / h[i+1]
+                                - (y_[i+1] - y_[i])   / h[i]);
+            }
+            for (std::size_t i = 0; i < m - 1; ++i)
+                upper[i] = lower[i] = h[i+1];
+
+            // Forward sweep
+            for (std::size_t i = 1; i < m; ++i) {
+                double w = lower[i-1] / diag[i-1];
+                diag[i] -= w * upper[i-1];
+                rhs[i]  -= w * rhs[i-1];
+            }
+
+            // Back substitution
+            spline_M_[m] = rhs[m-1] / diag[m-1];
+            for (int i = (int)m - 2; i >= 0; --i)
+                spline_M_[i+1] = (rhs[i] - upper[i] * spline_M_[i+2]) / diag[i];
+        }
     }
 }
 
