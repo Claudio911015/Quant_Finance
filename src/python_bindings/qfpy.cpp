@@ -7,6 +7,7 @@
 #include <qf/instruments/bond.hpp>
 #include <qf/instruments/option.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
+#include <qf/termstructure/volsurface.hpp>
 #include <qf/math/interpolation.hpp>
 #include <qf/pricingengines/ipricing_engine.hpp>
 #include <qf/pricingengines/engine_factory.hpp>
@@ -51,8 +52,23 @@ PYBIND11_MODULE(qfpy, m) {
              py::arg("ticker"), py::arg("spot"))
         .def("set_volatility", &qf::core::MarketEnvironment::setVolatility,
              py::arg("ticker"), py::arg("vol"))
+        .def("set_vol_surface", &qf::core::MarketEnvironment::setVolSurface,
+             py::arg("ticker"), py::arg("surface"),
+             "Register a VolSurface for a ticker (P4). Once set, the (strike, maturity) "
+             "volatility() overload and all equity engines mark off the surface.")
+        .def("has_vol_surface", &qf::core::MarketEnvironment::hasVolSurface,
+             py::arg("ticker"))
         .def("spot",           &qf::core::MarketEnvironment::spot,      py::arg("ticker"))
-        .def("volatility",     &qf::core::MarketEnvironment::volatility, py::arg("ticker"))
+        .def("volatility",
+             static_cast<double (qf::core::MarketEnvironment::*)(const std::string&) const>(
+                 &qf::core::MarketEnvironment::volatility),
+             py::arg("ticker"), "Flat scalar implied vol for a ticker.")
+        .def("volatility",
+             static_cast<double (qf::core::MarketEnvironment::*)
+                         (const std::string&, double, double) const>(
+                 &qf::core::MarketEnvironment::volatility),
+             py::arg("ticker"), py::arg("strike"), py::arg("maturity"),
+             "Strike/maturity-aware implied vol: the ticker's VolSurface if set, else the flat scalar.")
         .def("curve",          &qf::core::MarketEnvironment::curve,
              py::arg("name") = "default",
              py::return_value_policy::reference_internal);
@@ -179,6 +195,68 @@ PYBIND11_MODULE(qfpy, m) {
         .def("bumped", &qf::termstructure::YieldCurve::bumped,
              py::arg("pillar_index"), py::arg("bp_shift"),
              "Copy of the curve with a single pillar shifted by bp_shift basis points.");
+
+    // ------------------------------------------------------------------ //
+    // VolSurface (P4): per-ticker implied-vol surface                     //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::termstructure::VolSurface>(m, "VolSurface")
+        .def(py::init<std::vector<double>, std::vector<double>,
+                      std::vector<std::vector<double>>, qf::math::InterpolationMethod>(),
+             py::arg("maturities"), py::arg("strikes"), py::arg("vols"),
+             py::arg("strike_method") = qf::math::InterpolationMethod::Linear,
+             "Grid constructor: vols[i][j] is the implied vol at maturities[i] x strikes[j].")
+        .def_static("from_quotes", &qf::termstructure::VolSurface::fromQuotes,
+             py::arg("spot"), py::arg("r"), py::arg("q"), py::arg("quotes"),
+             py::arg("strike_method") = qf::math::InterpolationMethod::Linear,
+             "Build a surface from a complete rectangular chain of OptionQuote by inverting "
+             "each quote with the Brent implied-vol solver.")
+        .def("vol", &qf::termstructure::VolSurface::vol,
+             py::arg("strike"), py::arg("maturity"),
+             "Implied vol at (strike, maturity): smile-interp in strike, total-variance in T.")
+        .def("maturities", &qf::termstructure::VolSurface::maturities,
+             py::return_value_policy::reference_internal)
+        .def("strikes", &qf::termstructure::VolSurface::strikes,
+             py::return_value_policy::reference_internal)
+        .def("to_grid", [](const qf::termstructure::VolSurface& s) {
+                 return py::make_tuple(s.maturities(), s.strikes(), s.vols());
+             },
+             "Return (maturities, strikes, vols) pillar arrays for pandas/matplotlib plots.");
+
+    // Bridge closing the P3 loop: price a strike x maturity grid through the
+    // semi-analytic Heston, invert with the Brent solver, and return a smooth
+    // arbitrage-consistent VolSurface. The standard way to regularize a sparse or
+    // noisy listed chain into a full surface via the calibrated model.
+    m.def("surface_from_heston",
+          [](const qf::pricingengines::HestonParams& heston,
+             double spot, double r, double q,
+             const std::vector<double>& strikes,
+             const std::vector<double>& maturities,
+             qf::math::InterpolationMethod strike_method) {
+              std::vector<std::vector<double>> vols(
+                  maturities.size(), std::vector<double>(strikes.size(), 0.0));
+              for (std::size_t i = 0; i < maturities.size(); ++i) {
+                  for (std::size_t j = 0; j < strikes.size(); ++j) {
+                      qf::instruments::OptionParams p;
+                      p.spot          = spot;
+                      p.strike        = strikes[j];
+                      p.riskFreeRate  = r;
+                      p.dividendYield = q;
+                      p.volatility    = 0.0;
+                      p.maturity      = maturities[i];
+                      p.type          = qf::instruments::OptionType::Call;
+                      p.exercise      = qf::instruments::ExerciseType::European;
+                      double px = qf::pricingengines::hestonPrice(p, heston);
+                      vols[i][j] = qf::pricingengines::impliedVolatility(p, px);
+                  }
+              }
+              return qf::termstructure::VolSurface(maturities, strikes,
+                                                   std::move(vols), strike_method);
+          },
+          py::arg("params"), py::arg("spot"), py::arg("r"), py::arg("q"),
+          py::arg("strikes"), py::arg("maturities"),
+          py::arg("strike_method") = qf::math::InterpolationMethod::Linear,
+          "Build a smooth VolSurface by pricing a strike x maturity grid under calibrated "
+          "HestonParams and inverting to Black-Scholes implied vols.");
 
     py::enum_<qf::pricingengines::FDMethod>(m, "FDMethod")
         .value("Explicit", qf::pricingengines::FDMethod::Explicit)
