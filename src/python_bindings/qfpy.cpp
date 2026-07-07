@@ -1,5 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <tuple>
+#include <vector>
 
 #include <qf/core/market_environment.hpp>
 #include <qf/instruments/bond.hpp>
@@ -16,6 +18,7 @@
 #include <qf/instruments/iunderlying.hpp>
 #include <qf/instruments/instrument.hpp>
 #include <qf/models/hullwhite.hpp>
+#include <qf/models/heston_calibrator.hpp>
 #include <qf/instruments/swap.hpp>
 #include <qf/risk/scenario.hpp>
 
@@ -218,6 +221,68 @@ PYBIND11_MODULE(qfpy, m) {
           py::arg("opt"), py::arg("heston"));
     m.def("heston_montecarlo", &qf::pricingengines::hestonMonteCarlo, "Heston Monte Carlo price",
           py::arg("opt"), py::arg("heston"), py::arg("nPaths") = 100000, py::arg("nSteps") = 252, py::arg("seed") = 42);
+
+    // ------------------------------------------------------------------ //
+    // Heston calibration (P3): fit HestonParams to listed vanilla quotes  //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::models::OptionQuote>(m, "OptionQuote")
+        .def(py::init<>())
+        .def(py::init([](double strike, double maturity,
+                         qf::instruments::OptionType type, double marketPrice) {
+                 return qf::models::OptionQuote{strike, maturity, type, marketPrice};
+             }),
+             py::arg("strike"), py::arg("maturity"), py::arg("type"), py::arg("market_price"))
+        .def_readwrite("strike",       &qf::models::OptionQuote::strike)
+        .def_readwrite("maturity",     &qf::models::OptionQuote::maturity)
+        .def_readwrite("type",         &qf::models::OptionQuote::type)
+        .def_readwrite("market_price", &qf::models::OptionQuote::marketPrice);
+
+    py::enum_<qf::models::CalibrationObjective>(m, "CalibrationObjective")
+        .value("Price",      qf::models::CalibrationObjective::Price)
+        .value("ImpliedVol", qf::models::CalibrationObjective::ImpliedVol);
+
+    py::class_<qf::models::CalibrationResult>(m, "CalibrationResult")
+        .def_readonly("params",          &qf::models::CalibrationResult::params)
+        .def_readonly("rmse",            &qf::models::CalibrationResult::rmse)
+        .def_readonly("per_quote_errors",&qf::models::CalibrationResult::perQuoteErrors)
+        .def_readonly("converged",       &qf::models::CalibrationResult::converged)
+        .def_readonly("iterations",      &qf::models::CalibrationResult::iterations);
+
+    py::class_<qf::models::HestonCalibrator>(m, "HestonCalibrator")
+        .def(py::init<double, double, double>(),
+             py::arg("spot"), py::arg("r"), py::arg("q") = 0.0)
+        .def("calibrate", &qf::models::HestonCalibrator::calibrate,
+             py::arg("quotes"), py::arg("initial_guess"),
+             py::arg("objective") = qf::models::CalibrationObjective::Price,
+             py::arg("vega_weighted") = false,
+             py::arg("tol") = 1e-8, py::arg("maxIt") = 2000,
+             "Fit HestonParams to a set of OptionQuote against the semi-analytic price.");
+
+    // DataFrame-friendly convenience: quotes as (strike, maturity, type, price)
+    // tuples straight off a listed chain -> CalibrationResult whose .params
+    // plug into make_heston_engine.
+    m.def("calibrate_heston",
+          [](double spot, double r, double q,
+             const std::vector<std::tuple<double, double,
+                     qf::instruments::OptionType, double>>& quotes,
+             qf::models::CalibrationObjective objective,
+             bool vega_weighted) {
+              std::vector<qf::models::OptionQuote> qs;
+              qs.reserve(quotes.size());
+              for (const auto& t : quotes)
+                  qs.push_back({std::get<0>(t), std::get<1>(t),
+                                std::get<2>(t), std::get<3>(t)});
+              qf::models::HestonCalibrator calib(spot, r, q);
+              return calib.calibrate(qs, qf::pricingengines::HestonParams{
+                                             0.04, 1.5, 0.04, 0.4, -0.5},
+                                     objective, vega_weighted);
+          },
+          py::arg("spot"), py::arg("r"), py::arg("q"),
+          py::arg("quotes"),
+          py::arg("objective") = qf::models::CalibrationObjective::Price,
+          py::arg("vega_weighted") = false,
+          "Calibrate Heston to a list of (strike, maturity, OptionType, price) "
+          "quotes. Returns a CalibrationResult; .params feed make_heston_engine.");
 
     // ------------------------------------------------------------------ //
     // HullWhite — short-rate model (needed by CVACalculator in qfxva)    //

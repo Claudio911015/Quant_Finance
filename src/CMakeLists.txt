@@ -5,6 +5,7 @@ add_library(qf
     math/integration.cpp
     math/statistics.cpp
     math/daycount.cpp
+    math/optimization.cpp
     termstructure/yieldcurve.cpp
     termstructure/bootstrap.cpp
     instruments/instrument.cpp
@@ -23,6 +24,7 @@ add_library(qf
     models/vasicek.cpp
     models/hullwhite.cpp
     models/heston_model.cpp
+    models/heston_calibrator.cpp
     models/bs_model.cpp
     risk/greeks.cpp
     risk/var.cpp

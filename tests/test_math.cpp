@@ -2,7 +2,9 @@
 #include <qf/math/interpolation.hpp>
 #include <qf/math/rootfinding.hpp>
 #include <qf/math/integration.hpp>
+#include <qf/math/optimization.hpp>
 #include <cmath>
+#include <vector>
 
 using namespace qf::math;
 
@@ -147,4 +149,49 @@ TEST(Integration, GaussLegendreGaussian) {
     auto f = [](double x) { return std::exp(-x * x); };
     double expected = std::sqrt(M_PI) * std::erf(3.0);
     EXPECT_NEAR(gaussLegendre(f, -3.0, 3.0, 32), expected, 1e-10);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Nelder-Mead optimization
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(NelderMead, ShiftedQuadraticMinimum) {
+    // f(x,y) = (x-3)^2 + (y+2)^2, minimum at (3, -2) with f = 0.
+    auto f = [](const std::vector<double>& v) {
+        return (v[0] - 3.0) * (v[0] - 3.0) + (v[1] + 2.0) * (v[1] + 2.0);
+    };
+    auto res = nelderMead(f, {0.0, 0.0}, 1e-10, 2000);
+    EXPECT_TRUE(res.converged);
+    EXPECT_NEAR(res.x[0],  3.0, 1e-4);
+    EXPECT_NEAR(res.x[1], -2.0, 1e-4);
+    EXPECT_NEAR(res.fmin,  0.0, 1e-8);
+}
+
+TEST(NelderMead, RosenbrockRecovery) {
+    // Classic banana valley; global min at (1, 1) with f = 0.
+    auto rosen = [](const std::vector<double>& v) {
+        double a = 1.0 - v[0];
+        double b = v[1] - v[0] * v[0];
+        return a * a + 100.0 * b * b;
+    };
+    auto res = nelderMead(rosen, {-1.2, 1.0}, 1e-12, 5000);
+    EXPECT_TRUE(res.converged);
+    EXPECT_NEAR(res.x[0], 1.0, 1e-3);
+    EXPECT_NEAR(res.x[1], 1.0, 1e-3);
+}
+
+TEST(NelderMead, StarvedIterationsDoNotConverge) {
+    auto rosen = [](const std::vector<double>& v) {
+        double a = 1.0 - v[0];
+        double b = v[1] - v[0] * v[0];
+        return a * a + 100.0 * b * b;
+    };
+    auto res = nelderMead(rosen, {-1.2, 1.0}, 1e-12, 1);
+    EXPECT_FALSE(res.converged);
+    EXPECT_EQ(res.iterations, 1);
+}
+
+TEST(NelderMead, EmptyStartThrows) {
+    auto f = [](const std::vector<double>& v) { return v.empty() ? 0.0 : v[0]; };
+    EXPECT_THROW(nelderMead(f, {}, 1e-8, 100), std::invalid_argument);
 }
