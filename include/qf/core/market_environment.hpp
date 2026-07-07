@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 #include <qf/termstructure/yieldcurve.hpp>
+#include <qf/termstructure/volsurface.hpp>
 #include <qf/core/imarket_observer.hpp>
 
 namespace qf::core {
@@ -71,6 +72,17 @@ public:
     /// @param vol     Implied volatility as a decimal (e.g. 0.20 for 20 %).
     void setVolatility(const std::string& ticker, double vol);
 
+    /// @brief Set or update the implied-vol surface for a ticker (P4).
+    ///
+    /// Once a surface is registered, the strike/maturity-aware volatility() overload
+    /// prefers it over any flat scalar vol. Fires a VolatilityChanged notification, so
+    /// Observer-subscribed instruments reprice on a surface update exactly as they do on
+    /// a flat-vol update. The scalar setVolatility/volatility API is left untouched.
+    ///
+    /// @param ticker   Asset identifier matching IUnderlying::id().
+    /// @param surface  VolSurface to store (copied into the environment).
+    void setVolSurface(const std::string& ticker, termstructure::VolSurface surface);
+
     // -------------------------------------------------------------------------
     // Read-only accessors
     // -------------------------------------------------------------------------
@@ -93,6 +105,22 @@ public:
     /// @throws        std::out_of_range if @p ticker is not found.
     double volatility(const std::string& ticker) const;
 
+    /// @brief Strike/maturity-aware implied volatility for a ticker (P4).
+    ///
+    /// Prefers a VolSurface registered via setVolSurface(); when none is set, falls back
+    /// to the flat scalar returned by volatility(ticker) — so the flat-vol workflow is
+    /// bit-for-bit unchanged when no surface exists.
+    ///
+    /// @param ticker    Asset identifier.
+    /// @param strike    Option strike to mark.
+    /// @param maturity  Option maturity in years.
+    /// @return          Surface vol if a surface is set, else the flat scalar vol.
+    /// @throws          std::out_of_range if neither a surface nor a flat vol is set.
+    double volatility(const std::string& ticker, double strike, double maturity) const;
+
+    /// @brief True if a VolSurface has been registered for @p ticker.
+    bool hasVolSurface(const std::string& ticker) const;
+
 private:
     /// @brief Notify all live subscribers of a market-data change.
     ///
@@ -106,6 +134,7 @@ private:
     std::unordered_map<std::string, termstructure::YieldCurve> curves_;
     std::unordered_map<std::string, double> spots_;
     std::unordered_map<std::string, double> vols_;
+    std::unordered_map<std::string, termstructure::VolSurface> volSurfaces_;
     std::vector<std::weak_ptr<IMarketObserver>> observers_;
 };
 

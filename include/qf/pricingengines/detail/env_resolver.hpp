@@ -17,7 +17,11 @@ inline instruments::OptionParams resolveEquityParams(
 {
     if (ticker.empty()) return params;
     params.spot         = env.spot(ticker);
-    params.volatility   = env.volatility(ticker);
+    // Strike/maturity-aware lookup (P4): uses the ticker's VolSurface when one is set,
+    // otherwise falls back to the flat scalar vol — so BS/MC/BT/FDM become
+    // smile-consistent automatically through this single choke point, and the flat-vol
+    // path is unchanged when no surface exists.
+    params.volatility   = env.volatility(ticker, params.strike, params.maturity);
     params.riskFreeRate = env.curve("default").zeroRate(params.maturity);
     return params;
 }

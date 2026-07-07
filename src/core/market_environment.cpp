@@ -77,6 +77,12 @@ void MarketEnvironment::setVolatility(const std::string& ticker, double vol) {
     notify(ChangeType::VolatilityChanged, ticker);
 }
 
+void MarketEnvironment::setVolSurface(const std::string& ticker,
+                                      termstructure::VolSurface surface) {
+    volSurfaces_.insert_or_assign(ticker, std::move(surface));
+    notify(ChangeType::VolatilityChanged, ticker);
+}
+
 // -----------------------------------------------------------------------------
 // Read-only accessors
 // -----------------------------------------------------------------------------
@@ -103,6 +109,20 @@ double MarketEnvironment::volatility(const std::string& ticker) const {
         throw std::out_of_range("MarketEnvironment: volatility not found for ticker: " + ticker);
     }
     return it->second;
+}
+
+double MarketEnvironment::volatility(const std::string& ticker,
+                                     double strike, double maturity) const {
+    auto sit = volSurfaces_.find(ticker);
+    if (sit != volSurfaces_.end()) {
+        return sit->second.vol(strike, maturity);
+    }
+    // No surface: fall back to the flat scalar (unchanged behaviour, incl. its throw).
+    return volatility(ticker);
+}
+
+bool MarketEnvironment::hasVolSurface(const std::string& ticker) const {
+    return volSurfaces_.find(ticker) != volSurfaces_.end();
 }
 
 } // namespace qf::core
