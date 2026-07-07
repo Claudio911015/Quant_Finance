@@ -27,6 +27,21 @@ CVACalculator::CVACalculator(const qf::models::IRateModel& model,
         throw std::invalid_argument("CVACalculator: monitorDates must be sorted ascending");
 }
 
+void CVACalculator::setOwnCredit(const ICreditCurve& ownCredit, double ownLgd)
+{
+    if (ownLgd < 0.0 || ownLgd > 1.0)
+        throw std::invalid_argument("CVACalculator: own LGD must be in [0,1]");
+    ownCredit_ = &ownCredit;
+    ownLgd_    = ownLgd;
+}
+
+void CVACalculator::setFundingSpread(double fundingSpread)
+{
+    if (fundingSpread < 0.0)
+        throw std::invalid_argument("CVACalculator: funding spread must be >= 0");
+    fundingSpread_ = fundingSpread;
+}
+
 CVAResult CVACalculator::compute(const NettingSet& ns,
                                   const qf::core::MarketEnvironment&) const
 {
@@ -42,8 +57,9 @@ CVAResult CVACalculator::compute(const NettingSet& ns,
     const std::vector<double> baseTenors =
         {1.0/12, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 20.0, 30.0};
 
-    // Accumulate EPE per monitor date across paths
+    // Accumulate EPE and ENE per monitor date across paths
     std::vector<double> epeAccum(nDates, 0.0);
+    std::vector<double> eneAccum(nDates, 0.0);
 
     unsigned seed = params_.seed.has_value()
                   ? params_.seed.value()
@@ -81,25 +97,55 @@ CVAResult CVACalculator::compute(const NettingSet& ns,
             qf::core::MarketEnvironment simEnv(simCurve);
 
             double netVal = ns.netValue(simEnv, t_k);
-            epeAccum[k] += std::max(netVal, 0.0);
+            epeAccum[k] += std::max(netVal, 0.0);   // Expected Positive Exposure
+            eneAccum[k] += std::max(-netVal, 0.0);  // Expected Negative Exposure
         }
     }
 
-    // Assemble CVAResult
+    // Assemble CVAResult. DVA is folded only if an own-credit curve was configured;
+    // FVA only if a funding spread was configured — otherwise both stay 0 and the
+    // result matches the previous unilateral-CVA behaviour byte-for-byte.
+    const bool hasOwn = (ownCredit_ != nullptr);
+    const bool hasFva = (fundingSpread_ > 0.0);
+
     CVAResult result;
     result.profile.resize(nDates);
     result.cva = 0.0;
-    double sp_prev = 1.0;
+    result.dva = 0.0;
+    result.fva = 0.0;
+
+    double sp_prev    = 1.0; // counterparty survival at t_0 = 0
+    double spOwn_prev = 1.0; // own survival at t_0 = 0
+    double t_prev     = 0.0;
 
     for (std::size_t k = 0; k < nDates; ++k) {
-        double epe     = epeAccum[k] / static_cast<double>(params_.nPaths);
-        double sp      = credit_.survivalProbability(dates[k]);
-        double contrib = lgd_ * epe * (sp_prev - sp);
-        result.profile[k] = {dates[k], epe, sp, contrib};
-        result.cva += contrib;
-        sp_prev = sp;
+        double epe   = epeAccum[k] / static_cast<double>(params_.nPaths);
+        double ene   = eneAccum[k] / static_cast<double>(params_.nPaths);
+        double sp    = credit_.survivalProbability(dates[k]);
+        double spOwn = hasOwn ? ownCredit_->survivalProbability(dates[k]) : 1.0;
+
+        double cvaContrib = lgd_ * epe * (sp_prev - sp);
+        double dvaContrib = hasOwn ? ownLgd_ * ene * (spOwn_prev - spOwn) : 0.0;
+
+        double fvaContrib = 0.0;
+        if (hasFva) {
+            double dt      = dates[k] - t_prev;
+            double spJoint = sp * spOwn; // funding relevant only while both names survive
+            fvaContrib     = fundingSpread_ * (epe - ene) * spJoint * dt;
+        }
+
+        result.profile[k] =
+            {dates[k], epe, ene, sp, spOwn, cvaContrib, dvaContrib, fvaContrib};
+        result.cva += cvaContrib;
+        result.dva += dvaContrib;
+        result.fva += fvaContrib;
+
+        sp_prev    = sp;
+        spOwn_prev = spOwn;
+        t_prev     = dates[k];
     }
 
+    result.bcva = result.cva - result.dva;
     return result;
 }
 

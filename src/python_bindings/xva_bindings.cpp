@@ -68,35 +68,51 @@ PYBIND11_MODULE(qfxva, m) {
 
     // ── TimeStep ──────────────────────────────────────────────────
     py::class_<TimeStep>(m, "TimeStep")
-        .def_readonly("t",            &TimeStep::t)
-        .def_readonly("epe",          &TimeStep::epe)
-        .def_readonly("surv_prob",    &TimeStep::survProb)
-        .def_readonly("contribution", &TimeStep::contribution);
+        .def_readonly("t",                &TimeStep::t)
+        .def_readonly("epe",              &TimeStep::epe)
+        .def_readonly("ene",              &TimeStep::ene)
+        .def_readonly("surv_prob",        &TimeStep::survProb)
+        .def_readonly("own_surv_prob",    &TimeStep::ownSurvProb)
+        .def_readonly("contribution",     &TimeStep::contribution)
+        .def_readonly("dva_contribution", &TimeStep::dvaContribution)
+        .def_readonly("fva_contribution", &TimeStep::fvaContribution);
 
     // ── CVAResult ─────────────────────────────────────────────────
     py::class_<CVAResult>(m, "CVAResult")
         .def_readonly("cva",     &CVAResult::cva)
+        .def_readonly("dva",     &CVAResult::dva)
+        .def_readonly("fva",     &CVAResult::fva)
+        .def_readonly("bcva",    &CVAResult::bcva)
         .def_readonly("profile", &CVAResult::profile)
         .def("to_dataframe", [](const CVAResult& r) {
             py::dict d;
-            std::vector<double> ts, epes, sps, contribs;
-            ts.reserve(r.profile.size());
-            epes.reserve(r.profile.size());
-            sps.reserve(r.profile.size());
-            contribs.reserve(r.profile.size());
+            std::vector<double> ts, epes, enes, sps, ownSps, contribs, dvaContribs, fvaContribs;
+            const auto n = r.profile.size();
+            ts.reserve(n); epes.reserve(n); enes.reserve(n);
+            sps.reserve(n); ownSps.reserve(n);
+            contribs.reserve(n); dvaContribs.reserve(n); fvaContribs.reserve(n);
             for (const auto& step : r.profile) {
                 ts.push_back(step.t);
                 epes.push_back(step.epe);
+                enes.push_back(step.ene);
                 sps.push_back(step.survProb);
+                ownSps.push_back(step.ownSurvProb);
                 contribs.push_back(step.contribution);
+                dvaContribs.push_back(step.dvaContribution);
+                fvaContribs.push_back(step.fvaContribution);
             }
-            d["t"]            = ts;
-            d["epe"]          = epes;
-            d["surv_prob"]    = sps;
-            d["contribution"] = contribs;
+            d["t"]                = ts;
+            d["epe"]              = epes;
+            d["ene"]              = enes;
+            d["surv_prob"]        = sps;
+            d["own_surv_prob"]    = ownSps;
+            d["contribution"]     = contribs;
+            d["dva_contribution"] = dvaContribs;
+            d["fva_contribution"] = fvaContribs;
             py::object pd = py::module_::import("pandas");
             return pd.attr("DataFrame")(d);
-        }, "Return profile as a pandas DataFrame with columns: t, epe, surv_prob, contribution.");
+        }, "Return profile as a pandas DataFrame with columns: t, epe, ene, surv_prob, "
+           "own_surv_prob, contribution, dva_contribution, fva_contribution.");
 
     // ── CVACalculator ─────────────────────────────────────────────
     py::class_<CVACalculator>(m, "CVACalculator")
@@ -109,7 +125,14 @@ PYBIND11_MODULE(qfxva, m) {
              py::arg("hw"), py::arg("credit"), py::arg("lgd"), py::arg("params"),
              py::keep_alive<1,2>(),   // calculator keeps hw alive
              py::keep_alive<1,3>())   // calculator keeps credit alive
+        .def("set_own_credit", &CVACalculator::setOwnCredit,
+             py::arg("own_credit"), py::arg("own_lgd"),
+             py::keep_alive<1,2>(),   // calculator keeps own_credit alive
+             "Enable DVA using the firm's own credit curve and own LGD in [0,1].")
+        .def("set_funding_spread", &CVACalculator::setFundingSpread,
+             py::arg("funding_spread"),
+             "Enable FVA using a scalar funding spread (decimal, >= 0).")
         .def("compute", &CVACalculator::compute,
              py::arg("netting_set"), py::arg("env"),
-             "Run CVA simulation. Returns CVAResult.");
+             "Run the exposure simulation. Returns CVAResult with cva, dva, fva, bcva.");
 }

@@ -169,6 +169,120 @@ TEST(CVACalculator, NettingReducesExposureToNearZero) {
     EXPECT_NEAR(result.cva, 0.0, 1e-6); // payer+receiver cancel exactly at every path
 }
 
+// ── Bilateral XVA: DVA / FVA (P1) ──────────────────────────────────────────
+
+// Own credit not configured → DVA == 0 and BCVA == CVA (backward compatibility).
+TEST(CVACalculator, NoOwnCreditGivesZeroDVAAndBCVAEqualsCVA) {
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.005, curve);
+    qf::xva::FlatHazardRate credit(0.02);
+    qf::xva::SimParams params{2000, quarterlyDates(5.0), 42u};
+    qf::xva::CVACalculator calc(hw, credit, 0.6, params);
+
+    qf::xva::NettingSet ns;
+    ns.add(1e6, 0.10, 5.0, 1.0, qf::instruments::SwapType::Receiver);
+
+    qf::core::MarketEnvironment env(curve);
+    auto r = calc.compute(ns, env);
+
+    EXPECT_NEAR(r.dva, 0.0, 1e-12);
+    EXPECT_NEAR(r.fva, 0.0, 1e-12);
+    EXPECT_NEAR(r.bcva, r.cva, 1e-12);
+    for (const auto& s : r.profile)
+        EXPECT_NEAR(s.ownSurvProb, 1.0, 1e-12);
+}
+
+// Deep OTM payer swap → negative exposure → ENE > 0 → DVA > 0.
+// Symmetric to DeepITMReceiverSwapPositiveCVA (which drives CVA via EPE).
+TEST(CVACalculator, DeepOTMPayerSwapPositiveDVA) {
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.005, curve);
+    qf::xva::FlatHazardRate credit(0.02);      // counterparty
+    qf::xva::FlatHazardRate ownCredit(0.02);   // own
+    qf::xva::SimParams params{5000, quarterlyDates(5.0), 42u};
+    qf::xva::CVACalculator calc(hw, credit, 0.6, params);
+    calc.setOwnCredit(ownCredit, 0.6);
+
+    // Payer paying 10% fixed, receiving 4% float on a 4% curve → deeply out of money
+    qf::xva::NettingSet ns;
+    ns.add(1e6, 0.10, 5.0, 1.0, qf::instruments::SwapType::Payer);
+
+    qf::core::MarketEnvironment env(curve);
+    auto r = calc.compute(ns, env);
+
+    EXPECT_GT(r.dva, 0.0);
+    EXPECT_LT(r.cva, 0.1 * r.dva);             // negative-exposure book → ENE dominates
+    EXPECT_NEAR(r.bcva, r.cva - r.dva, 1e-9);  // identity
+    EXPECT_LT(r.bcva, 0.0);                     // DVA dominates → benefit to firm
+    for (const auto& s : r.profile) {
+        EXPECT_GE(s.ene, 0.0);
+        EXPECT_GE(s.dvaContribution, -1e-8);
+    }
+    EXPECT_GT(r.dva, 3000.0);
+    EXPECT_LT(r.dva, 50000.0);
+}
+
+// Symmetric book: DVA of a payer ≈ CVA of the mirror receiver (same magnitudes).
+TEST(CVACalculator, DVAOfPayerMatchesCVAOfReceiver) {
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.005, curve);
+    qf::xva::FlatHazardRate credit(0.02);
+    qf::xva::SimParams params{5000, quarterlyDates(5.0), 42u};
+
+    // CVA of the ITM receiver
+    qf::xva::CVACalculator cvaCalc(hw, credit, 0.6, params);
+    qf::xva::NettingSet nsRecv;
+    nsRecv.add(1e6, 0.10, 5.0, 1.0, qf::instruments::SwapType::Receiver);
+    qf::core::MarketEnvironment env(curve);
+    double cvaRecv = cvaCalc.compute(nsRecv, env).cva;
+
+    // DVA of the mirror payer (own credit == that same counterparty curve)
+    qf::xva::CVACalculator dvaCalc(hw, credit, 0.6, params);
+    dvaCalc.setOwnCredit(credit, 0.6);
+    qf::xva::NettingSet nsPay;
+    nsPay.add(1e6, 0.10, 5.0, 1.0, qf::instruments::SwapType::Payer);
+    double dvaPay = dvaCalc.compute(nsPay, env).dva;
+
+    EXPECT_NEAR(dvaPay, cvaRecv, 0.05 * cvaRecv); // within 5%
+}
+
+// Funding spread on a positive-exposure book → FVA > 0; zero spread → FVA == 0.
+TEST(CVACalculator, FundingSpreadDrivesPositiveFVA) {
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.005, curve);
+    qf::xva::FlatHazardRate credit(0.02);
+    qf::xva::SimParams params{2000, quarterlyDates(5.0), 42u};
+
+    qf::xva::NettingSet ns;
+    ns.add(1e6, 0.10, 5.0, 1.0, qf::instruments::SwapType::Receiver); // positive exposure
+    qf::core::MarketEnvironment env(curve);
+
+    qf::xva::CVACalculator noFva(hw, credit, 0.6, params);
+    EXPECT_NEAR(noFva.compute(ns, env).fva, 0.0, 1e-12);
+
+    qf::xva::CVACalculator withFva(hw, credit, 0.6, params);
+    withFva.setFundingSpread(0.01); // 100 bps
+    auto r = withFva.compute(ns, env);
+    EXPECT_GT(r.fva, 0.0); // net positive expected exposure → net funding cost
+    // FVA scales linearly with the funding spread (same paths, same seed).
+    qf::xva::CVACalculator withFva2(hw, credit, 0.6, params);
+    withFva2.setFundingSpread(0.02); // double the spread
+    EXPECT_NEAR(withFva2.compute(ns, env).fva, 2.0 * r.fva, 1e-6 * r.fva);
+}
+
+// Validation: own LGD out of range and negative funding spread throw.
+TEST(CVACalculator, BilateralConfigValidation) {
+    auto curve = flatCurve(0.04);
+    qf::models::HullWhite hw(0.1, 0.005, curve);
+    qf::xva::FlatHazardRate credit(0.02);
+    qf::xva::SimParams params{100, quarterlyDates(2.0), 42u};
+    qf::xva::CVACalculator calc(hw, credit, 0.6, params);
+
+    EXPECT_THROW(calc.setOwnCredit(credit, -0.1), std::invalid_argument);
+    EXPECT_THROW(calc.setOwnCredit(credit, 1.5), std::invalid_argument);
+    EXPECT_THROW(calc.setFundingSpread(-0.001), std::invalid_argument);
+}
+
 TEST(Vasicek, ConditionalBondPricePositive) {
     qf::models::Vasicek v(0.1, 0.05, 0.01, 0.04);
     double P = v.conditionalBondPrice(1.0, 5.0, 0.04);
