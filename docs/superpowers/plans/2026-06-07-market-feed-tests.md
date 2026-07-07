@@ -1,5 +1,7 @@
 # Quant_Finance: Tests para market_feed.py
 
+> **Status: COMPLETADO 2026-06-07** — ver commits b4081c8, d486f6b, f4a1613 y python/tests/test_market_feed.py.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `market_feed.py` (`python/market_feed.py`) tiene cero tests — sus funciones son nodos aislados en el grafo. Añadir tests con mocks de red para cubrir `fetch_treasury_curve_yfinance`, `fetch_treasury_curve_fred`, `fetch_equity` y `MarketEnvironmentBuilder`.
