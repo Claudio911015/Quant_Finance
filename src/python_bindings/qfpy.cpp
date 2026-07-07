@@ -14,8 +14,10 @@
 #include <qf/pricingengines/finite_difference.hpp>
 #include <qf/pricingengines/heston.hpp>
 #include <qf/instruments/iunderlying.hpp>
+#include <qf/instruments/instrument.hpp>
 #include <qf/models/hullwhite.hpp>
 #include <qf/instruments/swap.hpp>
+#include <qf/risk/scenario.hpp>
 
 namespace py = pybind11;
 
@@ -129,7 +131,19 @@ PYBIND11_MODULE(qfpy, m) {
         .def_readwrite("type", &qf::instruments::OptionParams::type)
         .def_readwrite("exercise", &qf::instruments::OptionParams::exercise);
 
-    py::class_<qf::instruments::Bond>(m, "Bond")
+    // ------------------------------------------------------------------ //
+    // Instrument — abstract base; enables passing any instrument (e.g. a  //
+    // Bond) to the ScenarioEngine, which takes a const Instrument&.        //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::instruments::Instrument>(m, "Instrument")
+        .def("pv",
+             static_cast<double (qf::instruments::Instrument::*)
+                         (const qf::core::MarketEnvironment&) const>(
+                 &qf::instruments::Instrument::pv),
+             py::arg("env"), "Present value against a MarketEnvironment.")
+        .def("maturity", &qf::instruments::Instrument::maturity);
+
+    py::class_<qf::instruments::Bond, qf::instruments::Instrument>(m, "Bond")
         .def(py::init<double, double, int, double>(),
              py::arg("faceValue"), py::arg("couponRate"), py::arg("periods"), py::arg("frequency") = 2.0)
         .def("price", &qf::instruments::Bond::price)
@@ -148,7 +162,20 @@ PYBIND11_MODULE(qfpy, m) {
              py::arg("maturities"), py::arg("zeroRates"), py::arg("method"))
         .def("zero_rate", &qf::termstructure::YieldCurve::zeroRate)
         .def("discount_factor", &qf::termstructure::YieldCurve::discountFactor)
-        .def("forward_rate", &qf::termstructure::YieldCurve::forwardRate);
+        .def("forward_rate", &qf::termstructure::YieldCurve::forwardRate)
+        .def("maturities", &qf::termstructure::YieldCurve::maturities,
+             py::return_value_policy::reference_internal,
+             "Pillar maturities (years) the curve was built from.")
+        .def("rates", &qf::termstructure::YieldCurve::rates,
+             py::return_value_policy::reference_internal,
+             "Pillar zero rates (decimal) aligned to maturities().")
+        .def("interpolation_method", &qf::termstructure::YieldCurve::interpolationMethod)
+        .def("parallel_bump", &qf::termstructure::YieldCurve::parallelBump,
+             py::arg("bp_shift"),
+             "Copy of the curve with every pillar shifted by bp_shift basis points.")
+        .def("bumped", &qf::termstructure::YieldCurve::bumped,
+             py::arg("pillar_index"), py::arg("bp_shift"),
+             "Copy of the curve with a single pillar shifted by bp_shift basis points.");
 
     py::enum_<qf::pricingengines::FDMethod>(m, "FDMethod")
         .value("Explicit", qf::pricingengines::FDMethod::Explicit)
@@ -282,4 +309,70 @@ PYBIND11_MODULE(qfpy, m) {
              py::arg("env"),
              "Undiscounted net cash flows: list of (time, net_cf) sorted by time.\n"
              "Positive = net receipt; negative = net payment.");
+
+    // ------------------------------------------------------------------ //
+    // qf::risk ScenarioEngine — curve rate risk (parallel/key-rate DV01, //
+    // named curve scenarios) for any Instrument (P2c).                    //
+    // ------------------------------------------------------------------ //
+    py::class_<qf::risk::KeyRateDV01>(m, "KeyRateDV01")
+        .def_readonly("maturity", &qf::risk::KeyRateDV01::maturity)
+        .def_readonly("dv01",     &qf::risk::KeyRateDV01::dv01)
+        .def("__repr__", [](const qf::risk::KeyRateDV01& r) {
+            return "KeyRateDV01(maturity=" + std::to_string(r.maturity)
+                 + ", dv01=" + std::to_string(r.dv01) + ")";
+        });
+
+    py::class_<qf::risk::ScenarioResult>(m, "ScenarioResult")
+        .def_readonly("label",       &qf::risk::ScenarioResult::label)
+        .def_readonly("base_pv",     &qf::risk::ScenarioResult::basePV)
+        .def_readonly("scenario_pv", &qf::risk::ScenarioResult::scenarioPV)
+        .def_readonly("pnl",         &qf::risk::ScenarioResult::pnl);
+
+    py::class_<qf::risk::ScenarioEngine>(m, "ScenarioEngine")
+        .def(py::init<std::string, double>(),
+             py::arg("curve_name") = "default", py::arg("bump_size_bp") = 1.0,
+             "Curve rate-risk engine. Bumps are in basis points; DV01s are the dollar\n"
+             "value of a 1 bp move, positive when PV rises as rates fall.")
+        .def("parallel_dv01", &qf::risk::ScenarioEngine::parallelDV01,
+             py::arg("instrument"), py::arg("env"),
+             "Dollar value of a 1 bp parallel shift of the target curve.")
+        .def("key_rate_dv01s", &qf::risk::ScenarioEngine::keyRateDV01s,
+             py::arg("instrument"), py::arg("env"),
+             "Key-rate DV01 ladder: one KeyRateDV01 per curve pillar.")
+        .def("run_scenario", &qf::risk::ScenarioEngine::runScenario,
+             py::arg("instrument"), py::arg("env"), py::arg("per_pillar_shifts_bp"),
+             py::arg("label") = "custom",
+             "Full revaluation under an arbitrary per-pillar shift (bp). Returns a "
+             "ScenarioResult (base_pv, scenario_pv, pnl).")
+        .def("parallel_shock", &qf::risk::ScenarioEngine::parallelShock,
+             py::arg("instrument"), py::arg("env"), py::arg("magnitude_bp"),
+             "Uniform parallel shock of magnitude_bp on every pillar.")
+        .def("steepener", &qf::risk::ScenarioEngine::steepener,
+             py::arg("instrument"), py::arg("env"), py::arg("magnitude_bp"),
+             "Steepener: linear ramp from -mag (short) to +mag (long).")
+        .def("flattener", &qf::risk::ScenarioEngine::flattener,
+             py::arg("instrument"), py::arg("env"), py::arg("magnitude_bp"),
+             "Flattener: linear ramp from +mag (short) to -mag (long).");
+
+    m.def("key_rate_dv01_dataframe",
+          [](const qf::risk::ScenarioEngine& engine,
+             const qf::instruments::Instrument& inst,
+             const qf::core::MarketEnvironment& env) {
+              auto ladder = engine.keyRateDV01s(inst, env);
+              std::vector<double> mats, dv01s;
+              mats.reserve(ladder.size());
+              dv01s.reserve(ladder.size());
+              for (const auto& rung : ladder) {
+                  mats.push_back(rung.maturity);
+                  dv01s.push_back(rung.dv01);
+              }
+              py::dict d;
+              d["maturity"] = mats;
+              d["dv01"]     = dv01s;
+              py::object pd = py::module_::import("pandas");
+              return pd.attr("DataFrame")(d);
+          },
+          py::arg("engine"), py::arg("instrument"), py::arg("env"),
+          "Return the key-rate DV01 ladder as a pandas DataFrame with columns "
+          "maturity, dv01 (follows CVAResult.to_dataframe() precedent).");
 }
