@@ -1,233 +1,216 @@
-# Graph Report - /home/claudio/Git/Quant_Finance  (2026-06-23)
+# Graph Report - /home/claudio/Git/Quant_Finance  (2026-07-07)
 
 ## Corpus Check
-- Corpus is ~47,899 words - fits in a single context window. You may not need a graph.
+- 137 files · ~60,000 words
+- Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 486 nodes · 796 edges · 37 communities detected
-- Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 26 edges (avg confidence: 0.63)
+- 527 nodes · 889 edges · 35 communities detected
+- Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 16 edges (avg confidence: 0.87)
 - Token cost: 0 input · 0 output
 
 ## God Nodes (most connected - your core abstractions)
-1. `MarketEnvironmentBuilder` - 27 edges
-2. `AppTestCase` - 19 edges
-3. `qf Static Library` - 13 edges
-4. `_MarketEnvironment` - 9 edges
-5. `QuantFinance Library` - 8 edges
-6. `fetch_treasury_curve_yfinance()` - 7 edges
-7. `_make_ticker_mock()` - 7 edges
-8. `price()` - 7 edges
-9. `fetch_treasury_curve_fred()` - 6 edges
-10. `fetch_equity()` - 6 edges
+1. `AppTestCase` - 19 edges
+2. `DualCurveBindings` - 8 edges
+3. `QuantFinance Library` - 8 edges
+4. `CVACalculator` - 8 edges
+5. `VolSurfaceBindings` - 7 edges
+6. `ScenarioEngineBindings` - 7 edges
+7. `price()` - 7 edges
+8. `HestonCalibrationBindings` - 6 edges
+9. `priceRegular()` - 6 edges
+10. `priceScheduled()` - 6 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `MarketEnvironmentBuilder` --conceptually_related_to--> `MarketEnvironment (qf::core)`  [INFERRED]
-  python/market_feed.py → CLAUDE.md
-- `_YieldCurve Stub` --conceptually_related_to--> `qfpy.YieldCurve (C++ binding)`  [INFERRED]
-  python/tests/test_market_feed.py → src/CMakeLists.txt
-- `_MarketEnvironment Stub` --conceptually_related_to--> `qfpy.MarketEnvironment (C++ binding)`  [INFERRED]
-  python/tests/test_market_feed.py → src/CMakeLists.txt
-- `fetch_treasury_curve_yfinance()` --calls--> `qfpy.YieldCurve (C++ binding)`  [EXTRACTED]
-  python/market_feed.py → src/CMakeLists.txt
-- `fetch_treasury_curve_fred()` --calls--> `qfpy.YieldCurve (C++ binding)`  [EXTRACTED]
-  python/market_feed.py → src/CMakeLists.txt
+- `IPricingEngine Interface` --semantically_similar_to--> `Pricing Engines Module`  [INFERRED] [semantically similar]
+  docs/superpowers/specs/2026-04-02-architecture-refactor-design.md → README.md
+- `IRateModel Interface` --semantically_similar_to--> `Rate Models Module`  [INFERRED] [semantically similar]
+  docs/superpowers/specs/2026-04-02-architecture-refactor-design.md → README.md
+- `Flask (Python web dependency)` --conceptually_related_to--> `QuantFinance Library`  [INFERRED]
+  python_web/requirements.txt → README.md
+- `Backward Compatibility Constraint` --conceptually_related_to--> `qfpy Python Bindings (pybind11)`  [INFERRED]
+  docs/superpowers/specs/2026-04-02-architecture-refactor-design.md → README.md
+- `Hull-White short-rate model` --implements--> `IRateModel interface`  [INFERRED]
+  docs/superpowers/specs/2026-04-15-cva-engine-design.md → CLAUDE.md
+
+## Hyperedges (group relationships)
+- **Strategy Pattern Interface Trio** — design_ipricing_engine, design_irate_model, design_iequity_model [EXTRACTED 0.95]
+- **XVA computation flow: MC paths to EPE/ENE to CVA/DVA/FVA** — qf_CVACalculator, qf_EPE, qf_ENE, qf_CVA, qf_DVA, qf_FVA [EXTRACTED 1.00]
+- **Rate risk: scenario repricing yields DV01 ladders and P&L shocks** — qf_ScenarioEngine, qf_YieldCurve, qf_Instrument, qf_KeyRateDV01, qf_ParallelDV01 [EXTRACTED 1.00]
+- **Equity vol marking: quoted chains to Heston calibration to VolSurface to engine repricing** — qf_OptionQuote, qf_HestonCalibrator, qf_VolSurface, qf_BlackScholesEngine, qf_MonteCarloEngine [INFERRED 0.85]
 
 ## Communities
 
-### Community 0 - "Binomial Tree Pricing"
+### Community 0 - "Equity Pricing Engines"
+Cohesion: 0.06
+Nodes (29): binomialTreeBSPrice(), price(), blackScholes(), impliedVolatility(), price(), EngineFactory, example_live.py — Demostración del feed de datos reales + pricing con qfpy.  Des, finiteDifferenceBSPrice() (+21 more)
+
+### Community 1 - "Market Environment & Observers"
+Cohesion: 0.08
+Nodes (22): IMarketObserver, MarketEnvironment, addCurve(), MarketEnvironment(), notify(), setSpot(), setVolatility(), setVolSurface() (+14 more)
+
+### Community 2 - "Design Specs: Core Concepts"
 Cohesion: 0.07
-Nodes (28): binomialTreeBSPrice(), price(), blackScholes(), impliedVolatility(), price(), EngineFactory, finiteDifferenceBSPrice(), optionIntrinsic() (+20 more)
+Nodes (35): Bilateral CVA (BCVA), Bond, Counterparty Valuation Adjustment (CVA), CVACalculator, CVAResult (CVA + DVA + FVA + profile), CapFloor, Credit curve (counterparty default probability), Debit Valuation Adjustment (DVA) (+27 more)
 
-### Community 1 - "Market Environment Builder"
-Cohesion: 0.05
-Nodes (32): MarketEnvironmentBuilder, Construye un qfpy.MarketEnvironment listo para usar con los pricing engines., Descarga datos y devuelve el MarketEnvironment.          Args:             verbo, _make_fred_response(), _make_ticker_mock(), _make_yf_df(), _MarketEnvironment, Simula una respuesta CSV de FRED con una sola fila de datos. (+24 more)
-
-### Community 2 - "Architecture & Build Config"
-Cohesion: 0.07
-Nodes (35): build_release CMakeCache (Release build), CVACalculator (qf::xva), EngineFactory, IRateModel Interface, MarketEnvironment (qf::core), example_live.py — Demostración del feed de datos reales + pricing con qfpy.  Des, MarketEnvironmentBuilder, env_summary() (+27 more)
-
-### Community 3 - "Equity Models (BS & Heston)"
+### Community 3 - "Rate & Equity Models"
 Cohesion: 0.09
 Nodes (11): simulate(), theta(), zeroRate(), IEquityModel, IRateModel, TEST(), testCurve(), TEST() (+3 more)
 
-### Community 4 - "Yield Curve Bootstrap"
-Cohesion: 0.11
-Nodes (16): annuity(), flatCurve(), irsNPV(), slopedCurve(), TEST(), annuity(), flatCurve(), irsNPV() (+8 more)
-
-### Community 5 - "Cap/Floor IR Instruments"
+### Community 4 - "Instruments & Day Count"
 Cohesion: 0.1
 Nodes (13): calculatePV(), hwBondOption(), price(), Instrument, IPricingEngine, calculatePV(), hwB(), hwSigmaP() (+5 more)
 
-### Community 6 - "Flask Web App Tests"
+### Community 5 - "Yield Curve & Bootstrap"
+Cohesion: 0.12
+Nodes (14): annuity(), flatCurve(), irsNPV(), slopedCurve(), TEST(), flatCurve(), slopedCurve(), TEST() (+6 more)
+
+### Community 6 - "Web App Tests"
 Cohesion: 0.12
 Nodes (5): AppTestCase, ExerciseType, FDMethod, InterpolationMethod, OptionType
 
-### Community 7 - "Market Observer Interface"
-Cohesion: 0.11
-Nodes (12): IMarketObserver, MarketEnvironment, addCurve(), MarketEnvironment(), notify(), setSpot(), setVolatility(), flatCurve() (+4 more)
-
-### Community 8 - "Credit Curve & Hazard Rate"
-Cohesion: 0.14
+### Community 7 - "CVA/XVA Engine"
+Cohesion: 0.13
 Nodes (6): ICreditCurve, NettingSet, flatCurve(), quarterlyDates(), TEST(), PyICreditCurve
 
-### Community 9 - "Swap Pricing"
-Cohesion: 0.14
-Nodes (12): annuity(), calculateCouponPV(), calculatePV(), cashFlows(), discountAnnuity(), Leg, makeFixed(), makeFloating() (+4 more)
-
-### Community 10 - "Greeks & Risk Measures"
+### Community 8 - "Risk & VaR"
 Cohesion: 0.13
 Nodes (7): identityCorr(), TEST(), atmCall(), bsPrice(), TEST(), parametricVaR(), portfolioVaR()
 
-### Community 11 - "Bond Pricing"
-Cohesion: 0.26
-Nodes (10): calculatePV(), cashflows(), convexity(), duration(), maturities(), price(), yield(), flatCurve() (+2 more)
+### Community 9 - "Swap Pricing"
+Cohesion: 0.18
+Nodes (14): annuity(), calculateCouponPV(), calculatePV(), cashFlows(), discountAnnuity(), Leg, makeFixed(), makeFloating() (+6 more)
 
-### Community 12 - "Flask REST API"
+### Community 10 - "Heston Calibration & Vol Surface"
+Cohesion: 0.18
+Nodes (12): calibrate(), fromUnconstrained(), toUnconstrained(), tryImpliedVol(), makeSyntheticQuotes(), TEST(), makeGrid(), TEST() (+4 more)
+
+### Community 11 - "Library Architecture"
+Cohesion: 0.12
+Nodes (17): Backward Compatibility Constraint, EngineFactory, IEquityModel Interface, IPricingEngine Interface, IRateModel Interface, MarketEnvironment, Strategy Pattern for Pricing, Instruments Module (+9 more)
+
+### Community 12 - "Scenario & Dual-curve Tests"
+Cohesion: 0.24
+Nodes (13): flattener(), keyRateDV01s(), parallelDV01(), parallelShock(), priceWithCurve(), rampShifts(), runScenario(), steepener() (+5 more)
+
+### Community 13 - "Flask API Routes"
 Cohesion: 0.14
 Nodes (2): api_swap(), Price an IRS or ScheduledSwap.      Request JSON (mode='regular'):     {
 
-### Community 13 - "Swaps Frontend JS"
+### Community 14 - "Bond Instruments"
+Cohesion: 0.32
+Nodes (10): calculatePV(), cashflows(), convexity(), duration(), maturities(), price(), yield(), flatCurve() (+2 more)
+
+### Community 15 - "Numerical Math"
+Cohesion: 0.23
+Nodes (5): gaussLegendre(), glNodesWeights(), centroid(), extrapolate(), nelderMead()
+
+### Community 16 - "Dual-curve Py Bindings"
+Cohesion: 0.27
+Nodes (3): _curve(), DualCurveBindings, Python-side tests for the dual-curve swap bindings (P5c).  Verifies capabilities
+
+### Community 17 - "Swaps Web UI"
 Cohesion: 0.35
 Nodes (9): formatCurrency(), getCurve(), hideSwError(), priceRegular(), priceScheduled(), setLoading(), setMode(), showResults() (+1 more)
 
-### Community 14 - "Bonds Frontend JS"
+### Community 18 - "Underlyings"
+Cohesion: 0.22
+Nodes (1): IUnderlying
+
+### Community 19 - "VolSurface Py Bindings"
+Cohesion: 0.22
+Nodes (2): Python-side tests for the VolSurface bindings (P4c).  Imports the *real* built q, VolSurfaceBindings
+
+### Community 20 - "ScenarioEngine Py Bindings"
+Cohesion: 0.31
+Nodes (2): Python-side smoke tests for the qf::risk ScenarioEngine bindings (P2c).  Imports, ScenarioEngineBindings
+
+### Community 21 - "Bonds Web UI"
 Cohesion: 0.33
 Nodes (7): calcBond(), fetchYieldCurve(), getCurveData(), hideError(), renderYieldCurve(), setLoading(), showError()
 
-### Community 15 - "Python Bindings (pybind11)"
-Cohesion: 0.2
-Nodes (10): Instruments Module, Math Module, Pricing Engines Module, qfpy Python Bindings (pybind11), QuantFinance Library, Rate Models Module, Risk Module, Term Structure Module (+2 more)
+### Community 22 - "Heston Calib Bindings"
+Cohesion: 0.39
+Nodes (2): HestonCalibrationBindings, Python-side round-trip test for the Heston calibration bindings (P3c).  Imports
 
-### Community 16 - "Numerical Methods"
-Cohesion: 0.31
-Nodes (2): gaussLegendre(), glNodesWeights()
-
-### Community 17 - "Heston Frontend JS"
+### Community 23 - "Web UI Core"
 Cohesion: 0.42
 Nodes (7): fetchHeston(), hideError(), price(), row(), setLoading(), showError(), validate()
 
-### Community 18 - "Underlying Asset Types"
-Cohesion: 0.29
-Nodes (1): IUnderlying
-
-### Community 19 - "Charts & UI Frontend"
+### Community 24 - "Charts Web UI"
 Cohesion: 0.46
 Nodes (7): fetchConvergence(), fetchGreeksSurface(), fetchPayoff(), getFormPayload(), renderConvergenceChart(), renderGreeksChart(), renderPayoffChart()
 
-### Community 20 - "XVA Python Tests"
+### Community 25 - "XVA Py Tests"
 Cohesion: 0.57
 Nodes (6): _make_env(), _make_hw(), _quarterly(), Python-level tests for qfxva bindings., test_cva_positive_for_itm_receiver(), test_result_to_dataframe()
 
-### Community 21 - "Release Build Targets"
-Cohesion: 0.5
-Nodes (4): build_release Release Build Configuration, doxygen CMake Target, pytests CMake Target, run_web_ui CMake Target
+### Community 26 - "Dual-curve Design"
+Cohesion: 0.33
+Nodes (7): CurveKeys (discountKey + projectionKey), Dual-curve pricing (OIS + projection), InterestRateSwap, OIS/index basis spread, OIS discount curve, Projection/index curve, ScheduledSwap
 
-### Community 22 - "IR & Equity Examples"
+### Community 27 - "Market Data Feed"
 Cohesion: 0.67
-Nodes (3): heston Example Executable, interest_rate_models Example Executable, swap_pricing Example Executable
+Nodes (5): MarketEnvironmentBuilder, fetch_equity, fetch_treasury_curve_fred, fetch_treasury_curve_yfinance, _yf_last_close
 
-### Community 23 - "CMake Compiler ID"
-Cohesion: 1.0
-Nodes (0): 
+### Community 28 - "Engine Factory"
+Cohesion: 0.5
+Nodes (4): BlackScholesEngine, EngineFactory, IPricingEngine interface, MonteCarloEngine
 
-### Community 24 - "CMake Project Structure"
+### Community 29 - "CMake Build"
 Cohesion: 1.0
 Nodes (2): Examples Targets, QuantFinance CMake Project
 
-### Community 25 - "Yield Curve Examples"
+### Community 30 - "Community 30"
 Cohesion: 1.0
-Nodes (2): bootstrap Example Executable, yield_curve Example Executable
+Nodes (1): env_summary
 
-### Community 26 - "Python Package Init"
+### Community 31 - "Community 31"
+Cohesion: 1.0
+Nodes (1): _YieldCurve Stub
+
+### Community 32 - "Community 32"
+Cohesion: 1.0
+Nodes (1): _MarketEnvironment Stub
+
+### Community 33 - "Community 33"
 Cohesion: 1.0
 Nodes (0): 
 
-### Community 27 - "Compiler Dependencies"
+### Community 34 - "Community 34"
 Cohesion: 1.0
-Nodes (0): 
-
-### Community 28 - "Architecture Docs"
-Cohesion: 1.0
-Nodes (1): CLAUDE.md — Architecture & Build Guide
-
-### Community 29 - "IEquityModel Interface"
-Cohesion: 1.0
-Nodes (1): IEquityModel Interface
-
-### Community 30 - "IPricingEngine Interface"
-Cohesion: 1.0
-Nodes (1): IPricingEngine Interface
-
-### Community 31 - "Monte Carlo Example"
-Cohesion: 1.0
-Nodes (1): monte_carlo Example Executable
-
-### Community 32 - "Bond Pricing Example"
-Cohesion: 1.0
-Nodes (1): bond_pricing Example Executable
-
-### Community 33 - "Black-Scholes Example"
-Cohesion: 1.0
-Nodes (1): black_scholes Example Executable
-
-### Community 34 - "qf Static Library Target"
-Cohesion: 1.0
-Nodes (1): qf CMake Target (Static Library)
-
-### Community 35 - "qfpy Bindings Target"
-Cohesion: 1.0
-Nodes (1): qfpy CMake Target (Python Bindings)
-
-### Community 36 - "Test Suite Target"
-Cohesion: 1.0
-Nodes (1): qf_tests CMake Target (Test Suite)
+Nodes (1): IUnderlying Interface
 
 ## Knowledge Gaps
-- **58 isolated node(s):** `market_feed.py — Feeds de datos reales hacia qf::core::MarketEnvironment.  Fuent`, `Obtiene el último precio de cierre usando yfinance 1.x (MultiIndex DataFrame).`, `Descarga yields del Tesoro US vía Yahoo Finance y construye una YieldCurve.`, `Descarga la curva del Tesoro US desde FRED (Federal Reserve Bank of St. Louis).`, `Devuelve (spot, atm_iv) para el ticker dado.      La vol implícita ATM se estima` (+53 more)
+- **57 isolated node(s):** `env_summary`, `example_live.py — Demostración del feed de datos reales + pricing con qfpy.  Des`, `_YieldCurve Stub`, `_MarketEnvironment Stub`, `IPricingEngine` (+52 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **Thin community `CMake Compiler ID`** (2 nodes): `CMakeCXXCompilerId.cpp`, `main()`
+- **Thin community `CMake Build`** (2 nodes): `Examples Targets`, `QuantFinance CMake Project`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `CMake Project Structure`** (2 nodes): `Examples Targets`, `QuantFinance CMake Project`
+- **Thin community `Community 30`** (1 nodes): `env_summary`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Yield Curve Examples`** (2 nodes): `bootstrap Example Executable`, `yield_curve Example Executable`
+- **Thin community `Community 31`** (1 nodes): `_YieldCurve Stub`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Python Package Init`** (1 nodes): `__init__.py`
+- **Thin community `Community 32`** (1 nodes): `_MarketEnvironment Stub`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Compiler Dependencies`** (1 nodes): `compiler_depend.ts`
+- **Thin community `Community 33`** (1 nodes): `__init__.py`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Architecture Docs`** (1 nodes): `CLAUDE.md — Architecture & Build Guide`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `IEquityModel Interface`** (1 nodes): `IEquityModel Interface`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `IPricingEngine Interface`** (1 nodes): `IPricingEngine Interface`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Monte Carlo Example`** (1 nodes): `monte_carlo Example Executable`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Bond Pricing Example`** (1 nodes): `bond_pricing Example Executable`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Black-Scholes Example`** (1 nodes): `black_scholes Example Executable`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `qf Static Library Target`** (1 nodes): `qf CMake Target (Static Library)`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `qfpy Bindings Target`** (1 nodes): `qfpy CMake Target (Python Bindings)`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Test Suite Target`** (1 nodes): `qf_tests CMake Target (Test Suite)`
+- **Thin community `Community 34`** (1 nodes): `IUnderlying Interface`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `MarketEnvironmentBuilder` connect `Community 1` to `Community 2`?**
-  _High betweenness centrality (0.084) - this node is a cross-community bridge._
-- **Are the 14 inferred relationships involving `MarketEnvironmentBuilder` (e.g. with `example_live.py — Demostración del feed de datos reales + pricing con qfpy.  Des` and `_YieldCurve`) actually correct?**
-  _`MarketEnvironmentBuilder` has 14 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `market_feed.py — Feeds de datos reales hacia qf::core::MarketEnvironment.  Fuent`, `Obtiene el último precio de cierre usando yfinance 1.x (MultiIndex DataFrame).`, `Descarga yields del Tesoro US vía Yahoo Finance y construye una YieldCurve.` to the rest of the system?**
-  _58 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `Community 0` be split into smaller, more focused modules?**
+- **What connects `env_summary`, `example_live.py — Demostración del feed de datos reales + pricing con qfpy.  Des`, `_YieldCurve Stub` to the rest of the system?**
+  _57 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `Equity Pricing Engines` be split into smaller, more focused modules?**
+  _Cohesion score 0.06 - nodes in this community are weakly interconnected._
+- **Should `Market Environment & Observers` be split into smaller, more focused modules?**
+  _Cohesion score 0.08 - nodes in this community are weakly interconnected._
+- **Should `Design Specs: Core Concepts` be split into smaller, more focused modules?**
   _Cohesion score 0.07 - nodes in this community are weakly interconnected._
-- **Should `Community 1` be split into smaller, more focused modules?**
-  _Cohesion score 0.05 - nodes in this community are weakly interconnected._
-- **Should `Community 2` be split into smaller, more focused modules?**
-  _Cohesion score 0.07 - nodes in this community are weakly interconnected._
-- **Should `Community 3` be split into smaller, more focused modules?**
+- **Should `Rate & Equity Models` be split into smaller, more focused modules?**
   _Cohesion score 0.09 - nodes in this community are weakly interconnected._
+- **Should `Instruments & Day Count` be split into smaller, more focused modules?**
+  _Cohesion score 0.1 - nodes in this community are weakly interconnected._
+- **Should `Yield Curve & Bootstrap` be split into smaller, more focused modules?**
+  _Cohesion score 0.12 - nodes in this community are weakly interconnected._
