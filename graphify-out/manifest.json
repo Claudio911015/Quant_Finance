@@ -1,139 +1,717 @@
 {
-  "/home/claudio/Git/Quant_Finance/python/market_feed.py": 1780855208.4398808,
-  "/home/claudio/Git/Quant_Finance/python/example_live.py": 1776367313.1821969,
-  "/home/claudio/Git/Quant_Finance/python/tests/test_market_feed.py": 1780855173.9711883,
-  "/home/claudio/Git/Quant_Finance/python/tests/__init__.py": 1780854706.3002095,
-  "/home/claudio/Git/Quant_Finance/include/qf/instruments/bond.hpp": 1776367313.180197,
-  "/home/claudio/Git/Quant_Finance/include/qf/instruments/swaption.hpp": 1776367313.181197,
-  "/home/claudio/Git/Quant_Finance/include/qf/instruments/swap.hpp": 1783463044.9938865,
-  "/home/claudio/Git/Quant_Finance/include/qf/instruments/instrument.hpp": 1775486920.1275158,
-  "/home/claudio/Git/Quant_Finance/include/qf/instruments/capfloor.hpp": 1776367313.180197,
-  "/home/claudio/Git/Quant_Finance/include/qf/instruments/iunderlying.hpp": 1776367313.181197,
-  "/home/claudio/Git/Quant_Finance/include/qf/instruments/option.hpp": 1775486920.1275158,
-  "/home/claudio/Git/Quant_Finance/include/qf/models/irate_model.hpp": 1776911123.6617422,
-  "/home/claudio/Git/Quant_Finance/include/qf/models/vasicek.hpp": 1776911123.6617422,
-  "/home/claudio/Git/Quant_Finance/include/qf/models/bs_model.hpp": 1775486920.1285157,
-  "/home/claudio/Git/Quant_Finance/include/qf/models/heston_model.hpp": 1775504429.0157967,
-  "/home/claudio/Git/Quant_Finance/include/qf/models/heston_calibrator.hpp": 1783457858.026281,
-  "/home/claudio/Git/Quant_Finance/include/qf/models/hullwhite.hpp": 1776911123.6617422,
-  "/home/claudio/Git/Quant_Finance/include/qf/models/iequity_model.hpp": 1775848246.2879436,
-  "/home/claudio/Git/Quant_Finance/include/qf/xva/netting_set.hpp": 1776367313.1821969,
-  "/home/claudio/Git/Quant_Finance/include/qf/xva/credit_curve.hpp": 1776367313.1821969,
-  "/home/claudio/Git/Quant_Finance/include/qf/xva/cva_calculator.hpp": 1783449507.180337,
-  "/home/claudio/Git/Quant_Finance/include/qf/xva/cva_result.hpp": 1783449490.6483185,
-  "/home/claudio/Git/Quant_Finance/include/qf/risk/scenario.hpp": 1783456448.712401,
-  "/home/claudio/Git/Quant_Finance/include/qf/risk/var.hpp": 1776367313.181197,
-  "/home/claudio/Git/Quant_Finance/include/qf/risk/greeks.hpp": 1776367313.181197,
-  "/home/claudio/Git/Quant_Finance/include/qf/core/market_environment.hpp": 1783459588.471825,
-  "/home/claudio/Git/Quant_Finance/include/qf/core/imarket_observer.hpp": 1776367313.180197,
-  "/home/claudio/Git/Quant_Finance/include/qf/termstructure/yieldcurve.hpp": 1783456190.5089526,
-  "/home/claudio/Git/Quant_Finance/include/qf/termstructure/volsurface.hpp": 1783459489.699634,
-  "/home/claudio/Git/Quant_Finance/include/qf/termstructure/bootstrap.hpp": 1773183054.399157,
-  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/ipricing_engine.hpp": 1775848198.7779353,
-  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/binomialtree.hpp": 1775504429.0157967,
-  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/heston.hpp": 1775504429.0157967,
-  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/engine_factory.hpp": 1775848213.2589378,
-  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/blackscholes.hpp": 1776367313.181197,
-  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/montecarlo.hpp": 1775504429.0167966,
-  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/finite_difference.hpp": 1775504429.0157967,
-  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/detail/env_resolver.hpp": 1783459606.6418586,
-  "/home/claudio/Git/Quant_Finance/include/qf/math/rootfinding.hpp": 1773106770.1964724,
-  "/home/claudio/Git/Quant_Finance/include/qf/math/interpolation.hpp": 1776367313.181197,
-  "/home/claudio/Git/Quant_Finance/include/qf/math/daycount.hpp": 1776367313.181197,
-  "/home/claudio/Git/Quant_Finance/include/qf/math/statistics.hpp": 1776367313.181197,
-  "/home/claudio/Git/Quant_Finance/include/qf/math/optimization.hpp": 1783457750.38524,
-  "/home/claudio/Git/Quant_Finance/include/qf/math/integration.hpp": 1773182299.5713787,
-  "/home/claudio/Git/Quant_Finance/src/instruments/iunderlying.cpp": 1776367313.1821969,
-  "/home/claudio/Git/Quant_Finance/src/instruments/capfloor.cpp": 1776367313.1821969,
-  "/home/claudio/Git/Quant_Finance/src/instruments/bond.cpp": 1776367313.1821969,
-  "/home/claudio/Git/Quant_Finance/src/instruments/option.cpp": 1775486920.1335158,
-  "/home/claudio/Git/Quant_Finance/src/instruments/instrument.cpp": 1775486920.1335158,
-  "/home/claudio/Git/Quant_Finance/src/instruments/swap.cpp": 1783464403.5315473,
-  "/home/claudio/Git/Quant_Finance/src/instruments/swaption.cpp": 1776367313.1831968,
-  "/home/claudio/Git/Quant_Finance/src/models/heston_model.cpp": 1775504429.0167966,
-  "/home/claudio/Git/Quant_Finance/src/models/vasicek.cpp": 1776911123.6627424,
-  "/home/claudio/Git/Quant_Finance/src/models/hullwhite.cpp": 1776367313.1831968,
-  "/home/claudio/Git/Quant_Finance/src/models/bs_model.cpp": 1775486920.1345158,
-  "/home/claudio/Git/Quant_Finance/src/models/heston_calibrator.cpp": 1783457891.5942957,
-  "/home/claudio/Git/Quant_Finance/src/python_bindings/qfpy.cpp": 1783464421.593613,
-  "/home/claudio/Git/Quant_Finance/src/python_bindings/xva_bindings.cpp": 1783449560.081397,
-  "/home/claudio/Git/Quant_Finance/src/xva/netting_set.cpp": 1776367313.184829,
-  "/home/claudio/Git/Quant_Finance/src/xva/cva_calculator.cpp": 1783449531.7753649,
-  "/home/claudio/Git/Quant_Finance/src/xva/credit_curve.cpp": 1776367313.184197,
-  "/home/claudio/Git/Quant_Finance/src/risk/var.cpp": 1776367313.184197,
-  "/home/claudio/Git/Quant_Finance/src/risk/greeks.cpp": 1776367313.184197,
-  "/home/claudio/Git/Quant_Finance/src/risk/scenario.cpp": 1783456472.7334423,
-  "/home/claudio/Git/Quant_Finance/src/core/market_environment.cpp": 1783459600.364847,
-  "/home/claudio/Git/Quant_Finance/src/termstructure/yieldcurve.cpp": 1783456198.0729659,
-  "/home/claudio/Git/Quant_Finance/src/termstructure/volsurface.cpp": 1783460902.2481897,
-  "/home/claudio/Git/Quant_Finance/src/termstructure/bootstrap.cpp": 1773183067.5911608,
-  "/home/claudio/Git/Quant_Finance/src/pricingengines/blackscholes.cpp": 1776367313.1831968,
-  "/home/claudio/Git/Quant_Finance/src/pricingengines/montecarlo.cpp": 1776367313.1831968,
-  "/home/claudio/Git/Quant_Finance/src/pricingengines/binomialtree.cpp": 1775504429.0167966,
-  "/home/claudio/Git/Quant_Finance/src/pricingengines/engine_factory.cpp": 1775843906.6137877,
-  "/home/claudio/Git/Quant_Finance/src/pricingengines/heston.cpp": 1775504429.0167966,
-  "/home/claudio/Git/Quant_Finance/src/pricingengines/finite_difference.cpp": 1775504429.0167966,
-  "/home/claudio/Git/Quant_Finance/src/math/optimization.cpp": 1783457829.7452693,
-  "/home/claudio/Git/Quant_Finance/src/math/integration.cpp": 1776367313.1831968,
-  "/home/claudio/Git/Quant_Finance/src/math/rootfinding.cpp": 1773106999.5407274,
-  "/home/claudio/Git/Quant_Finance/src/math/daycount.cpp": 1776367313.1831968,
-  "/home/claudio/Git/Quant_Finance/src/math/interpolation.cpp": 1783460863.0327404,
-  "/home/claudio/Git/Quant_Finance/src/math/statistics.cpp": 1776367313.1831968,
-  "/home/claudio/Git/Quant_Finance/web/tests/test_xva.py": 1776367313.1851969,
-  "/home/claudio/Git/Quant_Finance/tests/test_observer.cpp": 1776367313.1851969,
-  "/home/claudio/Git/Quant_Finance/tests/test_swaption.cpp": 1776367313.1851969,
-  "/home/claudio/Git/Quant_Finance/tests/test_dualcurve_py.py": 1783464448.3497102,
-  "/home/claudio/Git/Quant_Finance/tests/test_volsurface_py.py": 1783459979.5154898,
-  "/home/claudio/Git/Quant_Finance/tests/test_risk.cpp": 1776367313.1851969,
-  "/home/claudio/Git/Quant_Finance/tests/test_instruments.cpp": 1776369026.7534382,
-  "/home/claudio/Git/Quant_Finance/tests/test_models.cpp": 1776367313.1851969,
-  "/home/claudio/Git/Quant_Finance/tests/test_calibration_py.py": 1783458195.0614564,
-  "/home/claudio/Git/Quant_Finance/tests/test_daycount.cpp": 1776367313.1851969,
-  "/home/claudio/Git/Quant_Finance/tests/test_portfolio_var.cpp": 1776367313.1851969,
-  "/home/claudio/Git/Quant_Finance/tests/test_scenario_py.py": 1783456959.32947,
-  "/home/claudio/Git/Quant_Finance/tests/test_capfloor.cpp": 1776367313.184829,
-  "/home/claudio/Git/Quant_Finance/tests/test_pricingengines.cpp": 1776367313.1851969,
-  "/home/claudio/Git/Quant_Finance/tests/test_market_environment.cpp": 1783459633.2599075,
-  "/home/claudio/Git/Quant_Finance/tests/test_volsurface.cpp": 1783460941.9806201,
-  "/home/claudio/Git/Quant_Finance/tests/test_termstructure.cpp": 1783456218.9160023,
-  "/home/claudio/Git/Quant_Finance/tests/test_CVACalculator.cpp": 1783449675.6415315,
-  "/home/claudio/Git/Quant_Finance/tests/test_models_interfaces.cpp": 1775486920.1385157,
-  "/home/claudio/Git/Quant_Finance/tests/test_underlyings.cpp": 1776367313.1851969,
-  "/home/claudio/Git/Quant_Finance/tests/test_calibration.cpp": 1783458092.6973972,
-  "/home/claudio/Git/Quant_Finance/tests/test_dualcurve.cpp": 1783464436.3106663,
-  "/home/claudio/Git/Quant_Finance/tests/test_math.cpp": 1783460956.9857767,
-  "/home/claudio/Git/Quant_Finance/tests/test_app.py": 1775599399.5535364,
-  "/home/claudio/Git/Quant_Finance/tests/test_scenario.cpp": 1783463192.954647,
-  "/home/claudio/Git/Quant_Finance/tests/test_pricing_engines_oop.cpp": 1775504429.0177965,
-  "/home/claudio/Git/Quant_Finance/examples/black_scholes.cpp": 1773107057.1457887,
-  "/home/claudio/Git/Quant_Finance/examples/interest_rate_models.cpp": 1773182529.0581875,
-  "/home/claudio/Git/Quant_Finance/examples/yield_curve.cpp": 1773107114.1848483,
-  "/home/claudio/Git/Quant_Finance/examples/bond_pricing.cpp": 1773107069.1848013,
-  "/home/claudio/Git/Quant_Finance/examples/var.cpp": 1773182826.451122,
-  "/home/claudio/Git/Quant_Finance/examples/monte_carlo.cpp": 1773114267.1982622,
-  "/home/claudio/Git/Quant_Finance/examples/swap_pricing.cpp": 1773182692.833132,
-  "/home/claudio/Git/Quant_Finance/examples/finite_difference_models.cpp": 1773179555.7787397,
-  "/home/claudio/Git/Quant_Finance/examples/bootstrap.cpp": 1773183080.0221643,
-  "/home/claudio/Git/Quant_Finance/examples/heston_calibration.py": 1783458289.1785145,
-  "/home/claudio/Git/Quant_Finance/examples/heston.cpp": 1773182355.1993172,
-  "/home/claudio/Git/Quant_Finance/python_web/app.py": 1776369610.247819,
-  "/home/claudio/Git/Quant_Finance/python_web/static/js/swaps.js": 1776369784.271233,
-  "/home/claudio/Git/Quant_Finance/python_web/static/js/main.js": 1775599436.0517006,
-  "/home/claudio/Git/Quant_Finance/python_web/static/js/charts.js": 1775567712.179329,
-  "/home/claudio/Git/Quant_Finance/python_web/static/js/bonds.js": 1775599328.7471957,
-  "/home/claudio/Git/Quant_Finance/CLAUDE.md": 1783439160.5174663,
-  "/home/claudio/Git/Quant_Finance/CMakeLists.txt": 1775599827.99511,
-  "/home/claudio/Git/Quant_Finance/README.md": 1773190747.8331761,
-  "/home/claudio/Git/Quant_Finance/src/CMakeLists.txt": 1783459555.756763,
-  "/home/claudio/Git/Quant_Finance/tests/CMakeLists.txt": 1783463314.796227,
-  "/home/claudio/Git/Quant_Finance/examples/CMakeLists.txt": 1773183093.9281683,
-  "/home/claudio/Git/Quant_Finance/python_web/requirements.txt": 1773115854.888636,
-  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-04-02-architecture-refactor-design.md": 1775155714.1377044,
-  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-04-15-cva-engine-design.md": 1776367313.1587648,
-  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-04-19-quantengine-merge-design.md": 1776911123.6607423,
-  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-dual-curve-pricing-phase1-design.md": 1783464473.1168,
-  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-dva-fva-bilateral-xva-design.md": 1783449464.5182893,
-  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-heston-calibration-design.md": 1783457736.4462354,
-  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-scenario-engine-rate-risk-design.md": 1783456665.1260815,
-  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-vol-surface-design.md": 1783461221.7170842
+  "/home/claudio/Git/Quant_Finance/python/market_feed.py": {
+    "mtime": 1780855208.4398808,
+    "ast_hash": "ceb81c3eb1115d6cd707f5497f2bdc6d",
+    "semantic_hash": "ceb81c3eb1115d6cd707f5497f2bdc6d"
+  },
+  "/home/claudio/Git/Quant_Finance/python/example_live.py": {
+    "mtime": 1776367313.1821969,
+    "ast_hash": "113d5c90d8805e8f56bcfc3d2b545879",
+    "semantic_hash": "113d5c90d8805e8f56bcfc3d2b545879"
+  },
+  "/home/claudio/Git/Quant_Finance/python/tests/test_market_feed.py": {
+    "mtime": 1780855173.9711883,
+    "ast_hash": "b7cfa9aea9268e94b3e361f554912ef7",
+    "semantic_hash": "b7cfa9aea9268e94b3e361f554912ef7"
+  },
+  "/home/claudio/Git/Quant_Finance/python/tests/__init__.py": {
+    "mtime": 1780854706.3002095,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/instruments/bond.hpp": {
+    "mtime": 1776367313.180197,
+    "ast_hash": "e82daebf5dd2100ae6ccb163f73084ba",
+    "semantic_hash": "e82daebf5dd2100ae6ccb163f73084ba"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/instruments/swaption.hpp": {
+    "mtime": 1776367313.181197,
+    "ast_hash": "e69ea7c83e8802ab00af142da206227b",
+    "semantic_hash": "e69ea7c83e8802ab00af142da206227b"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/instruments/swap.hpp": {
+    "mtime": 1783463044.9938865,
+    "ast_hash": "64ededd82ad0ebcdbf26ca54dc482f80",
+    "semantic_hash": "64ededd82ad0ebcdbf26ca54dc482f80"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/instruments/instrument.hpp": {
+    "mtime": 1775486920.1275158,
+    "ast_hash": "7a23aef92af9c9a10ced87498d40cf23",
+    "semantic_hash": "7a23aef92af9c9a10ced87498d40cf23"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/instruments/capfloor.hpp": {
+    "mtime": 1776367313.180197,
+    "ast_hash": "b1710f778db8c7dfffa352bc02ac4e72",
+    "semantic_hash": "b1710f778db8c7dfffa352bc02ac4e72"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/instruments/iunderlying.hpp": {
+    "mtime": 1776367313.181197,
+    "ast_hash": "13914b3cdee9ad8ff48685f932bf96b0",
+    "semantic_hash": "13914b3cdee9ad8ff48685f932bf96b0"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/instruments/option.hpp": {
+    "mtime": 1775486920.1275158,
+    "ast_hash": "3a4717c1a5f35fe19fd9a3b46ab671da",
+    "semantic_hash": "3a4717c1a5f35fe19fd9a3b46ab671da"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/models/irate_model.hpp": {
+    "mtime": 1776911123.6617422,
+    "ast_hash": "10eb97bffb9eeaf0a9b342c763217f03",
+    "semantic_hash": "10eb97bffb9eeaf0a9b342c763217f03"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/models/vasicek.hpp": {
+    "mtime": 1776911123.6617422,
+    "ast_hash": "1dfa6ed15983860f651f0e6a993c269d",
+    "semantic_hash": "1dfa6ed15983860f651f0e6a993c269d"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/models/bs_model.hpp": {
+    "mtime": 1775486920.1285157,
+    "ast_hash": "bd7c5f972cf8aa5eca132bda832ef986",
+    "semantic_hash": "bd7c5f972cf8aa5eca132bda832ef986"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/models/heston_model.hpp": {
+    "mtime": 1775504429.0157967,
+    "ast_hash": "afd0d5cc5925e2312bf2560928817434",
+    "semantic_hash": "afd0d5cc5925e2312bf2560928817434"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/models/heston_calibrator.hpp": {
+    "mtime": 1783457858.026281,
+    "ast_hash": "8e2a18670f2759b9939938585797c49c",
+    "semantic_hash": "8e2a18670f2759b9939938585797c49c"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/models/hullwhite.hpp": {
+    "mtime": 1776911123.6617422,
+    "ast_hash": "c390d7c1cee656ba9c447101f72fae68",
+    "semantic_hash": "c390d7c1cee656ba9c447101f72fae68"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/models/iequity_model.hpp": {
+    "mtime": 1775848246.2879436,
+    "ast_hash": "f46d8b8ab3e91817a33a46571112b909",
+    "semantic_hash": "f46d8b8ab3e91817a33a46571112b909"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/xva/netting_set.hpp": {
+    "mtime": 1776367313.1821969,
+    "ast_hash": "56f6dbf39bf5dbe5168be424991a01bc",
+    "semantic_hash": "56f6dbf39bf5dbe5168be424991a01bc"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/xva/credit_curve.hpp": {
+    "mtime": 1776367313.1821969,
+    "ast_hash": "52612bbfb3da85d9432832763dc843a6",
+    "semantic_hash": "52612bbfb3da85d9432832763dc843a6"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/xva/cva_calculator.hpp": {
+    "mtime": 1783449507.180337,
+    "ast_hash": "1195a6bd71f647b5912048e1dfacfa6f",
+    "semantic_hash": "1195a6bd71f647b5912048e1dfacfa6f"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/xva/cva_result.hpp": {
+    "mtime": 1783449490.6483185,
+    "ast_hash": "9ad6155dca6fa518c8043ebde0b30c7f",
+    "semantic_hash": "9ad6155dca6fa518c8043ebde0b30c7f"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/risk/scenario.hpp": {
+    "mtime": 1783456448.712401,
+    "ast_hash": "ef0f6e97a0b194ed211eb59e9cf2b98e",
+    "semantic_hash": "ef0f6e97a0b194ed211eb59e9cf2b98e"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/risk/var.hpp": {
+    "mtime": 1776367313.181197,
+    "ast_hash": "4cb63b589983fd85ede5995a09eee13b",
+    "semantic_hash": "4cb63b589983fd85ede5995a09eee13b"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/risk/greeks.hpp": {
+    "mtime": 1776367313.181197,
+    "ast_hash": "7fcb490f19b8872f6d882778661bd77c",
+    "semantic_hash": "7fcb490f19b8872f6d882778661bd77c"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/core/market_environment.hpp": {
+    "mtime": 1783459588.471825,
+    "ast_hash": "9f16150345840094605647f1c84a7697",
+    "semantic_hash": "9f16150345840094605647f1c84a7697"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/core/imarket_observer.hpp": {
+    "mtime": 1776367313.180197,
+    "ast_hash": "1ad6e0e5a49f3517cd81b6d59788be49",
+    "semantic_hash": "1ad6e0e5a49f3517cd81b6d59788be49"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/termstructure/yieldcurve.hpp": {
+    "mtime": 1783456190.5089526,
+    "ast_hash": "98d0450b55932a0839febab39f5cafba",
+    "semantic_hash": "98d0450b55932a0839febab39f5cafba"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/termstructure/volsurface.hpp": {
+    "mtime": 1783459489.699634,
+    "ast_hash": "cb3a5a89f8fe30b1a4091d25c87cbc5f",
+    "semantic_hash": "cb3a5a89f8fe30b1a4091d25c87cbc5f"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/termstructure/bootstrap.hpp": {
+    "mtime": 1773183054.399157,
+    "ast_hash": "65b7eed1337191ad5c96e45aeab653f5",
+    "semantic_hash": "65b7eed1337191ad5c96e45aeab653f5"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/ipricing_engine.hpp": {
+    "mtime": 1775848198.7779353,
+    "ast_hash": "c3299070960fb160c353b820ba25efa3",
+    "semantic_hash": "c3299070960fb160c353b820ba25efa3"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/binomialtree.hpp": {
+    "mtime": 1775504429.0157967,
+    "ast_hash": "b5c30b655937cfad5263d50355df794e",
+    "semantic_hash": "b5c30b655937cfad5263d50355df794e"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/heston.hpp": {
+    "mtime": 1775504429.0157967,
+    "ast_hash": "6953ad7594f639a711f9bb39d47fd6a8",
+    "semantic_hash": "6953ad7594f639a711f9bb39d47fd6a8"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/engine_factory.hpp": {
+    "mtime": 1775848213.2589378,
+    "ast_hash": "2d0195df17d62adc40bc80ff86ed971e",
+    "semantic_hash": "2d0195df17d62adc40bc80ff86ed971e"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/blackscholes.hpp": {
+    "mtime": 1776367313.181197,
+    "ast_hash": "05388e221a9c314e7e0cc88d9b9ca6fe",
+    "semantic_hash": "05388e221a9c314e7e0cc88d9b9ca6fe"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/montecarlo.hpp": {
+    "mtime": 1775504429.0167966,
+    "ast_hash": "c064d0e15c4dd8801082c6a4eb72d281",
+    "semantic_hash": "c064d0e15c4dd8801082c6a4eb72d281"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/finite_difference.hpp": {
+    "mtime": 1775504429.0157967,
+    "ast_hash": "80753437f1b9eccab617e85239a68317",
+    "semantic_hash": "80753437f1b9eccab617e85239a68317"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/pricingengines/detail/env_resolver.hpp": {
+    "mtime": 1783459606.6418586,
+    "ast_hash": "38fdbd5589e6cfc9aa9969830a3e48d2",
+    "semantic_hash": "38fdbd5589e6cfc9aa9969830a3e48d2"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/math/rootfinding.hpp": {
+    "mtime": 1773106770.1964724,
+    "ast_hash": "f8d1067ddf01065bc323a03feddf8109",
+    "semantic_hash": "f8d1067ddf01065bc323a03feddf8109"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/math/interpolation.hpp": {
+    "mtime": 1776367313.181197,
+    "ast_hash": "3dc95f5d10fc90dfffc77bf2af33d629",
+    "semantic_hash": "3dc95f5d10fc90dfffc77bf2af33d629"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/math/daycount.hpp": {
+    "mtime": 1776367313.181197,
+    "ast_hash": "2460a8676593b5b8f8d35251afe98e4e",
+    "semantic_hash": "2460a8676593b5b8f8d35251afe98e4e"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/math/statistics.hpp": {
+    "mtime": 1776367313.181197,
+    "ast_hash": "37e80467b6913df4a1d1e16ca16f11f7",
+    "semantic_hash": "37e80467b6913df4a1d1e16ca16f11f7"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/math/optimization.hpp": {
+    "mtime": 1783457750.38524,
+    "ast_hash": "22a094f8a3d11fd68342371b7857f54a",
+    "semantic_hash": "22a094f8a3d11fd68342371b7857f54a"
+  },
+  "/home/claudio/Git/Quant_Finance/include/qf/math/integration.hpp": {
+    "mtime": 1773182299.5713787,
+    "ast_hash": "811d0844d66102d60c474d778e772616",
+    "semantic_hash": "811d0844d66102d60c474d778e772616"
+  },
+  "/home/claudio/Git/Quant_Finance/src/instruments/iunderlying.cpp": {
+    "mtime": 1776367313.1821969,
+    "ast_hash": "86f9956dc91f557629ae6ea47ab2102b",
+    "semantic_hash": "86f9956dc91f557629ae6ea47ab2102b"
+  },
+  "/home/claudio/Git/Quant_Finance/src/instruments/capfloor.cpp": {
+    "mtime": 1776367313.1821969,
+    "ast_hash": "ea0532bda0ec3b9a567b371ba5cd3a64",
+    "semantic_hash": "ea0532bda0ec3b9a567b371ba5cd3a64"
+  },
+  "/home/claudio/Git/Quant_Finance/src/instruments/bond.cpp": {
+    "mtime": 1776367313.1821969,
+    "ast_hash": "efa827a24898e9f9bc99a5016fafe0d2",
+    "semantic_hash": "efa827a24898e9f9bc99a5016fafe0d2"
+  },
+  "/home/claudio/Git/Quant_Finance/src/instruments/option.cpp": {
+    "mtime": 1775486920.1335158,
+    "ast_hash": "9956df2e1dd5cac99a6daf5fc83bf81e",
+    "semantic_hash": "9956df2e1dd5cac99a6daf5fc83bf81e"
+  },
+  "/home/claudio/Git/Quant_Finance/src/instruments/instrument.cpp": {
+    "mtime": 1775486920.1335158,
+    "ast_hash": "fa107bc2bb74d72d0c33127e464f0be6",
+    "semantic_hash": "fa107bc2bb74d72d0c33127e464f0be6"
+  },
+  "/home/claudio/Git/Quant_Finance/src/instruments/swap.cpp": {
+    "mtime": 1783464403.5315473,
+    "ast_hash": "f8ef183ad74d3fe25f5b81499d6700fb",
+    "semantic_hash": "f8ef183ad74d3fe25f5b81499d6700fb"
+  },
+  "/home/claudio/Git/Quant_Finance/src/instruments/swaption.cpp": {
+    "mtime": 1776367313.1831968,
+    "ast_hash": "45a333ff0bf8db6aff6c276f73f0df94",
+    "semantic_hash": "45a333ff0bf8db6aff6c276f73f0df94"
+  },
+  "/home/claudio/Git/Quant_Finance/src/models/heston_model.cpp": {
+    "mtime": 1775504429.0167966,
+    "ast_hash": "4fa56e346e7114fa4a56ef16a13e0da2",
+    "semantic_hash": "4fa56e346e7114fa4a56ef16a13e0da2"
+  },
+  "/home/claudio/Git/Quant_Finance/src/models/vasicek.cpp": {
+    "mtime": 1776911123.6627424,
+    "ast_hash": "20e86e28a6da6953bbab582dc16333db",
+    "semantic_hash": "20e86e28a6da6953bbab582dc16333db"
+  },
+  "/home/claudio/Git/Quant_Finance/src/models/hullwhite.cpp": {
+    "mtime": 1776367313.1831968,
+    "ast_hash": "577b5899286e863831e17c193f2bdd6a",
+    "semantic_hash": "577b5899286e863831e17c193f2bdd6a"
+  },
+  "/home/claudio/Git/Quant_Finance/src/models/bs_model.cpp": {
+    "mtime": 1775486920.1345158,
+    "ast_hash": "68bc8826c385e492c12bec1e94db1785",
+    "semantic_hash": "68bc8826c385e492c12bec1e94db1785"
+  },
+  "/home/claudio/Git/Quant_Finance/src/models/heston_calibrator.cpp": {
+    "mtime": 1783457891.5942957,
+    "ast_hash": "729304db1e76e077e6d670a91d87d7e3",
+    "semantic_hash": "729304db1e76e077e6d670a91d87d7e3"
+  },
+  "/home/claudio/Git/Quant_Finance/src/python_bindings/qfpy.cpp": {
+    "mtime": 1783464421.593613,
+    "ast_hash": "d08fefa2a2f9202e20a68435ca136b8b",
+    "semantic_hash": "d08fefa2a2f9202e20a68435ca136b8b"
+  },
+  "/home/claudio/Git/Quant_Finance/src/python_bindings/xva_bindings.cpp": {
+    "mtime": 1783449560.081397,
+    "ast_hash": "e4a96a3a8df5d10196c2889219aa0f79",
+    "semantic_hash": "e4a96a3a8df5d10196c2889219aa0f79"
+  },
+  "/home/claudio/Git/Quant_Finance/src/xva/netting_set.cpp": {
+    "mtime": 1776367313.184829,
+    "ast_hash": "c3d58b141b8ae6ee549277836c24099f",
+    "semantic_hash": "c3d58b141b8ae6ee549277836c24099f"
+  },
+  "/home/claudio/Git/Quant_Finance/src/xva/cva_calculator.cpp": {
+    "mtime": 1783449531.7753649,
+    "ast_hash": "2a87cff590e218ad8c32ae10bf220964",
+    "semantic_hash": "2a87cff590e218ad8c32ae10bf220964"
+  },
+  "/home/claudio/Git/Quant_Finance/src/xva/credit_curve.cpp": {
+    "mtime": 1776367313.184197,
+    "ast_hash": "2aa29ebfc0677fb5b84a529f491d30f2",
+    "semantic_hash": "2aa29ebfc0677fb5b84a529f491d30f2"
+  },
+  "/home/claudio/Git/Quant_Finance/src/risk/var.cpp": {
+    "mtime": 1776367313.184197,
+    "ast_hash": "b6f011ebc189c6718402d4066121d7fa",
+    "semantic_hash": "b6f011ebc189c6718402d4066121d7fa"
+  },
+  "/home/claudio/Git/Quant_Finance/src/risk/greeks.cpp": {
+    "mtime": 1776367313.184197,
+    "ast_hash": "46d765bb763eb921450c58d5f1778d96",
+    "semantic_hash": "46d765bb763eb921450c58d5f1778d96"
+  },
+  "/home/claudio/Git/Quant_Finance/src/risk/scenario.cpp": {
+    "mtime": 1783456472.7334423,
+    "ast_hash": "a3b0916ece82c1d491cd6c5f7585c690",
+    "semantic_hash": "a3b0916ece82c1d491cd6c5f7585c690"
+  },
+  "/home/claudio/Git/Quant_Finance/src/core/market_environment.cpp": {
+    "mtime": 1783459600.364847,
+    "ast_hash": "b50baf7475e8874a6cbbc1cf45b99eba",
+    "semantic_hash": "b50baf7475e8874a6cbbc1cf45b99eba"
+  },
+  "/home/claudio/Git/Quant_Finance/src/termstructure/yieldcurve.cpp": {
+    "mtime": 1783456198.0729659,
+    "ast_hash": "802c2f77894e7492524d16b3093fc9eb",
+    "semantic_hash": "802c2f77894e7492524d16b3093fc9eb"
+  },
+  "/home/claudio/Git/Quant_Finance/src/termstructure/volsurface.cpp": {
+    "mtime": 1783460902.2481897,
+    "ast_hash": "935e137687849ad9b8147f8a5be883bf",
+    "semantic_hash": "935e137687849ad9b8147f8a5be883bf"
+  },
+  "/home/claudio/Git/Quant_Finance/src/termstructure/bootstrap.cpp": {
+    "mtime": 1773183067.5911608,
+    "ast_hash": "98f90bcd67306ac35539f1c6684d7606",
+    "semantic_hash": "98f90bcd67306ac35539f1c6684d7606"
+  },
+  "/home/claudio/Git/Quant_Finance/src/pricingengines/blackscholes.cpp": {
+    "mtime": 1776367313.1831968,
+    "ast_hash": "f331bc55cea703b46f08f1983ceaf174",
+    "semantic_hash": "f331bc55cea703b46f08f1983ceaf174"
+  },
+  "/home/claudio/Git/Quant_Finance/src/pricingengines/montecarlo.cpp": {
+    "mtime": 1776367313.1831968,
+    "ast_hash": "98e8d4e9bed6c8f3ca0e126c6eebf63b",
+    "semantic_hash": "98e8d4e9bed6c8f3ca0e126c6eebf63b"
+  },
+  "/home/claudio/Git/Quant_Finance/src/pricingengines/binomialtree.cpp": {
+    "mtime": 1775504429.0167966,
+    "ast_hash": "e62f72e18e7ff7f4fc331b7f911933f4",
+    "semantic_hash": "e62f72e18e7ff7f4fc331b7f911933f4"
+  },
+  "/home/claudio/Git/Quant_Finance/src/pricingengines/engine_factory.cpp": {
+    "mtime": 1775843906.6137877,
+    "ast_hash": "36c224453a1ef1d25ee728e01485c8e7",
+    "semantic_hash": "36c224453a1ef1d25ee728e01485c8e7"
+  },
+  "/home/claudio/Git/Quant_Finance/src/pricingengines/heston.cpp": {
+    "mtime": 1775504429.0167966,
+    "ast_hash": "8dbb1ac657bdb5f09ea3fe54257b84f1",
+    "semantic_hash": "8dbb1ac657bdb5f09ea3fe54257b84f1"
+  },
+  "/home/claudio/Git/Quant_Finance/src/pricingengines/finite_difference.cpp": {
+    "mtime": 1775504429.0167966,
+    "ast_hash": "32e77a4b8a7bd1dbf66e41734ef9144b",
+    "semantic_hash": "32e77a4b8a7bd1dbf66e41734ef9144b"
+  },
+  "/home/claudio/Git/Quant_Finance/src/math/optimization.cpp": {
+    "mtime": 1783457829.7452693,
+    "ast_hash": "ec0b836527a96fda87c1da14370af0f4",
+    "semantic_hash": "ec0b836527a96fda87c1da14370af0f4"
+  },
+  "/home/claudio/Git/Quant_Finance/src/math/integration.cpp": {
+    "mtime": 1776367313.1831968,
+    "ast_hash": "c5e385fcab123da627a94bbcd43d9ee7",
+    "semantic_hash": "c5e385fcab123da627a94bbcd43d9ee7"
+  },
+  "/home/claudio/Git/Quant_Finance/src/math/rootfinding.cpp": {
+    "mtime": 1773106999.5407274,
+    "ast_hash": "708044fe05068b9caaaefd4af7003c7d",
+    "semantic_hash": "708044fe05068b9caaaefd4af7003c7d"
+  },
+  "/home/claudio/Git/Quant_Finance/src/math/daycount.cpp": {
+    "mtime": 1776367313.1831968,
+    "ast_hash": "9d3edad115e8978b79efd3f8b4d4cd0c",
+    "semantic_hash": "9d3edad115e8978b79efd3f8b4d4cd0c"
+  },
+  "/home/claudio/Git/Quant_Finance/src/math/interpolation.cpp": {
+    "mtime": 1783460863.0327404,
+    "ast_hash": "e7f9975084e3c78bb09363592814fe0b",
+    "semantic_hash": "e7f9975084e3c78bb09363592814fe0b"
+  },
+  "/home/claudio/Git/Quant_Finance/src/math/statistics.cpp": {
+    "mtime": 1776367313.1831968,
+    "ast_hash": "6d63d4c24f8b69190e01a68de5c8e193",
+    "semantic_hash": "6d63d4c24f8b69190e01a68de5c8e193"
+  },
+  "/home/claudio/Git/Quant_Finance/web/tests/test_xva.py": {
+    "mtime": 1776367313.1851969,
+    "ast_hash": "11818be463aac3101840ea5ed7c56462",
+    "semantic_hash": "11818be463aac3101840ea5ed7c56462"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_observer.cpp": {
+    "mtime": 1776367313.1851969,
+    "ast_hash": "ad69681114a10b59b0a8c0065ca4af26",
+    "semantic_hash": "ad69681114a10b59b0a8c0065ca4af26"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_swaption.cpp": {
+    "mtime": 1776367313.1851969,
+    "ast_hash": "decd8b31c74ea3935a9c8040658a76ee",
+    "semantic_hash": "decd8b31c74ea3935a9c8040658a76ee"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_dualcurve_py.py": {
+    "mtime": 1783464448.3497102,
+    "ast_hash": "8bbda3e8b04e0690d6b29f86af61a2eb",
+    "semantic_hash": "8bbda3e8b04e0690d6b29f86af61a2eb"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_volsurface_py.py": {
+    "mtime": 1783459979.5154898,
+    "ast_hash": "48af4e2d6ef5a0822a37deb9245e2801",
+    "semantic_hash": "48af4e2d6ef5a0822a37deb9245e2801"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_risk.cpp": {
+    "mtime": 1776367313.1851969,
+    "ast_hash": "c5f28458c2f0b0208cbc2ab33a86e5a4",
+    "semantic_hash": "c5f28458c2f0b0208cbc2ab33a86e5a4"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_instruments.cpp": {
+    "mtime": 1776369026.7534382,
+    "ast_hash": "26dd51cc794247410889de7f18d629cd",
+    "semantic_hash": "26dd51cc794247410889de7f18d629cd"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_models.cpp": {
+    "mtime": 1776367313.1851969,
+    "ast_hash": "7c15388212bdb25a6ea41b01160501a8",
+    "semantic_hash": "7c15388212bdb25a6ea41b01160501a8"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_calibration_py.py": {
+    "mtime": 1783458195.0614564,
+    "ast_hash": "5c3becdec9012866546180c705cc0705",
+    "semantic_hash": "5c3becdec9012866546180c705cc0705"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_daycount.cpp": {
+    "mtime": 1776367313.1851969,
+    "ast_hash": "6cdfd8147b6882aebd612fa78b3de684",
+    "semantic_hash": "6cdfd8147b6882aebd612fa78b3de684"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_portfolio_var.cpp": {
+    "mtime": 1776367313.1851969,
+    "ast_hash": "1ea49aa085257aa85f4cc7577ad9c828",
+    "semantic_hash": "1ea49aa085257aa85f4cc7577ad9c828"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_scenario_py.py": {
+    "mtime": 1783456959.32947,
+    "ast_hash": "b0f7848ce3d589b380a137738e23ba71",
+    "semantic_hash": "b0f7848ce3d589b380a137738e23ba71"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_capfloor.cpp": {
+    "mtime": 1776367313.184829,
+    "ast_hash": "784091475874cf189fd55d43a0a21e4f",
+    "semantic_hash": "784091475874cf189fd55d43a0a21e4f"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_pricingengines.cpp": {
+    "mtime": 1776367313.1851969,
+    "ast_hash": "c40d408adaaff07e4dbdc67989125187",
+    "semantic_hash": "c40d408adaaff07e4dbdc67989125187"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_market_environment.cpp": {
+    "mtime": 1783459633.2599075,
+    "ast_hash": "345bce40ac72953ddb4799dc313d2db4",
+    "semantic_hash": "345bce40ac72953ddb4799dc313d2db4"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_volsurface.cpp": {
+    "mtime": 1783460941.9806201,
+    "ast_hash": "22d41b6c8f0384213165f1fab4e06715",
+    "semantic_hash": "22d41b6c8f0384213165f1fab4e06715"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_termstructure.cpp": {
+    "mtime": 1783456218.9160023,
+    "ast_hash": "e2de8ba52b18f9543666f555387616c9",
+    "semantic_hash": "e2de8ba52b18f9543666f555387616c9"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_CVACalculator.cpp": {
+    "mtime": 1783449675.6415315,
+    "ast_hash": "f4c1461967e82aace9acc7fba16f126c",
+    "semantic_hash": "f4c1461967e82aace9acc7fba16f126c"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_models_interfaces.cpp": {
+    "mtime": 1775486920.1385157,
+    "ast_hash": "bb3c770f3767fd8ac9af4736aa87a710",
+    "semantic_hash": "bb3c770f3767fd8ac9af4736aa87a710"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_underlyings.cpp": {
+    "mtime": 1776367313.1851969,
+    "ast_hash": "71226282a0497c41fcf4cbc879997fb1",
+    "semantic_hash": "71226282a0497c41fcf4cbc879997fb1"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_calibration.cpp": {
+    "mtime": 1783458092.6973972,
+    "ast_hash": "3e6f5b9ee018faec5b7734bec7f06fbf",
+    "semantic_hash": "3e6f5b9ee018faec5b7734bec7f06fbf"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_dualcurve.cpp": {
+    "mtime": 1783464436.3106663,
+    "ast_hash": "aec63206d89018cdf39fab45a6dd7b8e",
+    "semantic_hash": "aec63206d89018cdf39fab45a6dd7b8e"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_math.cpp": {
+    "mtime": 1783460956.9857767,
+    "ast_hash": "135b12f3fa204b58074f4bbad6d94e6b",
+    "semantic_hash": "135b12f3fa204b58074f4bbad6d94e6b"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_app.py": {
+    "mtime": 1775599399.5535364,
+    "ast_hash": "f3addac7ea23968798182568cf10ce3c",
+    "semantic_hash": "f3addac7ea23968798182568cf10ce3c"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_scenario.cpp": {
+    "mtime": 1783463192.954647,
+    "ast_hash": "32e289185bd7703add3b4a3f19f19785",
+    "semantic_hash": "32e289185bd7703add3b4a3f19f19785"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/test_pricing_engines_oop.cpp": {
+    "mtime": 1775504429.0177965,
+    "ast_hash": "147dbc63870804302fd4d5ab23c99f65",
+    "semantic_hash": "147dbc63870804302fd4d5ab23c99f65"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/black_scholes.cpp": {
+    "mtime": 1773107057.1457887,
+    "ast_hash": "ce4b617c18fe45bdb806df9d65182e17",
+    "semantic_hash": "ce4b617c18fe45bdb806df9d65182e17"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/interest_rate_models.cpp": {
+    "mtime": 1773182529.0581875,
+    "ast_hash": "d43b9880619b27d522df23fbd6e1cd84",
+    "semantic_hash": "d43b9880619b27d522df23fbd6e1cd84"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/yield_curve.cpp": {
+    "mtime": 1773107114.1848483,
+    "ast_hash": "9eee6a321d847a8fcf1a67e0e70435e1",
+    "semantic_hash": "9eee6a321d847a8fcf1a67e0e70435e1"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/bond_pricing.cpp": {
+    "mtime": 1773107069.1848013,
+    "ast_hash": "b222bbe75684ba632d2bb6e61f381248",
+    "semantic_hash": "b222bbe75684ba632d2bb6e61f381248"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/var.cpp": {
+    "mtime": 1773182826.451122,
+    "ast_hash": "65988e5d12c1800e07dbd85d93f38948",
+    "semantic_hash": "65988e5d12c1800e07dbd85d93f38948"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/monte_carlo.cpp": {
+    "mtime": 1773114267.1982622,
+    "ast_hash": "421c70a4cfa2f9f5a327a2a434442ca9",
+    "semantic_hash": "421c70a4cfa2f9f5a327a2a434442ca9"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/swap_pricing.cpp": {
+    "mtime": 1773182692.833132,
+    "ast_hash": "dee0db402d936b9af9d14f755d58e8fc",
+    "semantic_hash": "dee0db402d936b9af9d14f755d58e8fc"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/finite_difference_models.cpp": {
+    "mtime": 1773179555.7787397,
+    "ast_hash": "3bd108a8aea08ebd7b0957c2c339259a",
+    "semantic_hash": "3bd108a8aea08ebd7b0957c2c339259a"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/bootstrap.cpp": {
+    "mtime": 1773183080.0221643,
+    "ast_hash": "a44dafd701b146c6f73d237e6bc4db42",
+    "semantic_hash": "a44dafd701b146c6f73d237e6bc4db42"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/heston_calibration.py": {
+    "mtime": 1783458289.1785145,
+    "ast_hash": "5c9054f2e0d915ce5200bfe6fd4b8585",
+    "semantic_hash": "5c9054f2e0d915ce5200bfe6fd4b8585"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/heston.cpp": {
+    "mtime": 1773182355.1993172,
+    "ast_hash": "6978ff660f94bea70f8559e593ca1d23",
+    "semantic_hash": "6978ff660f94bea70f8559e593ca1d23"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/app.py": {
+    "mtime": 1776369610.247819,
+    "ast_hash": "64d9cf60107296f1196084734410d056",
+    "semantic_hash": "64d9cf60107296f1196084734410d056"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/static/js/swaps.js": {
+    "mtime": 1776369784.271233,
+    "ast_hash": "6a63f70cb19f7de1d68d5e0171bb64cf",
+    "semantic_hash": "6a63f70cb19f7de1d68d5e0171bb64cf"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/static/js/main.js": {
+    "mtime": 1775599436.0517006,
+    "ast_hash": "b2acbca7a7f9d9ae759d12264555b47b",
+    "semantic_hash": "b2acbca7a7f9d9ae759d12264555b47b"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/static/js/charts.js": {
+    "mtime": 1775567712.179329,
+    "ast_hash": "35a060c273cc76b3bd0fe842b5917692",
+    "semantic_hash": "35a060c273cc76b3bd0fe842b5917692"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/static/js/bonds.js": {
+    "mtime": 1775599328.7471957,
+    "ast_hash": "c0e772606aa2ead5eeb4f04fce8255b9",
+    "semantic_hash": "c0e772606aa2ead5eeb4f04fce8255b9"
+  },
+  "/home/claudio/Git/Quant_Finance/CLAUDE.md": {
+    "mtime": 1783439160.5174663,
+    "ast_hash": "cfb07b579b20e5e10e5f0a31441b988b",
+    "semantic_hash": "cfb07b579b20e5e10e5f0a31441b988b"
+  },
+  "/home/claudio/Git/Quant_Finance/CMakeLists.txt": {
+    "mtime": 1775599827.99511,
+    "ast_hash": "94dd7fca898c2bc894e2b0efddb0c689",
+    "semantic_hash": "94dd7fca898c2bc894e2b0efddb0c689"
+  },
+  "/home/claudio/Git/Quant_Finance/README.md": {
+    "mtime": 1773190747.8331761,
+    "ast_hash": "3b2f3eb17e652e68ac7971f18b53779c",
+    "semantic_hash": "3b2f3eb17e652e68ac7971f18b53779c"
+  },
+  "/home/claudio/Git/Quant_Finance/src/CMakeLists.txt": {
+    "mtime": 1783459555.756763,
+    "ast_hash": "9d5f3ba1b4e5ad6f06c457afacfca9e3",
+    "semantic_hash": "9d5f3ba1b4e5ad6f06c457afacfca9e3"
+  },
+  "/home/claudio/Git/Quant_Finance/tests/CMakeLists.txt": {
+    "mtime": 1783463314.796227,
+    "ast_hash": "9cdcf742f963e8355559b5597e0d7f98",
+    "semantic_hash": "9cdcf742f963e8355559b5597e0d7f98"
+  },
+  "/home/claudio/Git/Quant_Finance/examples/CMakeLists.txt": {
+    "mtime": 1773183093.9281683,
+    "ast_hash": "47850dd40e02c0c8a3f1753ded25a378",
+    "semantic_hash": "47850dd40e02c0c8a3f1753ded25a378"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/requirements.txt": {
+    "mtime": 1773115854.888636,
+    "ast_hash": "63dbf37e973a8536a5596071a6c48bfa",
+    "semantic_hash": "63dbf37e973a8536a5596071a6c48bfa"
+  },
+  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-04-02-architecture-refactor-design.md": {
+    "mtime": 1775155714.1377044,
+    "ast_hash": "50a2a2e9c76637b2ae69a35c366d3424",
+    "semantic_hash": "50a2a2e9c76637b2ae69a35c366d3424"
+  },
+  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-04-15-cva-engine-design.md": {
+    "mtime": 1776367313.1587648,
+    "ast_hash": "d78d6c5c80f40c11725ff43db4f409fc",
+    "semantic_hash": "d78d6c5c80f40c11725ff43db4f409fc"
+  },
+  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-04-19-quantengine-merge-design.md": {
+    "mtime": 1776911123.6607423,
+    "ast_hash": "1064c0cacd2adb91cb959326cdfa8099",
+    "semantic_hash": "1064c0cacd2adb91cb959326cdfa8099"
+  },
+  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-dual-curve-pricing-phase1-design.md": {
+    "mtime": 1783464473.1168,
+    "ast_hash": "e1875f5ab55bbfe6e7279ae7e98cc299",
+    "semantic_hash": "e1875f5ab55bbfe6e7279ae7e98cc299"
+  },
+  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-dva-fva-bilateral-xva-design.md": {
+    "mtime": 1783449464.5182893,
+    "ast_hash": "41cc3d8e18e986c6c3db427bc08edfd3",
+    "semantic_hash": "41cc3d8e18e986c6c3db427bc08edfd3"
+  },
+  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-heston-calibration-design.md": {
+    "mtime": 1783457736.4462354,
+    "ast_hash": "33a87a3ccd8b62ee3ca062b5330d8ec4",
+    "semantic_hash": "33a87a3ccd8b62ee3ca062b5330d8ec4"
+  },
+  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-scenario-engine-rate-risk-design.md": {
+    "mtime": 1783456665.1260815,
+    "ast_hash": "bbd990fef7612fadad8c3e796818aeac",
+    "semantic_hash": "bbd990fef7612fadad8c3e796818aeac"
+  },
+  "/home/claudio/Git/Quant_Finance/docs/superpowers/specs/2026-07-07-vol-surface-design.md": {
+    "mtime": 1783461221.7170842,
+    "ast_hash": "514f820b79c92fd681f79dab953f0311",
+    "semantic_hash": "514f820b79c92fd681f79dab953f0311"
+  },
+  "/home/claudio/Git/Quant_Finance/generate_docs.sh": {
+    "mtime": 1773115272.6016338,
+    "ast_hash": "b1c5921ad89b31bdc736452bca047424",
+    "semantic_hash": "b1c5921ad89b31bdc736452bca047424"
+  },
+  "/home/claudio/Git/Quant_Finance/.github/copilot-instructions.md": {
+    "mtime": 1776367313.158197,
+    "ast_hash": "a13cf2e5b6fa785eed2104ab26ff5f86",
+    "semantic_hash": "a13cf2e5b6fa785eed2104ab26ff5f86"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/templates/base.html": {
+    "mtime": 1776369614.5328348,
+    "ast_hash": "d5602a27320a17b0a2e6db24bf9cb847",
+    "semantic_hash": "d5602a27320a17b0a2e6db24bf9cb847"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/templates/bonds.html": {
+    "mtime": 1775599309.604098,
+    "ast_hash": "f75936efc5c3bc7b3ba283f5ed4b3c54",
+    "semantic_hash": "f75936efc5c3bc7b3ba283f5ed4b3c54"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/templates/index.html": {
+    "mtime": 1775599423.755646,
+    "ast_hash": "dd2e714f707e4845f6e4e55d2ab0f10b",
+    "semantic_hash": "dd2e714f707e4845f6e4e55d2ab0f10b"
+  },
+  "/home/claudio/Git/Quant_Finance/python_web/templates/swaps.html": {
+    "mtime": 1776369755.4607978,
+    "ast_hash": "0a9ca2e0166830cf792338501bb72d3c",
+    "semantic_hash": "0a9ca2e0166830cf792338501bb72d3c"
+  }
 }
