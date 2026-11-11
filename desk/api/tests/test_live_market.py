@@ -435,6 +435,9 @@ PRICER_CASES = {
                       "rate": 0.07, "dividend_yield": 0.02, "maturity_years": 1, "quantity": 1000},
     "fx_forward": {"side": "buy", "notional_usd": 1e6, "strike": 18.9, "days": 91},
     "fx_option": {"side": "buy", "option_type": "call", "notional_usd": 1e6, "strike": 19, "days": 91},
+    # --- corte 3 --- (MKT-LIVE no trae la curva MXN-USD: descuenta con TIIE-F)
+    "xccy_swap": {"side": "pay_usd", "notional_usd": 1e7, "periods": 26},
+    # --- fin corte 3 ---
 }
 
 

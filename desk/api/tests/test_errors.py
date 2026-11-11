@@ -69,6 +69,15 @@ SPECS: Dict[str, Dict[str, Any]] = {
         "ge0": ["dividend_yield"], "free": ["rate"], "int1": [], "choice": ["option_type"],
         "cap": {"maturity_years": 50},
     },
+    # --- corte 3 ---
+    "xccy_swap": {
+        "base": {"side": "pay_usd", "notional_usd": 1e7, "periods": 26, "fx_rate": 18.6, "spread": -0.001,
+                 "exchange": "both"},
+        "req": ["side", "notional_usd", "periods"],
+        "gt0": ["notional_usd", "fx_rate"], "ge0": [], "free": ["spread"], "int1": ["periods"],
+        "choice": ["side", "exchange"], "cap": {"periods": 1200},
+    },
+    # --- fin corte 3 ---
 }
 
 NOT_A_NUMBER = [
@@ -463,6 +472,9 @@ MAGNITUDE_CAPS: Dict[str, Dict[str, float]] = {
     "fx_option": {"notional_usd": AMOUNT, "strike": PRICE},
     "equity_option": {"spot": PRICE, "strike": PRICE, "volatility": RATE, "rate": RATE,
                       "dividend_yield": RATE, "quantity": AMOUNT},
+    # --- corte 3 ---
+    "xccy_swap": {"notional_usd": AMOUNT, "fx_rate": PRICE, "spread": RATE},
+    # --- fin corte 3 ---
 }
 
 
@@ -542,7 +554,8 @@ def test_caso_por_defecto_de_cada_pricer_no_devuelve_nan_ni_infinito(client, pro
 # exigen >= 0 y quedan cubiertas por el mismo barrido.
 RATE_FLOOR = -1.0
 RATE_FIELDS = [("irs", "fixed_rate"), ("bond", "coupon_rate"),
-               ("equity_option", "rate"), ("equity_option", "dividend_yield")]
+               ("equity_option", "rate"), ("equity_option", "dividend_yield"),
+               ("xccy_swap", "spread")]  # corte 3
 BELOW_FLOOR = [-1.0000001, -1.5, -1e6, -1e300]
 
 
