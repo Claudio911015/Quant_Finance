@@ -109,6 +109,38 @@ const GENERAL_SECTIONS: Section[] = [
       },
     ],
   },
+  // --- corte 3 ---
+  {
+    id: 'csa',
+    title: 'Colateral y curvas MXN',
+    items: [
+      {
+        label: 'Convenciones (supuesto de convención)',
+        text: 'TIIE-F compuesta diaria, cupones cada 28 días, ACT/360; SOFR compuesta, ACT/360. Cross currency swap: SOFR plana contra TIIE-F más diferencial, ambas patas cada 28 días, con intercambio de nocional inicial y final. Forward USDMXN: F = S · DF_USD / DF_MXN^USD. Supuesto de convención: práctica general de mercado, pendiente de confirmar contra la nota de Banorte y la metodología de CME.',
+      },
+      {
+        label: 'Curva MXN-USD',
+        text: 'Puntos forward hasta 1 año y base de cross currency swaps después. Sin cotizaciones no existe y todo se descuenta con TIIE-F. En MX-DEMO es sintética; MKT-LIVE no la trae porque no hay fuente libre.',
+      },
+      {
+        label: 'Efecto del colateral',
+        text: 'Colateral por contraparte, con historial y fecha efectiva. Con colateral USD, los flujos MXN descuentan con MXN-USD y proyectan con TIIE-F; sin curva, aviso y TIIE-F. Con MXN no cambia nada. Cap/floor y swaption con colateral USD usan base determinista: cada flujo × DF_MXN-USD / DF_TIIE-F en el cap/floor, y razón de anualidades en la swaption.',
+      },
+      {
+        label: 'Cross currency swap',
+        text: 'Nocional constante, sin reinicio a mercado. Siempre se descuenta bajo colateral USD.',
+      },
+      {
+        label: 'Calendarios',
+        text: 'Inhábiles bancarios de México para TIIE-F y de publicación de SOFR (SIFMA) en EE. UU. para SOFR, por reglas 2020–2040. Una fijación no publicada en día inhábil de su índice no es faltante. Las fechas de pago son las pactadas: no se ajustan por inhábil.',
+      },
+      {
+        label: 'Riesgo',
+        text: 'MXN-USD entra al DV01 por plazo. En escenarios y VaR es curva dependiente: se recalibra con las cotizaciones fijas cuando se mueven SOFR, TIIE-F o el spot, salvo en su propio desplazamiento.',
+      },
+    ],
+  },
+  // --- fin corte 3 ---
   {
     id: 'ciclo-de-vida',
     title: 'Ciclo de vida y valuación a fecha',
@@ -123,7 +155,7 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Convención de días',
-        text: 'Días naturales, t = días/365, devengo ACT/360, fijaciones diarias capitalizadas, sin calendario de inhábiles.',
+        text: 'Días naturales, t = días/365, devengo ACT/360, fijaciones diarias capitalizadas. Los calendarios de inhábiles solo rigen fijaciones y coberturas (ver Calendarios).',
       },
       {
         label: 'Fines de semana',
@@ -131,7 +163,7 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Fijación faltante',
-        text: 'Un día de lunes a viernes sin fijación usa la última publicada anterior o la tasa a un día de la curva, con aviso. Los feriados todavía avisan: no hay calendario de inhábiles hasta el corte 3.',
+        text: 'Un día de lunes a viernes sin fijación usa la última publicada anterior o la tasa a un día de la curva, con aviso. Un día inhábil de su índice no es faltante.',
       },
       {
         label: 'Alta a la par',
@@ -150,8 +182,8 @@ const GENERAL_SECTIONS: Section[] = [
         text: 'La swaption vence en su expiración. Las opciones vencidas sin ejercicio registrado valen 0, con aviso.',
       },
       {
-        label: 'Aproximaciones',
-        text: 'Bono y cap/floor se valúan con el número de periodos enteros restantes (por ceil): dentro de un periodo no envejecen. El tratamiento exacto llega en el corte 3.',
+        label: 'Bono y cap/floor envejecidos',
+        text: 'Bono: precio sucio con cupón corrido, envejecido día a día; sus cupones y su amortización se liquidan. Cap/floor: el caplet ya fijado no entra en el valor y no tiene liquidación derivada, como las swaptions.',
       },
       {
         label: 'Cambios de nocional',
@@ -163,7 +195,7 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Fuera de alcance',
-        text: 'Novaciones, asignaciones, compensación, calendarios y ajuste de fechas, ejercicio automático, liquidación de caps/floors, swaptions y bonos vencidos (salen con PV 0 y aviso), historia automática de snapshots, división del paquete y textos compartidos de tablas, usuarios y aprobación.',
+        text: 'Novaciones, asignaciones, compensación, ajuste de fechas de pago por inhábiles, ejercicio automático, liquidación de caps/floors y swaptions, historia automática de snapshots, división del paquete y textos compartidos de tablas, usuarios y aprobación.',
       },
     ],
   },
@@ -303,7 +335,7 @@ const LIMITS: { label: string; text: string }[] = [
   { label: 'Alcance', text: 'Sin XVA. Un solo usuario.' },
   {
     label: 'Fechas',
-    text: 'Días naturales sin calendario de inhábiles; t = días/365; SOFR en periodos de 365 días.',
+    text: 'Días naturales; t = días/365; SOFR en periodos de 365 días; fechas de pago sin ajuste por inhábiles.',
   },
   {
     label: 'Bono',

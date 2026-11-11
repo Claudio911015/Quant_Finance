@@ -9,21 +9,38 @@ function row(label: string): string {
 }
 
 describe('MethodologyScreen', () => {
-  it('describe la aproximación de bono y cap/floor como es, sin decir que omite el cupón en curso', () => {
+  it('describe el envejecimiento exacto de bono y cap/floor', () => {
     render(<MethodologyScreen />);
-    const text = row('Aproximaciones');
-    expect(text).toContain('periodos enteros restantes');
-    expect(text).toContain('dentro de un periodo no envejecen');
-    expect(text).toContain('corte 3');
-    expect(text).not.toContain('se omite');
+    const text = row('Bono y cap/floor envejecidos');
+    expect(text).toContain('envejecido día a día');
+    expect(text).toContain('se liquidan');
+    expect(text).toContain('el caplet ya fijado no entra en el valor');
+    expect(text).not.toContain('periodos enteros restantes');
+    expect(text).not.toContain('corte 3');
   });
 
-  it('explica la regla de fines de semana y que los feriados todavía avisan', () => {
+  it('explica la regla de fines de semana y que un inhábil del índice no es faltante', () => {
     render(<MethodologyScreen />);
     expect(row('Fines de semana')).toContain('la del viernes devenga también sábado y domingo (3 días)');
     expect(row('Fines de semana')).toContain('no avisan');
-    expect(row('Fijación faltante')).toContain('Los feriados todavía avisan');
+    expect(row('Fijación faltante')).toContain('Un día inhábil de su índice no es faltante');
     expect(row('Fijación faltante')).toContain('lunes a viernes');
+  });
+
+  it('no conserva frases de "hasta el corte 3" ni "sin calendario de inhábiles"', () => {
+    const { container } = render(<MethodologyScreen />);
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('hasta el corte 3');
+    expect(text).not.toContain('sin calendario de inhábiles');
+  });
+
+  it('describe la sección de colateral y curvas MXN con sus conceptos', () => {
+    render(<MethodologyScreen />);
+    expect(document.getElementById('meth-csa')).not.toBeNull();
+    expect(row('Curva MXN-USD')).toContain('Sin cotizaciones no existe');
+    expect(row('Efecto del colateral')).toContain('MXN-USD');
+    expect(row('Cross currency swap')).toContain('Nocional constante');
+    expect(row('Calendarios')).toContain('no se ajustan por inhábil');
   });
 
   it('dice que un swap sin tasa fija nace a la par', () => {
