@@ -1,0 +1,192 @@
+.hedge-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 960px;
+  min-width: 0;
+}
+
+.hedge-report__actions {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--fs-sm);
+}
+
+.hedge-report__btn {
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.hedge-report__btn:hover {
+  background: var(--bg-hover);
+}
+
+.hedge-report__banner {
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.hedge-report__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.hedge-report__section p {
+  margin: 0;
+}
+
+.hedge-report__section h3 {
+  margin-top: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.hedge-report__facts {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.hedge-report__facts dt {
+  color: var(--text-dim);
+}
+
+.hedge-report__facts dd {
+  margin: 0;
+}
+
+.hedge-report__dim {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.hedge-report__error,
+.hedge-report__frozen {
+  color: var(--warn);
+}
+
+.hedge-report__period {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* El desborde horizontal queda dentro de la tabla, nunca en la página. */
+.hedge-report__scroll {
+  overflow-x: auto;
+}
+
+.hedge-report__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.hedge-report__table th,
+.hedge-report__table td {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.hedge-report__table th {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.hedge-report__table th.num,
+.hedge-report__table td.num {
+  text-align: right;
+}
+
+.hedge-report__table tfoot th {
+  border-top: 1px solid var(--border-strong);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.hedge-report__mismatch td:last-child {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* Impresión: documento claro en una columna, sin la navegación de la aplicación. */
+@media print {
+  :root {
+    --bg: #fff;
+    --bg-elev: #fff;
+    --bg-hover: #fff;
+    --border: #c8c8c8;
+    --border-strong: #8a8a8a;
+    --text: #000;
+    --text-dim: #444;
+    --accent: #0b4ea2;
+    --warn: #5c4210;
+    --warn-soft: #fff4d6;
+  }
+
+  html,
+  body,
+  #root {
+    height: auto;
+    min-width: 0;
+    overflow: visible;
+    background: #fff;
+  }
+
+  .shell__sidebar,
+  .shell__topbar {
+    display: none;
+  }
+
+  .shell,
+  .shell__body {
+    display: block;
+    height: auto;
+  }
+
+  .shell__main {
+    padding: 0;
+    overflow: visible;
+  }
+
+  .hedge-report {
+    max-width: none;
+  }
+
+  .hedge-report__actions {
+    display: none;
+  }
+
+  .hedge-report__scroll {
+    overflow: visible;
+  }
+
+  .hedge-report__table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .hedge-report__table thead {
+    display: table-header-group;
+  }
+
+  .hedge-report h2,
+  .hedge-report h3 {
+    break-after: avoid;
+  }
+}
