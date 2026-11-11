@@ -272,3 +272,6 @@ export function holidays(from: string, to: string): Promise<HolidaysResponse> {
   );
 }
 // --- fin corte 3 ---
+// --- corte 6: acceso de las pestañas de riesgo a la capa HTTP común ---
+export { request as apiRequest };
+// --- fin corte 6 ---

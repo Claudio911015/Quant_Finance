@@ -1,0 +1,233 @@
+/* Pestaña Escenarios (corte 6). Las clases comunes (.radv-*) vienen de risk-adv.css. */
+
+.scn-empty {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.scn-foot {
+  margin: var(--space-2) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+/* Lista de conjuntos */
+.scn-sets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scn-set {
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.scn-set__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.scn-set__head > h3 {
+  margin: 0;
+}
+
+.scn-set__desc {
+  margin: var(--space-1) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.scn-badge {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.scn-badge--warn {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* Detalle legible de cada escenario: nombre | choques */
+.scn-detail {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  font-size: var(--fs-sm);
+  list-style: none;
+}
+
+.scn-detail > li {
+  display: contents;
+}
+
+.scn-detail__name {
+  color: var(--text-dim);
+}
+
+.scn-detail__shock {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.scn-detail__solo {
+  grid-column: 1 / -1;
+}
+
+.scn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+/* Resultado de la corrida */
+.scn-pos {
+  color: var(--pos);
+}
+
+.scn-neg {
+  color: var(--neg);
+}
+
+.scn-total th,
+.scn-total td {
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 0;
+  font-weight: 600;
+}
+
+.scn-total th {
+  color: var(--text);
+  text-align: left;
+}
+
+/* Formulario */
+.scn-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.scn-form__top {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.scn-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.scn-field label {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.scn-control {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.scn-control:hover {
+  border-color: var(--text-dim);
+}
+
+.scn-control[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.scn-control--num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.scn-field__error {
+  color: var(--neg);
+  font-size: var(--fs-xs);
+}
+
+.scn-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.scn-rows > legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.scn-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-2);
+  align-items: end;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.scn-btn {
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.scn-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.scn-btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.scn-btn--primary {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 500;
+}
+
+.scn-btn--danger {
+  border-color: var(--neg);
+  color: var(--neg);
+}

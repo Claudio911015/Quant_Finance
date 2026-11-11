@@ -1,0 +1,158 @@
+/* Pestaña Límites (corte 6). Las clases comunes (.radv-*) vienen de risk-adv.css. */
+
+.radv-card.is-loading {
+  opacity: 0.6;
+  transition: opacity 120ms;
+}
+
+.lim-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.lim-head > h2 {
+  margin: 0;
+}
+
+.lim-empty {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.lim-foot {
+  margin: var(--space-2) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.lim-new {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+}
+
+/* Barra de uso y su porcentaje real */
+.lim-usage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 140px;
+}
+
+.lim-usage .radv-bar {
+  flex: 1 1 auto;
+  min-width: 70px;
+}
+
+/* Acciones por fila */
+.lim-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.lim-inline-input {
+  width: 130px;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.lim-inline-input[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+/* Formulario de alta */
+.lim-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); /* cabe "Exposición (PV positivo neto)" en su select */
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.lim-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.lim-field label {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.lim-control {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.lim-control:hover {
+  border-color: var(--text-dim);
+}
+
+.lim-control[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.lim-control--num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.lim-field__error {
+  color: var(--neg);
+  font-size: var(--fs-xs);
+}
+
+.lim-form__submit {
+  display: flex;
+  align-items: end;
+  align-self: end;
+}
+
+/* Botones */
+.lim-btn {
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lim-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.lim-btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.lim-btn--primary {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 500;
+}
+
+.lim-btn--danger {
+  border-color: var(--neg);
+  color: var(--neg);
+}

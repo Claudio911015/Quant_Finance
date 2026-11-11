@@ -124,3 +124,76 @@ def run_scenarios(
             rows.append(row)
         results.append({"name": spec["name"], "total_mxn": total, "trades": rows})
     return {"snapshot": snapshot_id, "scenarios": results}
+
+
+# --- corte 6: escenarios combinados (tipo "combined") ---
+# Se reasignan `_validate`, `_shock` y `shock` al final para no editar el código de arriba: los
+# escenarios simples siguen pasando por las funciones originales, sin cambio de comportamiento.
+_validate_single = _validate
+_shock_single = _shock
+
+_MAX_SHOCKS = 8  # choques por escenario combinado
+_SINGLE_PREFIX = "Escenario 1: "  # prefijo de los errores de `_validate_single` sobre una lista de uno
+
+
+def _without_prefix(err: ApiError) -> str:
+    msg = err.error
+    return msg[len(_SINGLE_PREFIX):] if msg.startswith(_SINGLE_PREFIX) else msg
+
+
+def _validate_one(i: int, spec: Any) -> Dict[str, Any]:
+    """Un escenario no combinado, validado por el original; el error lleva el índice `i`."""
+    try:
+        return _validate_single({"scenarios": [spec]})[0]
+    except ApiError as e:
+        raise _bad(i, _without_prefix(e))
+
+
+def _validate_combined(i: int, spec: Dict[str, Any]) -> Dict[str, Any]:
+    name = spec.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise _bad(i, "'name' debe ser texto no vacío")
+    shocks = spec.get("shocks")
+    if not isinstance(shocks, list) or not 1 <= len(shocks) <= _MAX_SHOCKS:
+        raise _bad(i, "'shocks' debe ser una lista de 1 a %d choques" % _MAX_SHOCKS)
+    out = []
+    for j, shock_spec in enumerate(shocks):
+        if not isinstance(shock_spec, dict):
+            raise _bad(i, "choque %d: debe ser un objeto" % (j + 1))
+        if shock_spec.get("type") == "combined":
+            raise _bad(i, "choque %d: un escenario combinado no se anida" % (j + 1))
+        # Los choques no llevan nombre: el validador original lo exige, así que va uno provisional.
+        try:
+            normalized = _validate_single({"scenarios": [dict(shock_spec, name="choque")]})[0]
+        except ApiError as e:
+            raise _bad(i, "choque %d: %s" % (j + 1, _without_prefix(e)))
+        normalized.pop("name")
+        out.append(normalized)
+    return {"name": name.strip(), "type": "combined", "shocks": out}
+
+
+def _validate(body: Dict[str, Any]) -> List[Dict[str, Any]]:  # noqa: F811
+    """Como el original, más el tipo `combined`: `shocks` de 1 a 8 choques simples aplicados en orden."""
+    raw = body.get("scenarios")
+    if not isinstance(raw, list) or not raw:
+        raise ApiError(400, "'scenarios' debe ser una lista no vacía de escenarios", "scenarios")
+    out = []
+    for i, spec in enumerate(raw):
+        if isinstance(spec, dict) and spec.get("type") == "combined":
+            out.append(_validate_combined(i, spec))
+        else:
+            out.append(_validate_one(i, spec))
+    return out
+
+
+def _shock(mkt: MarketContext, spec: Dict[str, Any]) -> MarketContext:  # noqa: F811
+    """Un `combined` encadena sus choques sobre el mismo contexto (`mkt.shifted` no muta el original)."""
+    if spec["type"] == "combined":
+        for single in spec["shocks"]:
+            mkt = _shock_single(mkt, single)
+        return mkt
+    return _shock_single(mkt, spec)
+
+
+shock = _shock  # noqa: F811 — la efectividad de coberturas y `run_scenarios` ven la versión con `combined`
+# --- fin corte 6 ---

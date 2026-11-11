@@ -22,6 +22,7 @@ if(GTest_FOUND)
         test_swaption.cpp
         test_daycount.cpp
         test_CVACalculator.cpp
+        test_ExposureProfile.cpp
         test_scenario.cpp
         test_calibration.cpp
         test_volsurface.cpp

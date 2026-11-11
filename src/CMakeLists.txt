@@ -40,6 +40,7 @@ add_library(qf
     xva/credit_curve.cpp
     xva/netting_set.cpp
     xva/cva_calculator.cpp
+    xva/exposure_profile.cpp
 )
 
 target_include_directories(qf
