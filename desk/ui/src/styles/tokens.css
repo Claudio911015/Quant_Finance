@@ -1,4 +1,6 @@
 :root {
+  color-scheme: dark;
+
   --bg: #0e1116;
   --bg-elev: #161b22;
   --border: #262d38;
@@ -8,6 +10,15 @@
   --pos: #3fb68b;
   --neg: #e5534b;
   --warn: #d9a441;
+
+  /* Superficies y estados derivados (U3): todas las pantallas deben reutilizarlos. */
+  --bg-hover: #1c232d;
+  --border-strong: #354050;
+  --accent-soft: rgba(76, 154, 255, 0.14);
+  --warn-soft: rgba(217, 164, 65, 0.14);
+  --overlay: rgba(5, 8, 12, 0.66);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --radius: 4px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -23,4 +34,7 @@
   --fs-sm: 12px;
   --fs-md: 13px;
   --fs-lg: 15px;
+
+  --sidebar-w: 208px;
+  --topbar-h: 44px;
 }
