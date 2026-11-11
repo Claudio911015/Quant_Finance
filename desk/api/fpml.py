@@ -358,6 +358,19 @@ def _swap_body(swap: ET.Element, company: str) -> Dict[str, Any]:
     for key in ("start", "end", "notional"):
         if fixed_data[key] != floating_data[key]:
             raise _bad("Las dos piernas del swap deben coincidir en fechas y nocional")
+    # Auditoría corte 5: `fit_to_maturity` redondea a periodos enteros y movía el vencimiento sin
+    # avisar. Lo conservador es rechazar (lo que no se representa fielmente no se importa) y
+    # nombrar la fecha representable más cercana. Si `end <= start` lo rechaza el alta (`maturity_date`).
+    period_days = CURVES[curve]["period_days"]
+    days = (fixed_data["end"] - fixed_data["start"]).days
+    if days > 0 and days % period_days != 0:
+        nearest = fixed_data["start"].toordinal() + max(1, int(round(days / period_days))) * period_days
+        raise _bad(
+            "<terminationDate> %s no cae en periodos enteros de %d días desde <effectiveDate> %s; QF Desk "
+            "solo representa swaps %s de periodos enteros (fecha más cercana: %s)"
+            % (fixed_data["end"].isoformat(), period_days, fixed_data["start"].isoformat(), curve,
+               date.fromordinal(nearest).isoformat())
+        )
     return {
         "params": {
             "curve": curve,
@@ -438,7 +451,7 @@ def import_trade(conn: sqlite3.Connection, raw: bytes) -> Dict[str, Any]:
 
     Cualquier 400 ocurre antes de escribir. La empresa es la `party` cuyo nombre coincide con
     `company_name`; si ninguna, la primera (`party_assumed`). No guarda el `tradeId` externo.
-    Igual que `POST /api/trades`, el vencimiento de un `irs` se ajusta a periodos enteros.
+    Un `irs` cuyo vencimiento no cae en periodos enteros se rechaza (no se mueve en silencio).
     """
     root = _parse(raw)
     trades = root.findall(_q("trade"))

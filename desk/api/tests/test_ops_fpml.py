@@ -447,10 +447,35 @@ def test_import_response_is_the_public_trade_and_it_is_persisted(client):
     assert stored["params"] == new["params"] and stored["counterparty"] == ALFA
 
 
-def test_import_irs_maturity_is_fitted_to_whole_periods_like_the_trade_form(client):
+def _with_termination(xml, termination):
+    return re.sub(r"(<terminationDate>\s*<unadjustedDate>)[^<]*", r"\g<1>%s" % termination, xml)
+
+
+def test_import_irs_rejects_a_termination_that_is_not_whole_periods(app, client):
+    """Auditoría corte 5: antes el vencimiento se redondeaba en silencio (2028-11-10 -> 2028-11-07)."""
     t = irs_trade(client, fixed_rate=0.07, periods=10)
     xml = _export(client, t["id"]).get_data(as_text=True)
-    odd = re.sub(r"(<terminationDate>\s*<unadjustedDate>)[^<]*", r"\g<1>%s" % "2027-08-31", xml)
-    new = _post(client, odd).get_json()["trade"]
-    days = (date.fromisoformat(new["maturity_date"]) - date.fromisoformat(new["start_date"])).days
-    assert days == new["params"]["periods"] * 28
+    start = date.fromisoformat(t["start_date"])
+    odd = _with_termination(xml, date.fromordinal(start.toordinal() + 10 * 28 + 3).isoformat())
+    body = _assert_rejected(app, client, odd, "periodos enteros")
+    # el mensaje nombra el elemento, la fecha pedida y la más cercana que sí se puede representar
+    assert "terminationDate" in body["error"]
+    assert date.fromordinal(start.toordinal() + 10 * 28).isoformat() in body["error"]
+
+
+def test_import_irs_rejects_a_sofr_termination_that_is_not_whole_years(app, client):
+    t = irs_trade(client, curve="SOFR", notional=20e6, periods=3, counterparty=GAMMA)
+    xml = _export(client, t["id"]).get_data(as_text=True)
+    start = date.fromisoformat(t["start_date"])
+    odd = _with_termination(xml, date.fromordinal(start.toordinal() + 3 * 365 - 1).isoformat())
+    _assert_rejected(app, client, odd, "periodos enteros")
+
+
+def test_import_irs_accepts_a_termination_on_a_period_boundary(client):
+    t = irs_trade(client, fixed_rate=0.07, periods=10)
+    xml = _export(client, t["id"]).get_data(as_text=True)
+    start = date.fromisoformat(t["start_date"])
+    shorter = _with_termination(xml, date.fromordinal(start.toordinal() + 7 * 28).isoformat())
+    new = _post(client, shorter).get_json()["trade"]
+    assert new["params"]["periods"] == 7
+    assert (date.fromisoformat(new["maturity_date"]) - start).days == 7 * 28
