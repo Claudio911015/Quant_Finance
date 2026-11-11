@@ -44,13 +44,13 @@ def test_las_fechas_intermedias_estan_dentro_de_los_pilares(mkt):
             assert c["df"] == mkt.curves[name].discount_factor(c["days"] / 365)
 
 
-def test_build_arma_el_documento_con_cases_vacio_en_este_paso():
+def test_build_arma_el_documento_completo():
     doc = export_cases.build()
     assert doc["snapshot"]["id"] == "MX-DEMO"
     assert doc["snapshot"]["spot"] == 18.6
     assert doc["hw"]["TIIE-F"] == {"a": 0.05, "sigma": 0.01}
     assert set(doc) == {"generated_at", "snapshot", "desk_commit", "desk_dirty", "hw", "curves", "cases"}
-    assert doc["cases"] == []
+    assert len(doc["cases"]) == 62  # la batería la llena build_cases (T2)
 
 
 def test_classify():
