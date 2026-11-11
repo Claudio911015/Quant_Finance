@@ -295,6 +295,73 @@ const HEDGE_SECTIONS: Section[] = [
   },
 ];
 
+// --- corte 6: metodología de riesgo avanzado ---
+const RISK_ADV_SECTIONS: Section[] = [
+  {
+    id: 'riesgo-avanzado',
+    title: 'Riesgo avanzado',
+    items: [
+      {
+        label: 'Orden de la cascada',
+        text: 'El paso del tiempo y las liquidaciones con el mercado de origen rodado a la fecha final; luego TIIE-F, SOFR y las demás curvas en orden alfabético, tipo de cambio, volatilidad (superficie y parámetros Hull-White), operaciones nuevas y eventos. Cada paso cambia un bloque del mercado de origen por el de destino.',
+      },
+      {
+        label: 'Residuo',
+        text: 'Por qué no es exactamente cero: la cascada suma exactamente el P&L salvo redondeo numérico y datos del mercado que no pertenecen a ningún bloque. Los efectos cruzados se atribuyen al paso posterior, así que cambiar el orden cambia la atribución pero no el total.',
+      },
+      {
+        label: 'Operaciones nuevas y eventos',
+        text: 'Las operaciones pactadas en la ventana van completas a su paso. Terminaciones, ejercicios y cambios de nocional se aíslan valuando con y sin los eventos de la ventana.',
+      },
+      {
+        label: 'VaR histórico',
+        text: 'Revaluación por sensibilidades (delta), no revaluación completa: el P&L diario es exposición por cambios históricos. Percentil empírico; escala por raíz del horizonte, como el paramétrico. Ventana de 250 días por omisión, mínimo 60; sin historia suficiente no se calcula.',
+      },
+      {
+        label: 'Déficit esperado',
+        text: 'Promedio de las pérdidas más allá del VaR al mismo nivel; siempre es mayor o igual que el VaR.',
+      },
+      {
+        label: 'Historia de factores',
+        text: 'Cambios diarios en pb de TIIE-F y SOFR, y rendimiento logarítmico de USDMXN. Fuentes: CSV, fijaciones, FRED o MarketDataFeed (SOFR con el proxy del Tesoro a 5 años). Los snapshots sintéticos usan la historia sintética.',
+      },
+      {
+        label: 'Historia sintética de MX-DEMO',
+        text: '500 días hábiles generados con semilla fija 20261110 a partir de las volatilidades y correlaciones de MX-DEMO. Inventada para demostración.',
+      },
+      {
+        label: 'Límites',
+        text: 'Por contraparte, PV positivo neto; por curva, DV01; por USDMXN, delta en MXN por 1 %; del portafolio, VaR paramétrico a 1 día y 99 %. Alerta desde 80 %, exceso por encima de 100 %. Se cambian con eventos, no se editan. La bitácora registra un exceso por límite y fecha de valuación.',
+      },
+      {
+        label: 'Exposición y CVA',
+        text: 'Simulación Hull-White de 500 trayectorias con semilla fija sobre una rejilla mensual hasta el último vencimiento. EE = exposición esperada; PFE = percentil 95 % de la exposición positiva, nunca menor que la EE; CVA = (1 − recuperación) × Σ EE × probabilidad de incumplimiento en cada intervalo.',
+      },
+      {
+        label: 'Supuestos de crédito',
+        text: 'Curva de riesgo plana por contraparte. Por omisión 1 % anual y recuperación 40 %, rotulados como supuesto. Cada cambio se guarda como fila nueva.',
+      },
+      {
+        label: 'Alcance del crédito',
+        text: 'Solo swaps de tasa; forwards, opciones FX y caps/floors se excluyen con aviso. Un conjunto de compensación por contraparte y curva, sin compensación entre monedas. Sin colateral.',
+      },
+      {
+        label: 'CVA informativo',
+        text: 'El CVA es informativo: no entra al PV ni a la contabilidad de coberturas.',
+      },
+      {
+        label: 'Escenarios históricos',
+        text: 'Aproximaciones con choques fijos aplicados a la vez: Depreciación 2008 (USDMXN +35 %, TIIE-F +100 pb, SOFR −200 pb); 2016 elecciones EE. UU. (USDMXN +12 %, TIIE-F +75 pb, SOFR +25 pb); Marzo 2020 (USDMXN +25 %, TIIE-F −100 pb, SOFR −150 pb). No reproducen la curva completa de esas fechas.',
+      },
+      {
+        label: 'Fuera de alcance',
+        text: 'VaR por revaluación completa y Monte Carlo del portafolio; DVA, FVA y colateral; pruebas de respaldo del VaR; flujo de aprobación de límites; curvas de crédito con plazo.',
+      },
+    ],
+  },
+];
+// --- fin corte 6 ---
+
 const LIMITS: { label: string; text: string }[] = [
   {
     label: 'Datos',
@@ -367,6 +434,13 @@ export function MethodologyScreen() {
       {HEDGE_SECTIONS.map((s) => (
         <SectionBlock key={s.id} section={s} />
       ))}
+
+      {/* --- corte 6: grupo de riesgo avanzado --- */}
+      <h2 className="meth-group">Riesgo avanzado</h2>
+      {RISK_ADV_SECTIONS.map((s) => (
+        <SectionBlock key={s.id} section={s} />
+      ))}
+      {/* --- fin corte 6 --- */}
 
       <section className="meth-section" aria-labelledby="meth-limites">
         <h2 id="meth-limites">Límites de este corte</h2>

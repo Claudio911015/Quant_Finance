@@ -112,4 +112,33 @@ describe('MethodologyScreen', () => {
       expect(hedgeRow('Derivado hipotético')).toContain('swap a la par');
     });
   });
+
+  // --- corte 6: pruebas del grupo de riesgo avanzado ---
+  describe('riesgo avanzado (corte 6)', () => {
+    function riskRow(label: string): string {
+      const section = document.getElementById('meth-riesgo-avanzado')!.closest('section')!;
+      const term = Array.from(section.querySelectorAll('dt')).find((dt) => dt.textContent === label);
+      return term?.nextElementSibling?.textContent ?? '';
+    }
+
+    it('describe la cascada, el residuo y el VaR histórico como sensibilidades', () => {
+      render(<MethodologyScreen />);
+      expect(riskRow('Residuo')).toContain('orden');
+      expect(riskRow('VaR histórico')).toContain('sensibilidades');
+    });
+
+    it('declara la semilla de la historia sintética y el CVA informativo', () => {
+      render(<MethodologyScreen />);
+      expect(riskRow('Historia sintética de MX-DEMO')).toContain('20261110');
+      expect(riskRow('CVA informativo')).toContain('no entra al PV');
+    });
+
+    it('lista los escenarios históricos con sus choques y excluye DVA del alcance', () => {
+      render(<MethodologyScreen />);
+      expect(riskRow('Escenarios históricos')).toContain('Marzo 2020');
+      expect(riskRow('Escenarios históricos')).toContain('+35 %');
+      expect(riskRow('Fuera de alcance')).toContain('DVA');
+    });
+  });
+  // --- fin corte 6 ---
 });
