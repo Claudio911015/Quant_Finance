@@ -220,9 +220,6 @@ def test_delete_is_always_409_and_missing_is_404(client):
 # Cada tarea posterior borra de aquí las rutas que implementa (T4: state y events; T5: fixings;
 # T6: roll; T9: flows y pnl).
 STUB_ROUTES = [
-    ("T5", "get", "/api/fixings", None),
-    ("T5", "post", "/api/fixings", {"index": "SOFR", "date": "2026-11-10", "value": 0.04}),
-    ("T5", "post", "/api/fixings/csv", {"csv": "index,date,value\n"}),
     ("T9", "get", "/api/trades/1/flows?snapshot=MX-DEMO", None),
     ("T9", "get", "/api/pnl?from=MX-DEMO&to=MX-DEMO", None),
 ]
