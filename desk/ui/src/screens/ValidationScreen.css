@@ -99,7 +99,7 @@
 
 /* Descripciones y métodos largos: envuelven en vez de ensanchar la tabla. */
 .vld-table td.vld-wrap {
-  min-width: 220px;
+  min-width: 160px;
   max-width: 360px;
   overflow-wrap: anywhere;
 }
@@ -127,10 +127,6 @@
 
 .vld-verdict--explained {
   color: var(--warn);
-}
-
-.vld-verdict {
-  white-space: nowrap;
 }
 
 .vld-filters {
