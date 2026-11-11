@@ -10,6 +10,8 @@ import './CashflowsPanel.css';
 
 /** Días hacia atrás desde el `as_of` con que abre el filtro "Desde": se ven los liquidados recientes y los proyectados. */
 const DEFAULT_LOOKBACK_DAYS = 90;
+// Un aviso de fijaciones faltantes puede nombrar cientos de días: se muestran los primeros y se cuenta el resto.
+const MAX_WARNING_DATES = 5;
 
 type CurrencyFilter = '' | OpsCurrency;
 
@@ -282,7 +284,13 @@ export function CashflowsPanel() {
           {data.warnings.map((w, i) => (
             <li key={`${w.code}-${i}`} className="ops-cash__note">
               {w.message}
-              {w.dates.length > 0 && <span className="ops-cash__dim"> ({w.dates.map(fmtDate).join(', ')})</span>}
+              {w.dates.length > 0 && (
+                <span className="ops-cash__dim" title={w.dates.map(fmtDate).join(', ')}>
+                  {' '}
+                  ({w.dates.slice(0, MAX_WARNING_DATES).map(fmtDate).join(', ')}
+                  {w.dates.length > MAX_WARNING_DATES && ` … y ${w.dates.length - MAX_WARNING_DATES} más`})
+                </span>
+              )}
             </li>
           ))}
         </ul>

@@ -181,6 +181,27 @@ describe('CashflowsPanel', () => {
     expect(avisos.getByText('(2026-11-05)')).toBeTruthy();
   });
 
+  it('un aviso con muchas fechas muestra las primeras y cuenta el resto, sin listar los 117 días', async () => {
+    const dates = Array.from({ length: 117 }, (_, i) => {
+      const d = new Date(Date.UTC(2026, 6, 1 + i));
+      return d.toISOString().slice(0, 10);
+    });
+    vi.mocked(getCashflows).mockResolvedValue({
+      ...RESPONSE,
+      warnings: [{ code: 'missing_fixing', index: 'TIIE-F', dates, message: 'Faltan fijaciones de TIIE-F en 117 día(s)' }],
+    });
+    renderPanel();
+    await loaded();
+    const avisos = screen.getByRole('list', { name: 'Avisos' });
+    expect(within(avisos).getByText('Faltan fijaciones de TIIE-F en 117 día(s)', { exact: false })).toBeTruthy();
+    const note = within(avisos).getByText('y 112 más', { exact: false });
+    expect(note.textContent).toContain(dates[0]);
+    expect(note.textContent).toContain(dates[4]);
+    expect(note.textContent).not.toContain(dates[5]);
+    // la lista completa sigue disponible al pasar el cursor
+    expect(note.getAttribute('title')).toContain(dates[116]);
+  });
+
   it('cambiar Moneda a USD vuelve a consultar con currency USD', async () => {
     renderPanel();
     await loaded();
