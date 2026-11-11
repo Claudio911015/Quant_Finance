@@ -22,8 +22,8 @@ El corte 1 (en curso) deja una calculadora con portafolio y riesgo. Lo que lo se
 ## 3. Mapa de cortes
 
 ```
-Corte 1  Workstation núcleo ........................ en curso
-Corte 2  La operación con vida + mercado con historia
+Corte 1  Workstation núcleo ........................ hecho y auditado
+Corte 2  La operación con vida + mercado con historia ... hecho y auditado 2026-11-11 (docs/superpowers/qf-desk/corte2/)
 Corte 3  Curvas MXN multi-curva + cross currency swap
 Corte 4  Contabilidad de coberturas IFRS 9 ......... (requiere 2)
 Corte 5  Operaciones: flujos, confirmaciones, conciliación (requiere 2)

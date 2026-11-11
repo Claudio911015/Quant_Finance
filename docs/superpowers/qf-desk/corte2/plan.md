@@ -409,3 +409,28 @@ U1–U8 no tocan backend y pueden correr junto a T2–T9 (archivos disjuntos). T
 P1–P10 están resueltas en "Aclaraciones de Fable al plan" del diseño y ya forman parte del Contexto y de T3, T4, T7, T8, T9, T10, U4 y U5. El método de la curva desplazada (R3/R4) quedó aceptado.
 
 - P11 respondida: `cap_floor` y `bond` siguen la regla de `irs` (ver Convenciones). No queda nada abierto.
+
+## T12 — Correcciones tras la auditoría (decisiones de Fable) — modelo sonnet
+
+Auditoría de Opus: R1–R13 CUMPLE, sin defectos medios ni altos. Estas correcciones cierran los defectos bajos y dos huecos de la integración. Cada una con su test. Un commit por bloque (backend / interfaz), `git commit -- <rutas>`, `GRAPHIFY_SKIP_HOOK=1`.
+
+**Backend (`desk/api`)**
+1. **Fines de semana no son fijaciones faltantes.** Las tasas a un día solo se publican en días hábiles: la del viernes devenga 3 días. En el factor acumulado (`valuation._accrued_factor` y su uso en `settlement.py`), sábado y domingo no se esperan: se agrupan con la fijación del día hábil anterior (días = 3 el viernes) y **no** generan `missing_fixing`. Solo un día de lunes a viernes sin fijación avisa (los feriados seguirán avisando hasta el corte 3; se declara). Si la carga trae una fijación en sábado o domingo, se usa tal cual. Tests: periodo que cruza un fin de semana con fijaciones solo en hábiles → sin aviso y factor == `compound_overnight` con días [1,1,1,1,3]; un miércoles faltante → aviso solo con esa fecha. R3/R4 deben seguir pasando (ajustar las fijaciones de esos tests si hace falta, sin relajar tolerancias).
+2. **Rótulo al rodar:** si el rótulo del origen ya termina en ` · rodado al AAAA-MM-DD`, ese sufijo se reemplaza en vez de encadenarse.
+3. **Alta de `irs` sin `fixed_rate`:** `create_trade` fija `fixed_rate` a la tasa par del swap con el snapshot de la petición (o `MX-DEMO`), de modo que la operación nace a la par y queda guardada con su tasa. La respuesta devuelve `params.fixed_rate`. Test: PV en la fecha de pacto ≈ 0 (1e-6 × nocional).
+4. **CSV de fijaciones:** tolerar BOM UTF-8 al inicio y fin de línea `\r\n`.
+5. **`events.post_event`:** operación sin eventos → error controlado (409 con mensaje), no 500.
+6. Quitar el test esqueleto vacío de `test_trades_dates.py` (`STUB_ROUTES` y su test) si ya no cubre nada.
+7. **Sin duplicación:** que `valuation.py` exponga con nombre público lo que `settlement.py` importa como privado (`_accrued_factor`, `_shortened`) y una función que arme el `OisSwap` envejecido, y que `settlement.py` la use en vez de repetir las ~12 líneas.
+
+**Interfaz (`desk/ui`)**
+8. P&L y blotter muestran el nombre del producto con los mismos rótulos en español de Pricers (no `irs`, `fx_forward`).
+9. Blotter filtrado con 0 filas: un solo mensaje («Ninguna operación con ese estado»). La fila de total se rotula «Total del portafolio» cuando hay filtro activo.
+10. Ficha: si la operación tiene un evento `termination` o `exercise` (en cualquier fecha), no se ofrecen acciones; en su lugar, una línea «Terminada el AAAA-MM-DD» / «Ejercida el AAAA-MM-DD». El encabezado «Acciones» no aparece vacío.
+11. Nunca mostrar `-0.00`: el formateador de montos normaliza el cero negativo.
+12. Metodología: la aproximación de bono y cap/floor se describe como es («se valúan con el número de periodos enteros restantes; dentro de un periodo no envejecen; tratamiento exacto en el corte 3»); añadir la regla de fines de semana y que los feriados aún avisan; el alta de un swap sin tasa fija nace a la par.
+
+**Documentación**
+13. `CLAUDE.md` del repo: actualizar el conteo de tests (ctest 402) y añadir una sección corta de QF Desk (qué es, `desk/run.sh`, las cuatro suites, dónde están diseño/plan/roadmap).
+
+**Verificación:** las cuatro suites del Contexto sin fallos; reportar conteos.
