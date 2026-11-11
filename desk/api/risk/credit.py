@@ -21,6 +21,10 @@ EE(0) y PFE(0) son max(PV de la contraparte, 0): el valor de hoy sí compensa en
 mensuales siguientes no (cada conjunto se simula por separado), así que en una contraparte con swaps en
 dos monedas el primer punto mensual puede quedar por encima de EE(0): es la cota superior declarada.
 
+Límite conocido: el modelo ve cada swap como uno fresco desde hoy hasta su vencimiento. Un swap que aún
+no empieza (`start_date` posterior al `as_of`) queda igual de anclado a su PV en t = 0, pero su perfil
+posterior es solo una aproximación.
+
 `qfxva` se importa dentro de las funciones, después de `qfpy` (orden obligatorio: ambos registran el
 mismo enum de C++ y `qfxva` lo reutiliza solo si `qfpy` ya está cargado), para que el backend arranque
 aunque el módulo no esté compilado. Las escrituras no hacen commit: lo hace la ruta.
