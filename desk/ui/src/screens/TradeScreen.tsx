@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ApiError, getTrade, listHedges, postEvent, tradeFlows, tradeState } from '../api/client';
+import { ApiError, getTrade, holidays, listHedges, postEvent, tradeFlows, tradeState } from '../api/client';
 import type {
   EventType,
+  Flow,
   FlowKind,
   FlowsResponse,
   HedgeSummary,
@@ -12,7 +13,7 @@ import type {
   TradeStatus,
   Warning,
 } from '../api/types';
-import { FLOW_KIND_EXTRA_LABEL } from '../lib/csaLabels';
+import { FLOW_KIND_EXTRA_LABEL, LEG_LABEL, NO_CSA_TEXT } from '../lib/csaLabels';
 import { HEDGE_STATUS_LABEL, HEDGE_TYPE_LABEL } from '../lib/hedgeLabels';
 import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
@@ -41,8 +42,40 @@ const FLOW_KIND_LABEL: Record<FlowKind, string> = {
   coupon: 'Cupón',
   settlement: 'Liquidación',
   transfer: 'Transferencia',
-  ...FLOW_KIND_EXTRA_LABEL, // corte 3: U1 solo mantiene el tipado; U4 rotula la ficha
+  ...FLOW_KIND_EXTRA_LABEL, // corte 3: intercambio de nocional y amortización
 };
+
+// --- corte 3 ---
+// Días inhábiles: cada flujo se compara con el calendario de su moneda (MXN -> México, USD -> publicación de SOFR).
+const CURRENCY_CALENDAR: Record<string, 'MX' | 'US'> = { MXN: 'MX', USD: 'US' };
+type HolidayNames = Record<'MX' | 'US', Record<string, string>>;
+
+// El backend solo conoce 2020–2040 y acepta rangos de hasta 3660 días (400 si no): se recorta el rango
+// pedido para no perder todas las marcas de una ficha con flujos más allá de esos límites.
+const HOLIDAY_FIRST = '2020-01-01';
+const HOLIDAY_LAST = '2040-12-31';
+const HOLIDAY_MAX_SPAN_DAYS = 3650;
+
+/** Rango ISO (primera y última fecha de los flujos, recortado a lo que el backend acepta) o `null` si no queda ninguno. */
+function holidayRange(dates: string[]): [string, string] | null {
+  if (dates.length === 0) return null;
+  const sorted = [...dates].sort();
+  const from = sorted[0] < HOLIDAY_FIRST ? HOLIDAY_FIRST : sorted[0];
+  let to = sorted[sorted.length - 1] > HOLIDAY_LAST ? HOLIDAY_LAST : sorted[sorted.length - 1];
+  if (from > to) return null;
+  const limit = new Date(Date.parse(`${from}T00:00:00Z`) + HOLIDAY_MAX_SPAN_DAYS * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  if (to > limit) to = limit;
+  return [from, to];
+}
+
+/** Nombre del día inhábil de la fecha del flujo en el calendario de su moneda, si lo es. */
+function holidayOf(f: Flow, names: HolidayNames | null): string | undefined {
+  const cal = CURRENCY_CALENDAR[f.currency];
+  return cal != null && names != null ? names[cal][f.date] : undefined;
+}
+// --- fin corte 3 ---
 
 function describe(e: unknown): string {
   return e instanceof ApiError ? e.message : 'No se pudo conectar con el backend';
@@ -77,7 +110,7 @@ function Warnings({ warnings }: { warnings: Warning[] }) {
     <ul className="trade__warnings" aria-label="Avisos">
       {warnings.map((w, i) => (
         <li key={`${w.code}-${i}`} className="trade__warning">
-          {w.message}
+          {w.code === 'no_csa_curve' ? NO_CSA_TEXT : w.message}
           {w.dates.length > 0 && <span className="trade__warning-dates"> ({w.dates.map(fmtDate).join(', ')})</span>}
         </li>
       ))}
@@ -195,6 +228,7 @@ export default function TradeScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [hedges, setHedges] = useState<HedgeSummary[]>([]);
+  const [holidayNames, setHolidayNames] = useState<HolidayNames | null>(null); // corte 3
   // Cada carga toma un número; solo la última escribe estado (una respuesta lenta de un
   // snapshot anterior no debe pisar la del que el usuario eligió después).
   const latest = useRef(0);
@@ -249,6 +283,33 @@ export default function TradeScreen() {
     };
   }, [id]);
 
+  // --- corte 3 ---
+  // Los feriados solo marcan la ficha: si la llamada falla, los flujos se muestran igual sin marcas.
+  useEffect(() => {
+    const range = holidayRange((flows?.flows ?? []).map((f) => f.date));
+    if (range == null) {
+      setHolidayNames(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await holidays(range[0], range[1]);
+        const names: HolidayNames = { MX: {}, US: {} };
+        for (const cal of ['MX', 'US'] as const) {
+          for (const h of res.holidays[cal]) names[cal][h.date] = h.name;
+        }
+        if (!cancelled) setHolidayNames(names);
+      } catch {
+        if (!cancelled) setHolidayNames(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [flows]);
+  // --- fin corte 3 ---
+
   if (id == null) {
     return (
       <section className="trade">
@@ -271,6 +332,8 @@ export default function TradeScreen() {
   const closing = events.find((ev) => ev.type === 'termination' || ev.type === 'exercise');
   const showActions = closing != null || status === 'no_pactada' || (status === 'viva' && asOf != null);
   const rows = [...(flows?.flows ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+  const hasLegs = rows.some((f) => f.leg != null); // corte 3: solo el cross currency swap trae patas
+  const bond = flows?.bond ?? null; // corte 3
 
   return (
     <section className="trade">
@@ -401,12 +464,29 @@ export default function TradeScreen() {
             </div>
           )}
           {flows && <Warnings warnings={flows.warnings} />}
+          {bond && (
+            <dl className="trade__facts trade__bond" aria-label="Precio del bono">
+              <div>
+                <dt>Precio sucio</dt>
+                <dd className="num">{fmtMoney(bond.dirty, bond.currency)}</dd>
+              </div>
+              <div>
+                <dt>Precio limpio</dt>
+                <dd className="num">{fmtMoney(bond.clean, bond.currency)}</dd>
+              </div>
+              <div>
+                <dt>Cupón corrido</dt>
+                <dd className="num">{fmtMoney(bond.accrued, bond.currency)}</dd>
+              </div>
+            </dl>
+          )}
           {flows && rows.length === 0 && <p className="trade__meta">Sin flujos a esta fecha</p>}
           {rows.length > 0 && (
             <table className="trade__flows">
               <thead>
                 <tr>
                   <th className="num">Fecha</th>
+                  {hasLegs && <th>Pata</th>}
                   <th>Tipo</th>
                   <th>Estado</th>
                   <th className="num">Monto</th>
@@ -416,17 +496,24 @@ export default function TradeScreen() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((f, i) => (
-                  <tr key={`${f.date}-${f.kind}-${i}`} className={`trade__flow trade__flow--${f.status}`}>
-                    <td className="num">{fmtDate(f.date)}</td>
-                    <td>{FLOW_KIND_LABEL[f.kind]}</td>
-                    <td>{f.status === 'settled' ? 'Liquidado' : 'Proyectado'}</td>
-                    <td className="num">{fmtNumber(f.amount, 2)}</td>
-                    <td>{f.currency}</td>
-                    <td className="num">{dash(f.df, 6)}</td>
-                    <td className="num">{dash(f.pv, 2)}</td>
-                  </tr>
-                ))}
+                {rows.map((f, i) => {
+                  const holiday = holidayOf(f, holidayNames);
+                  return (
+                    <tr key={`${f.date}-${f.kind}-${i}`} className={`trade__flow trade__flow--${f.status}`}>
+                      <td className="num">
+                        {fmtDate(f.date)}
+                        {holiday && <span className="trade__holiday">Inhábil ({holiday})</span>}
+                      </td>
+                      {hasLegs && <td>{f.leg ? LEG_LABEL[f.leg] : '—'}</td>}
+                      <td>{FLOW_KIND_LABEL[f.kind]}</td>
+                      <td className="trade__flow-state">{f.status === 'settled' ? 'Liquidado' : 'Proyectado'}</td>
+                      <td className="num">{fmtNumber(f.amount, 2)}</td>
+                      <td>{f.currency}</td>
+                      <td className="num">{dash(f.df, 6)}</td>
+                      <td className="num">{dash(f.pv, 2)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

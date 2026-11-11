@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   FlowsResponse,
+  HolidaysResponse,
   Snapshot,
   TradeDetail,
   TradeEvent,
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   tradeState: vi.fn(),
   tradeFlows: vi.fn(),
   postEvent: vi.fn(),
+  holidays: vi.fn(),
 }));
 
 vi.mock('../api/client', async (importOriginal) => {
@@ -34,6 +36,7 @@ vi.mock('../api/client', async (importOriginal) => {
     tradeState: mocks.tradeState,
     tradeFlows: mocks.tradeFlows,
     postEvent: mocks.postEvent,
+    holidays: mocks.holidays,
   };
 });
 
@@ -85,6 +88,37 @@ const FLOWS: FlowsResponse = {
   ],
 };
 
+// --- corte 3 ---
+const NO_HOLIDAYS: HolidaysResponse = { from: '', to: '', holidays: { MX: [], US: [] } };
+
+// El 2026-11-16 es el tercer lunes de noviembre (inhábil en México) y no es feriado en EE. UU.
+const HOLIDAYS_2026: HolidaysResponse = {
+  from: '2026-11-10',
+  to: '2026-12-08',
+  holidays: {
+    MX: [{ date: '2026-11-16', name: 'Día de la Revolución' }],
+    US: [{ date: '2026-11-26', name: 'Thanksgiving' }],
+  },
+};
+
+function flow(date: string, currency: string, extra: Partial<FlowsResponse['flows'][number]> = {}) {
+  return {
+    date,
+    kind: 'coupon' as const,
+    status: 'projected' as const,
+    amount: 1000,
+    currency,
+    df: 0.99,
+    pv: 990,
+    ...extra,
+  };
+}
+
+function flowsOf(flows: FlowsResponse['flows'], extra: Partial<FlowsResponse> = {}): FlowsResponse {
+  return { id: 1, snapshot: 'MX-DEMO', as_of: '2026-11-10', flows, warnings: [], ...extra };
+}
+// --- fin corte 3 ---
+
 // Sin terminación ni ejercicio: la operación admite acciones mientras esté viva.
 const LIVE_EVENTS = EVENTS.slice(0, 2);
 
@@ -98,6 +132,7 @@ function setup(status: TradeStatus = 'viva', events: TradeEvent[] = LIVE_EVENTS)
   mocks.tradeFlows.mockResolvedValue(FLOWS);
   mocks.listHedges.mockResolvedValue([]);
   mocks.postEvent.mockResolvedValue([]);
+  mocks.holidays.mockResolvedValue(NO_HOLIDAYS);
 }
 
 function renderScreen() {
@@ -328,4 +363,126 @@ describe('TradeScreen', () => {
     renderScreen();
     expect(await screen.findByText('Operación inexistente')).toBeTruthy();
   });
+  // --- corte 3 ---
+  it('marca el flujo MXN en día inhábil de México y no marca el mismo día en USD', async () => {
+    setup();
+    mocks.tradeFlows.mockResolvedValue(
+      flowsOf([flow('2026-11-16', 'MXN'), flow('2026-11-16', 'USD'), flow('2026-12-08', 'MXN')]),
+    );
+    mocks.holidays.mockResolvedValue(HOLIDAYS_2026);
+    renderScreen();
+    const marks = await screen.findAllByText('Inhábil (Día de la Revolución)');
+    expect(marks).toHaveLength(1);
+    // Se pide el rango de la primera a la última fecha de los flujos.
+    expect(mocks.holidays).toHaveBeenCalledWith('2026-11-16', '2026-12-08');
+    const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1);
+    const mxn = rows.find((r) => r.textContent?.includes('MXN') && r.textContent.includes('2026-11-16'));
+    const usd = rows.find((r) => r.textContent?.includes('USD'));
+    expect(mxn?.textContent).toContain('Inhábil (Día de la Revolución)');
+    expect(mxn?.textContent).toContain('2026-11-16'); // la fecha no cambia
+    expect(usd?.textContent).not.toContain('Inhábil');
+    expect(rows[2].textContent).not.toContain('Inhábil');
+  });
+
+  it('un flujo USD en día inhábil de EE. UU. se marca con el nombre del calendario de SOFR', async () => {
+    setup();
+    mocks.tradeFlows.mockResolvedValue(flowsOf([flow('2026-11-26', 'USD'), flow('2026-11-26', 'MXN')]));
+    mocks.holidays.mockResolvedValue(HOLIDAYS_2026);
+    renderScreen();
+    expect(await screen.findAllByText('Inhábil (Thanksgiving)')).toHaveLength(1);
+  });
+
+  it('si falla la llamada de feriados la ficha se muestra igual, sin marcas', async () => {
+    setup();
+    mocks.tradeFlows.mockResolvedValue(flowsOf([flow('2026-11-16', 'MXN')]));
+    mocks.holidays.mockRejectedValue(new ApiError(500, 'fallo', 'from'));
+    renderScreen();
+    const table = await screen.findByRole('table');
+    await waitFor(() => expect(mocks.holidays).toHaveBeenCalled());
+    expect(within(table).getAllByRole('row')).toHaveLength(2);
+    expect(screen.queryByText(/Inhábil/)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('un calendario de flujos más largo que lo que acepta el backend pide un rango recortado, no falla entero', async () => {
+    setup();
+    mocks.tradeFlows.mockResolvedValue(flowsOf([flow('2026-11-16', 'MXN'), flow('2045-01-01', 'MXN')]));
+    mocks.holidays.mockResolvedValue(HOLIDAYS_2026);
+    renderScreen();
+    await screen.findByText('Inhábil (Día de la Revolución)');
+    expect(mocks.holidays).toHaveBeenCalledWith('2026-11-16', '2036-11-13');
+  });
+
+  it('sin flujos no pide feriados', async () => {
+    setup();
+    mocks.tradeFlows.mockResolvedValue(flowsOf([]));
+    renderScreen();
+    await screen.findByText('Sin flujos a esta fecha');
+    expect(mocks.holidays).not.toHaveBeenCalled();
+  });
+
+  it('un cross currency swap muestra la columna Pata y el intercambio de nocional', async () => {
+    setup();
+    mocks.getTrade.mockResolvedValue({ ...TRADE, product: 'xccy_swap', currency: 'USD', events: LIVE_EVENTS });
+    mocks.tradeFlows.mockResolvedValue(
+      flowsOf([
+        flow('2026-11-10', 'USD', { kind: 'exchange', status: 'settled', amount: -10000000, leg: 'USD', df: null, pv: null }),
+        flow('2026-12-08', 'MXN', { leg: 'MXN' }),
+        flow('2027-11-09', 'USD', { kind: 'exchange', leg: 'USD' }),
+      ]),
+    );
+    renderScreen();
+    const table = await screen.findByRole('table');
+    expect(within(table).getByRole('columnheader', { name: 'Pata' })).toBeTruthy();
+    expect(within(table).getAllByText('Intercambio de nocional')).toHaveLength(2);
+    expect(within(table).getAllByText('Pata USD (SOFR)', { selector: 'td' })).toHaveLength(2);
+    expect(within(table).getByText('Pata MXN (TIIE-F + diferencial)')).toBeTruthy();
+    expect(screen.getByText('Cross currency swap USDMXN')).toBeTruthy();
+  });
+
+  it('sin patas no hay columna Pata', async () => {
+    setup();
+    renderScreen();
+    const table = await screen.findByRole('table');
+    expect(within(table).queryByRole('columnheader', { name: 'Pata' })).toBeNull();
+  });
+
+  it('un bono vivo muestra precio sucio, limpio y cupón corrido, y la amortización', async () => {
+    setup();
+    mocks.getTrade.mockResolvedValue({ ...TRADE, product: 'bond', events: LIVE_EVENTS });
+    mocks.tradeFlows.mockResolvedValue(
+      flowsOf(
+        [flow('2026-12-08', 'MXN'), flow('2027-06-07', 'MXN', { kind: 'redemption', amount: 100000000 })],
+        { bond: { dirty: 101250000.5, clean: 100000000, accrued: 1250000.5, currency: 'MXN' } },
+      ),
+    );
+    renderScreen();
+    const figures = await screen.findByLabelText('Precio del bono');
+    expect(within(figures).getByText('Precio sucio').nextSibling?.textContent).toBe('MXN 101,250,000.50');
+    expect(within(figures).getByText('Precio limpio').nextSibling?.textContent).toBe('MXN 100,000,000.00');
+    expect(within(figures).getByText('Cupón corrido').nextSibling?.textContent).toBe('MXN 1,250,000.50');
+    expect(within(screen.getByRole('table')).getByText('Amortización')).toBeTruthy();
+  });
+
+  it('sin bono (null) no aparecen las cifras de precio', async () => {
+    setup();
+    mocks.tradeFlows.mockResolvedValue({ ...FLOWS, bond: null });
+    renderScreen();
+    await screen.findByRole('table');
+    expect(screen.queryByLabelText('Precio del bono')).toBeNull();
+    expect(screen.queryByText('Precio sucio')).toBeNull();
+  });
+
+  it('el aviso no_csa_curve se muestra con el texto legible de la interfaz', async () => {
+    setup();
+    mocks.tradeFlows.mockResolvedValue(
+      flowsOf([flow('2026-12-08', 'MXN')], {
+        warnings: [{ code: 'no_csa_curve', index: null, dates: [], message: 'sin curva (texto del backend)' }],
+      }),
+    );
+    renderScreen();
+    const warnings = await screen.findByRole('list', { name: 'Avisos' });
+    expect(warnings.textContent).toBe('Sin curva MXN-USD en este snapshot: se descuenta con TIIE-F');
+  });
+  // --- fin corte 3 ---
 });

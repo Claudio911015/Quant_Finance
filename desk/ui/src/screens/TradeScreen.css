@@ -250,7 +250,22 @@
   color: var(--text-dim);
 }
 
-.trade__flow--projected td:nth-child(3) {
+.trade__flow--projected .trade__flow-state {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* --- corte 3 --- */
+/* Etiqueta bajo la fecha de un flujo que cae en día inhábil de su moneda (no cambia la fecha). */
+.trade__holiday {
+  display: block;
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+/* Cifras del bono (sucio, limpio, corrido) sobre el calendario de flujos. */
+.trade__bond {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+/* --- fin corte 3 --- */
