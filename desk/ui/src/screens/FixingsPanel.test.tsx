@@ -246,6 +246,32 @@ describe('FixingsPanel', () => {
       );
     });
 
+    it('si el rango pasa de 366 días pide solo los últimos 366 hasta la fecha de valuación y lo dice', async () => {
+      mocks.fixingSources.mockResolvedValue(withSources({ index: 'SOFR', last_date: '2025-01-01' }));
+      mocks.fetchFixings.mockResolvedValue(fetched({ from: '2025-11-10' }));
+      render(<FixingsPanel />);
+      const g = await group('SOFR');
+      fireEvent.click(within(g).getByRole('button', { name: 'Traer de la fuente' }));
+      await waitFor(() =>
+        expect(mocks.fetchFixings).toHaveBeenCalledWith({ index: 'SOFR', from: '2025-11-10', to: '2026-11-11' }),
+      );
+      expect((await within(g).findByRole('status')).textContent).toBe(
+        'Insertadas: 2 · Sin cambio: 1 (se trajeron los últimos 366 días)',
+      );
+    });
+
+    it('un rango de exactamente 366 días no se recorta ni avisa', async () => {
+      mocks.fixingSources.mockResolvedValue(withSources({ index: 'SOFR', last_date: '2025-11-09' }));
+      mocks.fetchFixings.mockResolvedValue(fetched({ from: '2025-11-10' }));
+      render(<FixingsPanel />);
+      const g = await group('SOFR');
+      fireEvent.click(within(g).getByRole('button', { name: 'Traer de la fuente' }));
+      await waitFor(() =>
+        expect(mocks.fetchFixings).toHaveBeenCalledWith({ index: 'SOFR', from: '2025-11-10', to: '2026-11-11' }),
+      );
+      expect((await within(g).findByRole('status')).textContent).toBe('Insertadas: 2 · Sin cambio: 1');
+    });
+
     it('sin fijaciones previas trae los 30 días anteriores a la fecha de valuación', async () => {
       mocks.fetchFixings.mockResolvedValue(fetched({ index: 'USDMXN' }));
       render(<FixingsPanel />);

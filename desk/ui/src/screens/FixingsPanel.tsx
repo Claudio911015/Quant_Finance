@@ -20,13 +20,25 @@ function addDays(iso: string, n: number): string {
   return new Date(Date.UTC(y, m - 1, d) + n * DAY_MS).toISOString().slice(0, 10);
 }
 
-/** Rango a traer: del día siguiente a la última fijación (o 30 días atrás si no hay) a la fecha de valuación; `null` si ya está al día. */
-function fetchRange(src: FixingSource, asOf: string): { from: string; to: string } | null {
-  const from = src.last_date ? addDays(src.last_date, 1) : addDays(asOf, -30);
-  return from > asOf ? null : { from, to: asOf };
+// Lo máximo que acepta `POST /api/fixings/fetch` entre `from` y `to` (`MAX_RANGE_DAYS` en el backend).
+const MAX_FETCH_DAYS = 366;
+
+interface FetchRange {
+  from: string;
+  to: string;
+  /** El rango calculado pasaba de `MAX_FETCH_DAYS` y se recortó a los últimos. */
+  truncated: boolean;
 }
 
-type FetchOutcome = { ok: true; result: FetchFixingsResult } | { ok: false; text: string };
+/** Rango a traer: del día siguiente a la última fijación (o 30 días atrás si no hay) a la fecha de valuación, con tope de 366 días; `null` si ya está al día. */
+function fetchRange(src: FixingSource, asOf: string): FetchRange | null {
+  const from = src.last_date ? addDays(src.last_date, 1) : addDays(asOf, -30);
+  if (from > asOf) return null;
+  const earliest = addDays(asOf, -MAX_FETCH_DAYS);
+  return from < earliest ? { from: earliest, to: asOf, truncated: true } : { from, to: asOf, truncated: false };
+}
+
+type FetchOutcome = { ok: true; result: FetchFixingsResult; truncated: boolean } | { ok: false; text: string };
 
 // Las tasas se capturan en % y viajan en decimal; el redondeo evita 0.07010000000000001.
 const pctToDec = (pct: number) => Number((pct / 100).toFixed(8));
@@ -112,12 +124,12 @@ export default function FixingsPanel() {
     void loadSources();
   }, [loadSources]);
 
-  async function fetchFromSource(index: FixingIndex, range: { from: string; to: string }) {
+  async function fetchFromSource(index: FixingIndex, { from, to, truncated }: FetchRange) {
     setFetching(index);
     setOutcomes((o) => ({ ...o, [index]: undefined }));
     try {
-      const result = await fetchFixings({ index, ...range });
-      setOutcomes((o) => ({ ...o, [index]: { ok: true, result } }));
+      const result = await fetchFixings({ index, from, to });
+      setOutcomes((o) => ({ ...o, [index]: { ok: true, result, truncated } }));
       void load();
       void loadSources();
     } catch (e) {
@@ -291,6 +303,7 @@ export default function FixingsPanel() {
                   <p role="status" className="fixings__ok">
                     {`Insertadas: ${outcome.result.inserted} · Sin cambio: ${outcome.result.unchanged}`}
                     {outcome.result.conflicts.length > 0 && ` · Conflictos: ${outcome.result.conflicts.length}`}
+                    {outcome.truncated && ` (se trajeron los últimos ${MAX_FETCH_DAYS} días)`}
                   </p>
                   {outcome.result.conflicts.length > 0 && (
                     <div className="fixings__scroll">
