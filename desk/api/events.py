@@ -8,8 +8,12 @@ import sqlite3
 from datetime import date
 from typing import Any, Dict, List
 
+from desk.api import lifecycle
 from desk.api.db import now_iso
+from desk.api.errors import ApiError
 from desk.api.lifecycle import EVENT_TYPES
+from desk.api.pricing import PRODUCTS
+from desk.api.validation import MAX_AMOUNT, finite_number, iso_date, number
 
 _COLUMNS = "id, trade_id, type, event_date, data, prev_event_id, created_at"
 
@@ -82,9 +86,76 @@ def insert_event(
     }
 
 
+# Tipos que la API acepta; `execution` lo crea el alta de la operación y `reset`/`transfer` no se registran a mano.
+API_EVENT_TYPES = ("quantity_change", "terms_change", "exercise", "termination")
+_OPTIONS = ("fx_option", "swaption", "equity_option")
+_PRICE_FIELD = {"irs": "fixed_rate", "fx_forward": "strike", "fx_option": "strike",
+                "cap_floor": "strike", "swaption": "strike", "equity_option": "strike"}
+
+
+def _terms_data(trade: Dict[str, Any], event_date: date, data: Dict[str, Any]) -> Dict[str, Any]:
+    """`data` de un `terms_change`: solo el campo de precio del producto, revalidado sobre los términos vigentes."""
+    partial = data.get("terms")
+    price = _PRICE_FIELD.get(trade["product"])
+    if price is None:
+        raise ApiError(400, "Esta operación no admite cambio de términos", "terms")
+    if not isinstance(partial, dict) or set(partial) != {price}:
+        raise ApiError(400, "'terms' solo admite el campo '%s'" % price, "terms")
+    if not finite_number(partial[price]):
+        raise ApiError(400, "'%s' debe ser un número finito" % price, "terms")
+    current = lifecycle.state(trade, trade["events"], event_date)["terms"]
+    try:
+        merged = PRODUCTS[trade["product"]].validate({**current, price: partial[price]})
+    except ApiError as e:
+        raise ApiError(400, e.error, "terms")
+    return {"terms": {price: merged[price]}}
+
+
 def post_event(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Valida y registra un evento por la API; devuelve los eventos insertados (uno o dos).
 
-    Responde 400/404/409 según el contrato. Se implementa en T4.
+    `termination` y `exercise` insertan además un `transfer` en MXN con `cause_event_id`.
+    No hace commit: todo queda en la transacción de la petición.
+
+    @param body `{"type", "event_date", "data"}` con `data` según el tipo.
+    @return eventos insertados con `event_date` como `date`.
+    @raise ApiError 404 (operación), 400 (tipo, fecha o `data`) o 409 (la operación no está viva en `event_date`).
     """
-    raise NotImplementedError("events.post_event se implementa en T4")
+    from desk.api import portfolio  # import tardío: portfolio importa este módulo
+
+    trade = portfolio.get_trade(conn, trade_id)
+    kind = body.get("type")
+    if not isinstance(kind, str) or kind not in EVENT_TYPES:
+        raise ApiError(400, "Tipo de evento desconocido: %s" % (kind,), "type")
+    if kind not in API_EVENT_TYPES:
+        raise ApiError(400, "El tipo '%s' no se registra por la API" % kind, "type")
+    if kind == "exercise" and trade["product"] not in _OPTIONS:
+        raise ApiError(400, "Solo se ejercen opciones: no aplica a '%s'" % trade["product"], "type")
+    event_date = iso_date(body, "event_date")
+    if event_date < trade["trade_date"]:
+        raise ApiError(400, "'event_date' no puede ser anterior a 'trade_date'", "event_date")
+    data = body.get("data")
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ApiError(400, "'data' debe ser un objeto", "data")
+    if kind == "quantity_change":
+        data = {"notional": number(data, "notional", gt=0, le=MAX_AMOUNT)}
+    elif kind == "terms_change":
+        data = _terms_data(trade, event_date, data)
+    else:  # termination / exercise
+        data = {"amount": number(data, "amount", ge=-MAX_AMOUNT, le=MAX_AMOUNT)}
+    status = lifecycle.state(trade, trade["events"], event_date)["status"]
+    if status != "viva":
+        raise ApiError(
+            409, "La operación no está viva el %s (estado: %s)" % (event_date.isoformat(), status), "id"
+        )
+    created = [insert_event(conn, trade_id, kind, event_date, data)]
+    if kind in ("termination", "exercise"):
+        created.append(
+            insert_event(
+                conn, trade_id, "transfer", event_date,
+                {"amount": data["amount"], "currency": "MXN", "cause_event_id": created[0]["id"]},
+            )
+        )
+    return created
