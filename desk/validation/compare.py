@@ -10,7 +10,12 @@ from typing import Any, Dict, List, Optional
 
 from desk.validation import common
 
-STEPS = ["python -m desk.validation.export_cases", "run_quantlib.py", "python -m desk.validation.compare"]
+# Cada paso con su comando completo y el intérprete que lo corre (las rutas de ambos Python van en `reproduce`).
+STEPS = [
+    "python -m desk.validation.export_cases  # con el Python del backend",
+    "python desk/validation/run_quantlib.py  # con el Python de QuantLib",
+    "python -m desk.validation.compare  # con el Python del backend",
+]
 
 
 def _curve_checks(cases_doc: dict, reference_doc: dict) -> List[Dict[str, Any]]:

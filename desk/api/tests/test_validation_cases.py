@@ -14,10 +14,10 @@ EXPECTED_COUNTS = {
     "bond": 8, "cap_floor": 8, "swaption": 8,
 }
 ID_PATTERN = re.compile(r"^(%s)-\d\d$" % "|".join(common.PRODUCTS))
-# Palabra en español que debe llevar el rótulo de cada producto (la de su plantilla).
+# Palabra en español que debe llevar el rótulo de cada producto (la de su plantilla), singular o plural.
 LABEL_WORD = {
-    "irs": "periodos", "fx_forward": "días", "fx_option": "días", "equity_option": "días",
-    "bond": "cupones", "cap_floor": "periodos", "swaption": "días",
+    "irs": r"periodos? de", "fx_forward": "días", "fx_option": "días", "equity_option": "días",
+    "bond": r"cup(ón|ones) cada", "cap_floor": r"periodos?", "swaption": "días",
 }
 
 
@@ -192,7 +192,7 @@ def test_ningun_caso_pasa_del_ultimo_pilar_de_su_curva(cases, mkt):
 def test_rotulos_no_vacios_y_en_espanol(cases):
     for c in cases:
         assert c["label"].strip(), c["id"]
-        assert LABEL_WORD[c["product"]] in c["label"], c["id"]
+        assert re.search(LABEL_WORD[c["product"]], c["label"]), c["id"]
         if c["source"] == "portfolio":
             assert c["label"].endswith(" · portafolio #%d" % c["trade_id"]), c["id"]
         else:
@@ -202,6 +202,21 @@ def test_rotulos_no_vacios_y_en_espanol(cases):
     assert labels["fx_option-02"] == "Compra call USD 2,000,000 a 30 días · strike 18.6000"
     assert labels["bond-08"] == "Bono TIIE-F · cupón 7.50 % · 6 cupones cada 182.5 días"
     assert labels["bond-02"] == "Bono TIIE-F · cupón 7.00 % · 20 cupones cada 182 días"
+
+
+def test_los_rotulos_concuerdan_en_numero_con_la_cantidad(cases):
+    labels = {c["id"]: c["label"] for c in cases}
+    # Cantidad 1 → singular (antes salía «1 periodos», «1 cupones», «1 años»).
+    assert labels["irs-06"] == "Paga fija TIIE-F · 1 periodo de 28 días · fija 6.5000 %"
+    assert labels["irs-09"] == "Recibe fija SOFR · 1 periodo de 365 días · fija 3.8000 %"
+    assert labels["bond-03"] == "Bono TIIE-F · cupón 0.00 % · 1 cupón cada 365 días"
+    assert labels["swaption-04"] == "Receptora TIIE-F · expira en 182 días · swap de 1 año · strike 6.50 %"
+    # Cantidad > 1 → plural.
+    assert labels["swaption-01"] == "Pagadora TIIE-F · expira en 365 días · swap de 2 años · strike 7.00 %"
+    assert labels["cap_floor-02"] == "Cap TIIE-F · 13 periodos · strike 7.00 %"
+    # Ningún rótulo conserva la concordancia errónea.
+    for cid, label in labels.items():
+        assert not re.search(r"(?<![\d.])1 (periodos|cupones|años)\b", label), cid
 
 
 def test_el_documento_es_serializable_y_sin_no_finitos(cases):

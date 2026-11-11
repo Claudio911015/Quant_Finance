@@ -21,9 +21,9 @@ export const VALIDATION_REPORT: ValidationReport = {
     backend_python: '/home/claudio/anaconda3/bin/python',
     quantlib_python: '/home/claudio/anaconda3/envs/quantsuite-oracle/bin/python',
     steps: [
-      'python -m desk.validation.export_cases',
-      'run_quantlib.py',
-      'python -m desk.validation.compare'
+      'python -m desk.validation.export_cases  # con el Python del backend',
+      'python desk/validation/run_quantlib.py  # con el Python de QuantLib',
+      'python -m desk.validation.compare  # con el Python del backend'
     ]
   },
   tolerances: {

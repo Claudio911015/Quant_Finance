@@ -220,11 +220,16 @@ def _notional_currency(product: str, p: Dict[str, Any], mkt: "market.MarketConte
     return p["quantity"] * p["spot"], "MXN"
 
 
+def _count(n: float, singular: str, plural: str) -> str:
+    """«1 periodo», «26 periodos», «1 año», «2 años»: concuerda el sustantivo con la cantidad."""
+    return "%g %s" % (n, singular if n == 1 else plural)
+
+
 def _label(product: str, p: Dict[str, Any], inputs: Dict[str, Any], at_par: bool) -> str:
     if product == "irs":
         side = "Paga fija" if p["side"] == "payer" else "Recibe fija"
-        text = "%s %s · %d periodos de %d días · fija %.4f %%" % (
-            side, p["curve"], p["periods"], inputs["period_days"], p["fixed_rate"] * 100
+        text = "%s %s · %s de %d días · fija %.4f %%" % (
+            side, p["curve"], _count(p["periods"], "periodo", "periodos"), inputs["period_days"], p["fixed_rate"] * 100
         )
         return text + (" (a la par)" if at_par else "")
     if product == "fx_forward":
@@ -242,16 +247,16 @@ def _label(product: str, p: Dict[str, Any], inputs: Dict[str, Any], at_par: bool
             p["volatility"] * 100, p["rate"] * 100, p["dividend_yield"] * 100, p["quantity"],
         )
     if product == "bond":
-        return "Bono %s · cupón %.2f %% · %d cupones cada %g días" % (
-            p["curve"], p["coupon_rate"] * 100, p["periods"], 365 / p["frequency"]
+        return "Bono %s · cupón %.2f %% · %s cada %g días" % (
+            p["curve"], p["coupon_rate"] * 100, _count(p["periods"], "cupón", "cupones"), 365 / p["frequency"]
         )
     if product == "cap_floor":
-        return "%s %s · %d periodos · strike %.2f %%" % (
-            p["cap_type"].capitalize(), p["curve"], p["periods"], p["strike"] * 100
+        return "%s %s · %s · strike %.2f %%" % (
+            p["cap_type"].capitalize(), p["curve"], _count(p["periods"], "periodo", "periodos"), p["strike"] * 100
         )
-    return "%s %s · expira en %d días · swap de %g años · strike %.2f %%" % (
+    return "%s %s · expira en %d días · swap de %s · strike %.2f %%" % (
         "Pagadora" if p["swaption_type"] == "payer" else "Receptora", p["curve"],
-        _round_days(p["expiry_years"]), p["swap_tenor_years"], p["strike"] * 100,
+        _round_days(p["expiry_years"]), _count(p["swap_tenor_years"], "año", "años"), p["strike"] * 100,
     )
 
 
