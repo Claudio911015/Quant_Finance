@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Snapshot, Source } from '../api/types';
-import { SnapshotProvider } from '../state/SnapshotContext';
+import { SnapshotProvider, useSnapshot } from '../state/SnapshotContext';
 import { MarketScreen } from './MarketScreen';
 
 // echarts pinta en canvas, que jsdom no tiene; aquí solo importa qué opción recibe cada gráfica.
@@ -61,6 +61,74 @@ const SNAPSHOT: Snapshot = {
   hw: { 'TIIE-F': { a: 0.05, sigma: 0.01 }, SOFR: { a: 0.03, sigma: 0.008 } },
   factors: { names: [], units: [], daily_vols: [], correlations: [] },
 };
+
+const LIVE: Snapshot = {
+  ...SNAPSHOT,
+  id: 'MKT-LIVE',
+  label: 'Mercado vivo (SOFR aproximada)',
+  as_of: '2026-11-10',
+  data_quality: 'mixed',
+  read_only: true,
+  sources: {
+    'curve:TIIE-F': { kind: 'synthetic', label: 'Sintética: sin datos libres (Banxico exige token)', as_of: null },
+    'curve:SOFR': { kind: 'proxy', label: 'Aproximada: 1D = SOFR overnight (FRBNY)', as_of: '2026-11-10' },
+    spot: { kind: 'live', label: 'FRED DEXMXUS (mediodía de Nueva York)', as_of: '2026-11-06' },
+    surface: { kind: 'synthetic', label: 'Sintética: sin datos libres de volatilidad USDMXN', as_of: null },
+    hw: { kind: 'synthetic', label: 'Sintéticos (heredados de MX-DEMO)', as_of: null },
+    factor_vols: { kind: 'mixed', label: 'SOFR y USDMXN medidas; TIIE-F sintética', as_of: '2026-11-10' },
+    factor_corr: { kind: 'synthetic', label: 'Sintéticas (heredadas de MX-DEMO)', as_of: null },
+  },
+  fx: { pair: 'USDMXN', spot: 18.6226 },
+};
+
+const REFRESH_OK = {
+  ran_at: '2026-11-11T15:04:05+00:00',
+  mdf_exit_code: 0,
+  treasury_latest: '2026-11-10',
+  sofr_latest: '2026-11-09',
+  fred_latest: '2026-11-06',
+  snapshot: LIVE,
+};
+
+const READ_ONLY_NOTE = 'Mercado vivo se reconstruye en cada actualización; sus cotizaciones y el spot no se editan.';
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
+/**
+ * Backend con estado: `ids` es lo que lista el servidor (en el orden de la API, MKT-LIVE primero)
+ * y `refresh` responde al POST; el refresco real crea MKT-LIVE, así que el mock lo agrega a la lista.
+ */
+function mockBackend(opts: { live: boolean; refresh?: () => Response | Promise<Response> }) {
+  let hasLive = opts.live;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input).replace(/^\/api/, '');
+    if (init?.method === 'POST' && path === '/market/refresh') {
+      const res = await (opts.refresh ?? (() => json(REFRESH_OK)))();
+      if (res.status === 200) hasLive = true;
+      return res;
+    }
+    if (path === '/market/snapshots') {
+      return json({ snapshots: hasLive ? [LIVE, SNAPSHOT] : [SNAPSHOT] });
+    }
+    if (path === '/market/snapshots/MKT-LIVE' && hasLive) return json(LIVE);
+    if (path === '/market/snapshots/MX-DEMO') return json(SNAPSHOT);
+    return json({ error: 'Snapshot no encontrado', field: null }, 404);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+const gets = (fetchMock: ReturnType<typeof mockBackend>, path: string) =>
+  fetchMock.mock.calls.filter(([url, init]) => url === `/api${path}` && init?.method === 'GET').length;
+
+const posts = (fetchMock: ReturnType<typeof mockBackend>) =>
+  fetchMock.mock.calls.filter(([url, init]) => url === '/api/market/refresh' && init?.method === 'POST');
+
+/** Botón para fijar MX-DEMO como activo aunque MKT-LIVE esté en la lista (elección explícita). */
+function PickDemo() {
+  const { setSnapshotId } = useSnapshot();
+  return <button onClick={() => setSnapshotId('MX-DEMO')}>elegir MX-DEMO</button>;
+}
 
 function mockApi(onPut?: (body: unknown) => Response) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -224,5 +292,149 @@ describe('MarketScreen', () => {
     expect((await screen.findByRole('alert')).textContent).toBe('Tasa fuera de rango');
     expect(puts(fetchMock)).toHaveLength(1);
     await waitFor(() => expect(rateCells(container)[0].textContent).toBe('6.7500'));
+  });
+
+  it('cada curva, el spot y la superficie llevan su etiqueta: tipo, rótulo y fecha', async () => {
+    mockBackend({ live: true });
+    renderScreen();
+
+    const tiie = await screen.findByRole('region', { name: 'TIIE-F' });
+    expect(within(tiie).getByText('Sintética')).toBeTruthy();
+    expect(within(tiie).getByText('Sintética: sin datos libres (Banxico exige token)')).toBeTruthy();
+    expect(within(tiie).getByText('sin fecha')).toBeTruthy();
+
+    const sofr = screen.getByRole('region', { name: 'SOFR' });
+    expect(within(sofr).getByText('Aproximada')).toBeTruthy();
+    expect(within(sofr).getByText('Aproximada: 1D = SOFR overnight (FRBNY)')).toBeTruthy();
+    expect(within(sofr).getByText('2026-11-10')).toBeTruthy();
+
+    const spot = screen.getByLabelText('Spot USDMXN').closest('.market__spot') as HTMLElement;
+    expect(within(spot).getByText('En vivo')).toBeTruthy();
+    expect(within(spot).getByText('FRED DEXMXUS (mediodía de Nueva York)')).toBeTruthy();
+    expect(within(spot).getByText('2026-11-06')).toBeTruthy();
+
+    const surface = screen.getByRole('region', { name: /Superficie de volatilidad/ });
+    expect(within(surface).getByText('Sintética')).toBeTruthy();
+    expect(within(surface).getByText('Sintética: sin datos libres de volatilidad USDMXN')).toBeTruthy();
+    expect(within(surface).getByText('sin fecha')).toBeTruthy();
+  });
+
+  it('con read_only el spot y las tasas no se editan, no hay PUT y la nota lo explica', async () => {
+    const fetchMock = mockBackend({ live: true });
+    const { container } = renderScreen();
+
+    expect((await screen.findByRole('note')).textContent).toBe(READ_ONLY_NOTE);
+    expect((screen.getByLabelText('Spot USDMXN') as HTMLInputElement).disabled).toBe(true);
+
+    await waitFor(() => expect(rateCells(container)).toHaveLength(2));
+    const cell = rateCells(container)[0];
+    fireEvent.doubleClick(cell);
+    cell.focus();
+    fireEvent.keyDown(cell, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(cell.querySelector('input')).toBeNull();
+    expect(cell.textContent).toBe('6.7500');
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+  });
+
+  it('sin read_only no hay nota y el spot está habilitado', async () => {
+    mockApi();
+    renderScreen();
+
+    const input = (await screen.findByLabelText('Spot USDMXN')) as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('"Actualizar datos" hace POST, se deshabilita mientras corre, muestra las fechas y recarga lista y snapshot', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const fetchMock = mockBackend({
+      live: true,
+      refresh: async () => {
+        await gate;
+        return json(REFRESH_OK);
+      },
+    });
+    renderScreen();
+
+    await screen.findByLabelText('Spot USDMXN'); // el botón se vuelve a montar cuando llega el snapshot
+    expect(gets(fetchMock, '/market/snapshots/MKT-LIVE')).toBe(1);
+    expect(gets(fetchMock, '/market/snapshots')).toBe(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar datos' }));
+    const busy = (await screen.findByRole('button', { name: 'Actualizando…' })) as HTMLButtonElement;
+    expect(busy.disabled).toBe(true);
+    expect(posts(fetchMock)).toHaveLength(1);
+
+    release();
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Datos al 2026-11-10 · SOFR 2026-11-09 · FRED 2026-11-06',
+    );
+    await waitFor(() => expect(gets(fetchMock, '/market/snapshots')).toBe(2));
+    await waitFor(() => expect(gets(fetchMock, '/market/snapshots/MKT-LIVE')).toBe(2));
+    expect((screen.getByRole('button', { name: 'Actualizar datos' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('si MKT-LIVE no existía, el refresco cambia a él y el mensaje lo avisa', async () => {
+    const fetchMock = mockBackend({ live: false });
+    renderScreen();
+
+    expect(((await screen.findByLabelText('Spot USDMXN')) as HTMLInputElement).value).toBe('18.6');
+    expect(gets(fetchMock, '/market/snapshots/MKT-LIVE')).toBe(0);
+    expect(screen.queryByRole('note')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar datos' }));
+
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Datos al 2026-11-10 · SOFR 2026-11-09 · FRED 2026-11-06 · Se cambió a Mercado vivo (SOFR aproximada)',
+    );
+    await waitFor(() => expect(gets(fetchMock, '/market/snapshots/MKT-LIVE')).toBe(1));
+    expect((await screen.findByRole('note')).textContent).toBe(READ_ONLY_NOTE);
+    await waitFor(() =>
+      expect((screen.getByLabelText('Spot USDMXN') as HTMLInputElement).value).toBe('18.6226'),
+    );
+  });
+
+  it('si MKT-LIVE ya estaba y el activo es MX-DEMO, el refresco no cambia de snapshot', async () => {
+    const fetchMock = mockBackend({ live: true });
+    render(
+      <SnapshotProvider>
+        <PickDemo />
+        <MarketScreen />
+      </SnapshotProvider>,
+    );
+    await screen.findByLabelText('Spot USDMXN');
+    fireEvent.click(screen.getByRole('button', { name: 'elegir MX-DEMO' }));
+    await waitFor(() =>
+      expect((screen.getByLabelText('Spot USDMXN') as HTMLInputElement).value).toBe('18.6'),
+    );
+    const liveGets = gets(fetchMock, '/market/snapshots/MKT-LIVE');
+    const demoGets = gets(fetchMock, '/market/snapshots/MX-DEMO');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar datos' }));
+
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Datos al 2026-11-10 · SOFR 2026-11-09 · FRED 2026-11-06',
+    );
+    await waitFor(() => expect(gets(fetchMock, '/market/snapshots/MX-DEMO')).toBe(demoGets + 1));
+    expect(gets(fetchMock, '/market/snapshots/MKT-LIVE')).toBe(liveGets);
+    expect((screen.getByLabelText('Spot USDMXN') as HTMLInputElement).value).toBe('18.6');
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it.each([
+    [502, 'FRED no respondió: tiempo de espera agotado'],
+    [409, 'Ya hay una actualización de datos en curso'],
+  ])('un %i del refresco muestra el mensaje del backend tal cual', async (status, message) => {
+    mockBackend({ live: true, refresh: () => json({ error: message, field: null }, status) });
+    renderScreen();
+
+    await screen.findByLabelText('Spot USDMXN');
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar datos' }));
+
+    expect((await screen.findByRole('alert')).textContent).toBe(message);
+    expect(screen.queryByRole('status')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Actualizar datos' }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

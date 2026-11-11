@@ -9,16 +9,20 @@ import {
   type GridApi,
 } from 'ag-grid-community';
 import type { EChartsCoreOption } from 'echarts/core';
-import { ApiError, updateSnapshot } from '../api/client';
-import type { CurvePoint, Quote, Snapshot } from '../api/types';
+import { ApiError, refreshMarket, updateSnapshot } from '../api/client';
+import type { CurvePoint, Quote, Snapshot, Source, SourceKey } from '../api/types';
 import { EChart, cssColor } from '../components/EChart';
 import { fmtNumber } from '../lib/format';
+import { asOfText, kindText } from '../lib/provenance';
 import { useSnapshot } from '../state/SnapshotContext';
 import './MarketScreen.css';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 const CURVE_ORDER = ['TIIE-F', 'SOFR'];
+
+const LIVE_ID = 'MKT-LIVE';
+const READ_ONLY_NOTE = 'Mercado vivo se reconstruye en cada actualización; sus cotizaciones y el spot no se editan.';
 
 const gridTheme = themeQuartz.withPart(colorSchemeDark).withParams({
   backgroundColor: 'var(--bg-elev)',
@@ -157,6 +161,18 @@ function surfaceOption(surface: Snapshot['vol_surface']): EChartsCoreOption {
   };
 }
 
+/* ---------- Procedencia ---------- */
+
+function SourceTag({ source }: { source: Source }) {
+  return (
+    <p className="market__source">
+      <span className={`market__kind market__kind--${source.kind}`}>{kindText(source.kind)}</span>
+      <span className="market__source-label">{source.label}</span>
+      <span className="market__source-date">{asOfText(source.as_of)}</span>
+    </p>
+  );
+}
+
 /* ---------- Tabla de cotizaciones (AG Grid) ---------- */
 
 interface QuoteRow {
@@ -172,10 +188,20 @@ type CommitQuote = (quoteId: string, ratePct: number | null) => Promise<boolean>
 
 const REVERT = 'revert';
 
-function QuotesGrid({ quotes, onCommit }: { quotes: Quote[]; onCommit: CommitQuote }) {
+function QuotesGrid({
+  quotes,
+  readOnly,
+  onCommit,
+}: {
+  quotes: Quote[];
+  readOnly: boolean;
+  onCommit: CommitQuote;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<GridApi<QuoteRow> | null>(null);
   const commit = useRef(onCommit);
+  // La rejilla se crea una sola vez; `editable` consulta esta referencia en cada intento de edición.
+  const locked = useRef(readOnly);
   const rows = useMemo<QuoteRow[]>(
     () =>
       quotes.map((q) => ({
@@ -193,6 +219,10 @@ function QuotesGrid({ quotes, onCommit }: { quotes: Quote[]; onCommit: CommitQuo
   }, [onCommit]);
 
   useEffect(() => {
+    locked.current = readOnly;
+  }, [readOnly]);
+
+  useEffect(() => {
     if (!host.current) return;
     const columnDefs: ColDef<QuoteRow>[] = [
       { field: 'label', headerName: 'Plazo' },
@@ -203,7 +233,7 @@ function QuotesGrid({ quotes, onCommit }: { quotes: Quote[]; onCommit: CommitQuo
         headerName: 'Tasa (%)',
         type: 'rightAligned',
         cellClass: 'num',
-        editable: true,
+        editable: () => !locked.current,
         cellEditor: 'agNumberCellEditor',
         valueFormatter: (p) => (p.value == null ? '' : fmtNumber(p.value, 4)),
       },
@@ -250,6 +280,7 @@ function CurvePanel({
   error: string | null;
   onCommit: CommitQuote;
 }) {
+  const source = snapshot.sources[`curve:${name}` as SourceKey];
   const curve = snapshot.curves[name];
   const quotes = useMemo(() => snapshot.quotes.filter((q) => q.curve === name), [snapshot, name]);
   const option = useMemo(() => curveOption(curve.points), [curve]);
@@ -260,11 +291,12 @@ function CurvePanel({
         <span className="market__meta">
           {curve.currency} · cupón {curve.period_days} d
         </span>
+        {source && <SourceTag source={source} />}
       </header>
       <div className="market__split">
         <EChart option={option} ariaLabel={`Curva ${name}: cero y forward`} />
         <div className="market__table">
-          <QuotesGrid quotes={quotes} onCommit={onCommit} />
+          <QuotesGrid quotes={quotes} readOnly={snapshot.read_only} onCommit={onCommit} />
           {error && (
             <p role="alert" className="market__error">
               {error}
@@ -306,12 +338,14 @@ function SpotField({ snapshot, onSave }: { snapshot: Snapshot; onSave: (n: numbe
           className="market__input num"
           type="number"
           step="any"
+          disabled={snapshot.read_only}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => void save()}
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         />
       </label>
+      <SourceTag source={snapshot.sources.spot} />
       {error && (
         <p role="alert" className="market__error">
           {error}
@@ -322,8 +356,10 @@ function SpotField({ snapshot, onSave }: { snapshot: Snapshot; onSave: (n: numbe
 }
 
 export function MarketScreen() {
-  const { snapshot, setSnapshot, error } = useSnapshot();
+  const { snapshot, snapshots, setSnapshot, setSnapshotId, reload, error } = useSnapshot();
   const [quoteError, setQuoteError] = useState<{ curve: string; message: string } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const snapshotKey = snapshot?.id;
 
   useEffect(() => {
@@ -332,10 +368,51 @@ export function MarketScreen() {
 
   const surface = useMemo(() => (snapshot ? surfaceOption(snapshot.vol_surface) : null), [snapshot]);
 
+  async function refresh() {
+    // Se anota antes de pedir: si MKT-LIVE no existía, el refresco lo crea y la pantalla cambia a él.
+    const hadLive = snapshots.some((s) => s.id === LIVE_ID);
+    setRefreshing(true);
+    setRefreshStatus(null);
+    try {
+      const r = await refreshMarket();
+      let text = `Datos al ${r.treasury_latest} · SOFR ${r.sofr_latest} · FRED ${r.fred_latest}`;
+      if (!hadLive) {
+        setSnapshotId(LIVE_ID);
+        text += ' · Se cambió a Mercado vivo (SOFR aproximada)';
+      }
+      setRefreshStatus({ ok: true, text });
+      await reload();
+    } catch (e) {
+      setRefreshStatus({ ok: false, text: describeError(e) });
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  // Botón y resultado van juntos: el mensaje (fechas o error del backend) queda bajo el botón.
+  const refreshControl = (
+    <div className="market__refresh-box">
+      <button type="button" className="market__btn" disabled={refreshing} onClick={() => void refresh()}>
+        {refreshing ? 'Actualizando…' : 'Actualizar datos'}
+      </button>
+      {refreshStatus && (
+        <p
+          role={refreshStatus.ok ? 'status' : 'alert'}
+          className={refreshStatus.ok ? 'market__refresh' : 'market__error'}
+        >
+          {refreshStatus.text}
+        </p>
+      )}
+    </div>
+  );
+
   if (!snapshot || !surface) {
     return (
       <div className="market">
-        <h1>Mercado</h1>
+        <header className="market__head">
+          <h1>Mercado</h1>
+          {refreshControl}
+        </header>
         <p className="market__meta">{error ? 'Sin datos de mercado' : 'Cargando snapshot…'}</p>
       </div>
     );
@@ -374,8 +451,16 @@ export function MarketScreen() {
     <div className="market">
       <header className="market__head">
         <h1>Mercado</h1>
-        <SpotField snapshot={snapshot} onSave={saveSpot} />
+        <div className="market__actions">
+          <SpotField snapshot={snapshot} onSave={saveSpot} />
+          {refreshControl}
+        </div>
       </header>
+      {snapshot.read_only && (
+        <p role="note" className="market__note">
+          {READ_ONLY_NOTE}
+        </p>
+      )}
 
       {curveNames.map((name) => (
         <CurvePanel
@@ -392,6 +477,7 @@ export function MarketScreen() {
           <header className="market__panel-head">
             <h2 id="surface-title">Superficie de volatilidad {snapshot.vol_surface.pair}</h2>
             <span className="market__meta">plazo × strike, vol en %</span>
+            <SourceTag source={snapshot.sources.surface} />
           </header>
           <EChart option={surface} height={300} ariaLabel="Mapa de calor de la superficie de volatilidad" />
         </section>
