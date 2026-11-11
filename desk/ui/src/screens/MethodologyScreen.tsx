@@ -90,6 +90,11 @@ const GENERAL_SECTIONS: Section[] = [
     items: [
       { label: 'DV01', text: 'PV(base) − PV(+1 pb).' },
       {
+        label: 'DV01 por plazo',
+        text:
+          'El DV01 por plazo se calcula con diferencia central, (PV(−1 pb) − PV(+1 pb)) / 2, sobre un desplazamiento de la tasa cero en cada pilar; el DV01 paralelo es PV(base) − PV(+1 pb). Para productos con convexidad (cap/floor) la suma por plazo puede diferir del paralelo en unas décimas de punto porcentual.',
+      },
+      {
         label: 'VaR',
         text:
           'Delta-normal con volatilidades y correlaciones de factores del snapshot. Tres factores: TIIE-F paralelo, SOFR paralelo y USDMXN rendimiento relativo; sin factores por plazo.',
@@ -120,6 +125,10 @@ const LIMITS: { label: string; text: string }[] = [
   {
     label: 'Payoff',
     text: 'Opciones al vencimiento; solo ilustrativo.',
+  },
+  {
+    label: 'Gráficas de payoff',
+    text: 'Son de presentación: se calculan en el navegador, no en el backend (el PV y el riesgo sí vienen de él). La de la swaption usa una anualidad aproximada, con descuento plano a la tasa swap.',
   },
   { label: 'Moneda', text: 'Reporte en MXN al spot del snapshot.' },
 ];
