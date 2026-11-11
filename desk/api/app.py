@@ -10,6 +10,7 @@ from werkzeug.utils import safe_join
 from desk.api import db, fred
 from desk.api.errors import register_error_handlers
 from desk.api.routes import fixings, hedges, market, pnl, price, risk, trades
+from desk.api.routes import ops  # corte 5
 from desk.api.seed_market import seed_market
 from desk.api.seed_trades import seed_trades
 
@@ -50,6 +51,9 @@ def create_app(db_path: Optional[Union[str, Path]] = None, seed: bool = True) ->
     app.teardown_appcontext(db.close_conn)
     for module in (market, price, trades, risk, fixings, pnl, hedges):
         app.register_blueprint(module.bp)
+    # --- corte 5 ---
+    app.register_blueprint(ops.bp)
+    # --- fin corte 5 ---
 
     @app.get("/", defaults={"path": ""})
     @app.get("/<path:path>")
