@@ -253,6 +253,16 @@ const GENERAL_SECTIONS: Section[] = [
         label: 'Volatilidades diarias',
         text: 'SOFR = cambio diario del rendimiento par de 5Y en pb; USDMXN = rendimiento logarítmico entre observaciones válidas consecutivas. Hasta 250 cambios diarios, desviación estándar muestral; con menos se usan los disponibles (el rótulo dice cuántos) y con menos de 60 no se construye el snapshot. Por eso la procedencia de Volatilidades de factores sale como Mixta.',
       },
+      // corte 8
+      {
+        label: 'Fijaciones SOFR',
+        text: 'Fijaciones diarias de SOFR reales, de la Fed de Nueva York. Se traen con el botón Traer de la fuente de Fijaciones; un valor distinto del guardado se lista como conflicto y no se sobrescribe.',
+      },
+      {
+        label: 'Banxico (TIIE de Fondeo, FIX)',
+        text: 'Cliente de la API SIE de Banxico listo, inactivo hasta tener un token en BANXICO_TOKEN; sin probar contra un token real, así que el formato de respuesta de éxito no está verificado. Las curvas de TIIE-F siguen sintéticas.',
+      },
+      // fin corte 8
     ],
   },
 ];

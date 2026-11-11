@@ -29,6 +29,54 @@ El script compila `qfpy` si falta `build/src/qfpy*.so`, construye la UI con `npm
 
 Para usar otro intérprete de Python: `QF_PYTHON=/ruta/a/python ./desk/run.sh`.
 
+## Variables de entorno
+
+- `BANXICO_TOKEN`: token de la API SIE de Banxico, necesario solo para traer TIIE de Fondeo (SF331451) y FIX (SF43718) desde la fuente. Se lee solo del entorno del proceso del backend; nunca se guarda en base ni se devuelve en respuestas. Se obtiene registrándose en el portal SIE API de Banxico (https://www.banxico.org.mx/SieAPIRest/service/v1/token), que pide captcha; lo genera el usuario. Sin ella, el resto de la aplicación funciona igual.
+- `MDF_DB`: base de MarketDataFeed (por omisión `~/Git/MarketDataFeed/build/sofr.db`).
+- `MDF_FETCH`: ejecutable `fetch_sofr` de MarketDataFeed (por omisión `~/Git/MarketDataFeed/build/examples/fetch_sofr`).
+
+## Fijaciones desde la fuente
+
+`POST /api/fixings/fetch` trae fijaciones de la fuente y las guarda para el índice indicado. Cuerpo `{"index": "SOFR" | "TIIE-F" | "USDMXN", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}`, rango máximo de 366 días.
+
+```bash
+curl -X POST localhost:5070/api/fixings/fetch -H 'Content-Type: application/json' -d '{"index":"SOFR","from":"2026-11-02","to":"2026-11-06"}'
+```
+
+Respuesta de ejemplo (200):
+
+```json
+{"index": "SOFR", "source": "Fed de Nueva York", "from": "2026-11-02", "to": "2026-11-06",
+ "fetched": 4, "inserted": 3, "unchanged": 1, "conflicts": []}
+```
+
+- No sobrescribe lo guardado: un valor distinto del almacenado se lista en `conflicts` (`date`, `stored`, `source`) y no se cambia. Las tasas se guardan en decimal (0.0389 = 3.89 %).
+- Errores: 400 (índice, fechas o rango inválidos, con `field`); 409 con `code: "banxico_token_missing"` (falta `BANXICO_TOKEN`, solo TIIE-F y USDMXN); 502 (la fuente no respondió, devolvió un valor inválido, o Banxico rechazó el token con `code: "banxico_token_rejected"`). En 409 y 502 no se escribe nada.
+- Un rango sin datos en la fuente responde 200 con todo en cero.
+- `GET /api/fixings/sources` indica para cada índice la fuente, si está disponible (`available`, y `reason` si no), y su última fecha (`last_date`).
+- SOFR viene de la Fed de Nueva York y son fijaciones reales. La integración con Banxico está lista pero **sin probar contra un token real**: el formato de respuesta de éxito no está verificado. Los identificadores de serie se comprobaron en el catálogo público del SIE (SF331451 y SF43718). Un rango sin observaciones en Banxico podría responder 404; hoy ese caso se vería como 502 genérico.
+
+## Respaldo y restauración
+
+```bash
+# Respaldo (válido con el servidor encendido)
+/home/claudio/anaconda3/bin/python -m desk.api.backup /ruta/respaldos --keep 14
+
+# Restauración (con el servidor APAGADO; el CLI no lo detecta)
+/home/claudio/anaconda3/bin/python -m desk.api.backup --restore /ruta/respaldos/qfdesk-20261111-153000.sqlite --force
+```
+
+- El CLI siempre actúa sobre `desk/data/desk.db`; no hay flag `--db`.
+- Las copias llevan la hora local en el nombre: `qfdesk-YYYYMMDD-HHMMSS.sqlite`.
+- Al restaurar con `--force`, la base actual se guarda antes como `<base>.antes-de-restaurar-YYYYMMDD-HHMMSS` (hora local) y el CLI indica la ruta.
+- `--keep N` borra las copias más viejas y conserva N.
+
+Ejemplo de cron (respaldo diario a las 02:30):
+
+```
+30 2 * * * cd /home/claudio/Git/Quant_Finance && /home/claudio/anaconda3/bin/python -m desk.api.backup /ruta/respaldos --keep 14
+```
+
 ## Datos
 
 - Base SQLite: `desk/data/desk.db` (no versionada; se crea y siembra al arrancar).
@@ -47,6 +95,10 @@ Para usar otro intérprete de Python: `QF_PYTHON=/ruta/a/python ./desk/run.sh`.
   ```
 
 - Sigue sintético: TIIE-F, superficie de volatilidad, parámetros Hull-White y correlaciones. El detalle de fuentes está en la pantalla Metodología.
+
+## Lo que el corte 8 NO hace
+
+Fuera de alcance del diseño: Login, usuarios y permisos; XVA/CVA en la interfaz; reportes PDF; pruebas de efectividad de coberturas; datos de mercado reales o en vivo; TIIE a 28 días (la tasa vieja); despliegue en ThinkCentre; licencia y precio; borrar o modificar `python_web/`; push o PR.
 
 ## Tests
 
