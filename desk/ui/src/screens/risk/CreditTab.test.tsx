@@ -169,6 +169,23 @@ describe('CreditTab: contrapartes y CVA', () => {
     expect(marks[0].closest('tr')?.textContent).toContain(ALFA.counterparty);
   });
 
+  it('muestra el mensaje de los avisos de valuación (el backend los envía como objetos, no como texto)', async () => {
+    mocks.creditExposure.mockResolvedValue({
+      ...EXPOSURE,
+      warnings: [
+        {
+          code: 'missing_fixing',
+          index: 'SOFR',
+          dates: ['2026-11-10', '2026-11-11'],
+          message: 'Faltan fijaciones de SOFR en 2 día(s)',
+        },
+      ],
+    });
+    renderTab();
+    const msg = await screen.findByText('Faltan fijaciones de SOFR en 2 día(s)');
+    expect(msg.closest('.radv-note--warn')).not.toBeNull();
+  });
+
   it('pone el pie con las trayectorias y el alcance', async () => {
     renderTab();
     await screen.findByRole('note');

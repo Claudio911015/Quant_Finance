@@ -399,7 +399,7 @@ export function CreditTab() {
             <div className="radv-note radv-note--warn" role="status">
               <ul className="credittab-list">
                 {data.warnings.map((w, i) => (
-                  <li key={i}>{w}</li>
+                  <li key={i}>{w.message}</li>
                 ))}
               </ul>
             </div>

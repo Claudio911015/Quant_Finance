@@ -367,7 +367,7 @@ const LIMITS: { label: string; text: string }[] = [
     label: 'Datos',
     text: 'Mixtos en MKT-LIVE: curva SOFR aproximada, spot y volatilidades de SOFR y USDMXN de fuentes reales; el resto sintético. Ver Fuentes de datos.',
   },
-  { label: 'Alcance', text: 'Sin XVA. Un solo usuario.' },
+  { label: 'Alcance', text: 'CVA informativo solo de swaps de tasa; sin DVA, FVA ni colateral. Un solo usuario.' },
   {
     label: 'Fechas',
     text: 'Días naturales sin calendario de inhábiles; t = días/365; SOFR en periodos de 365 días.',

@@ -1,5 +1,5 @@
 // Tipos del corte 6 (riesgo avanzado): transcripción del contrato HTTP del backend.
-import type { ScenarioSpec, ScenariosResponse, TradeError } from './types';
+import type { ScenarioSpec, ScenariosResponse, TradeError, Warning } from './types';
 
 // --- P&L explicado ---
 
@@ -28,7 +28,7 @@ export interface ExplainRow {
   error: string | null;
   /** Falla de la cascada con `pnl` válido: todo el P&L va a `residual`. */
   explain_error: string | null;
-  warnings: string[];
+  warnings: Warning[];
 }
 
 export interface ExplainResponse {
@@ -235,7 +235,7 @@ export interface CreditExposureResponse {
   notice: string;
   counterparties: CreditCounterparty[];
   excluded: CreditExcluded[];
-  warnings: string[];
+  warnings: Warning[];
 }
 
 // --- Biblioteca de escenarios ---
