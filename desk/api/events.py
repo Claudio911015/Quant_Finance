@@ -5,7 +5,7 @@ Forma de un evento: `{"id", "trade_id", "type", "event_date" (date), "data" (dic
 """
 import json
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, List
 
 from desk.api import lifecycle
@@ -119,7 +119,8 @@ def post_event(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) ->
 
     @param body `{"type", "event_date", "data"}` con `data` según el tipo.
     @return eventos insertados con `event_date` como `date`.
-    @raise ApiError 404 (operación), 400 (tipo, fecha o `data`) o 409 (la operación no está viva en `event_date`).
+    @raise ApiError 404 (operación), 400 (tipo, fecha o `data`) o 409 (la operación no está viva en
+        `event_date`, o `event_date` es anterior al último evento registrado).
     """
     from desk.api import portfolio  # import tardío: portfolio importa este módulo
 
@@ -145,7 +146,18 @@ def post_event(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) ->
         data = _terms_data(trade, event_date, data)
     else:  # termination / exercise
         data = {"amount": number(data, "amount", ge=-MAX_AMOUNT, le=MAX_AMOUNT)}
+    last = max(e["event_date"] for e in trade["events"])
+    if event_date < last:
+        raise ApiError(
+            409,
+            "Los eventos se registran en orden cronológico: el último es del %s y 'event_date' es %s"
+            % (last.isoformat(), event_date.isoformat()),
+            "event_date",
+        )
     status = lifecycle.state(trade, trade["events"], event_date)["status"]
+    if kind == "exercise" and status == "vencida" and event_date == trade["maturity_date"]:
+        # El ejercicio ocurre al vencimiento: ahí se juzga el estado del día anterior.
+        status = lifecycle.state(trade, trade["events"], event_date - timedelta(days=1))["status"]
     if status != "viva":
         raise ApiError(
             409, "La operación no está viva el %s (estado: %s)" % (event_date.isoformat(), status), "id"

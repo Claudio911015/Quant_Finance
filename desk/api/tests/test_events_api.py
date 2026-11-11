@@ -205,6 +205,43 @@ def test_exercise_on_options_inserts_exercise_and_transfer(app, client, product)
     assert post(client, t["id"], "termination", "2026-12-01", {"amount": 1.0}).status_code == 409
 
 
+@pytest.mark.parametrize("product", sorted(OPTIONS))
+def test_exercise_on_the_maturity_date_is_accepted_and_the_state_is_ejercida(app, client, product):
+    t = new_trade(client, product, OPTIONS[product])
+    maturity = date.fromisoformat(t["maturity_date"])
+    r = post(client, t["id"], "exercise", iso(maturity), {"amount": 8000.0})
+    assert r.status_code == 201, r.get_json()
+    assert [e["type"] for e in r.get_json()["events"]] == ["exercise", "transfer"]
+    assert [row[1] for row in event_rows(app, t["id"])] == ["execution", "exercise", "transfer"]
+    assert get_state(client, t["id"], iso(maturity - timedelta(days=1)))["status"] == "viva"
+    assert get_state(client, t["id"], iso(maturity))["status"] == "ejercida"
+    assert get_state(client, t["id"], iso(maturity + timedelta(days=1)))["status"] == "ejercida"
+
+
+def test_exercise_after_the_maturity_date_is_409_vencida(app, client):
+    t = new_trade(client, "fx_option", OPTIONS["fx_option"])
+    after = iso(date.fromisoformat(t["maturity_date"]) + timedelta(days=1))
+    r = post(client, t["id"], "exercise", after, {"amount": 8000.0})
+    assert r.status_code == 409 and r.get_json()["field"] == "id"
+    assert "vencida" in r.get_json()["error"]
+    assert len(event_rows(app, t["id"])) == 1
+
+
+def test_exercise_on_the_maturity_date_of_an_already_closed_trade_is_409(app, client):
+    t = new_trade(client, "fx_option", OPTIONS["fx_option"])
+    maturity = date.fromisoformat(t["maturity_date"])
+    assert post(client, t["id"], "exercise", iso(maturity), {"amount": 8000.0}).status_code == 201
+    r = post(client, t["id"], "exercise", iso(maturity), {"amount": 1.0})
+    assert r.status_code == 409 and r.get_json()["field"] == "id" and "ejercida" in r.get_json()["error"]
+    assert len(event_rows(app, t["id"])) == 3
+
+    u = new_trade(client, "fx_option", OPTIONS["fx_option"])
+    assert post(client, u["id"], "termination", iso(maturity - timedelta(days=1)), {"amount": 5.0}).status_code == 201
+    r = post(client, u["id"], "exercise", iso(maturity), {"amount": 1.0})
+    assert r.status_code == 409 and "terminada" in r.get_json()["error"]
+    assert len(event_rows(app, u["id"])) == 3
+
+
 @pytest.mark.parametrize("product, params", [("irs", IRS), ("fx_forward", FWD), ("bond", BOND),
                                              ("cap_floor", {"curve": "TIIE-F", "cap_type": "cap",
                                                             "notional": 1e6, "periods": 13, "strike": 0.07})])
@@ -283,13 +320,35 @@ def test_terms_change_without_a_terms_object_is_400_on_terms(client, data):
     assert r.status_code == 400 and r.get_json()["field"] == "terms"
 
 
+# ------------------------------------------------------------------ orden cronológico
+
+@pytest.mark.parametrize("kind, data", [("quantity_change", {"notional": 5e5}),
+                                        ("terms_change", {"terms": {"strike": 19.5}}),
+                                        ("termination", {"amount": 1.0})])
+def test_event_dated_before_the_last_stored_event_is_409_on_event_date(app, client, kind, data):
+    t = new_trade(client)
+    assert post(client, t["id"], "quantity_change", "2026-11-25", {"notional": 8e5}).status_code == 201
+    before = event_rows(app, t["id"])
+    r = post(client, t["id"], kind, "2026-11-24", data)
+    assert r.status_code == 409 and r.get_json()["field"] == "event_date", r.get_json()
+    assert "cronológico" in r.get_json()["error"]
+    assert event_rows(app, t["id"]) == before
+
+
+def test_event_on_the_same_date_as_the_last_stored_event_is_accepted(app, client):
+    t = new_trade(client)
+    assert post(client, t["id"], "quantity_change", "2026-11-25", {"notional": 8e5}).status_code == 201
+    assert post(client, t["id"], "terms_change", "2026-11-25", {"terms": {"strike": 19.5}}).status_code == 201
+    assert len(event_rows(app, t["id"])) == 3
+
+
 # ----------------------------------------------------------------------- orden y lectura
 
 def test_events_listing_is_ordered_by_event_date_then_id(client):
     t = new_trade(client)
-    post(client, t["id"], "quantity_change", "2026-12-01", {"notional": 5e5})
     post(client, t["id"], "quantity_change", "2026-11-20", {"notional": 8e5})
     post(client, t["id"], "quantity_change", "2026-11-20", {"notional": 7e5})
+    post(client, t["id"], "quantity_change", "2026-12-01", {"notional": 5e5})
     got = client.get("/api/trades/%d" % t["id"]).get_json()["events"]
     assert [(e["type"], e["event_date"], e["data"].get("notional")) for e in got] == [
         ("execution", "2026-11-10", None),
@@ -300,11 +359,11 @@ def test_events_listing_is_ordered_by_event_date_then_id(client):
     assert [e["id"] for e in got[1:3]] == sorted(e["id"] for e in got[1:3])
 
 
-def test_same_date_events_inserted_out_of_date_order_the_highest_id_wins(client):
+def test_same_date_events_the_highest_id_wins(client):
     t = new_trade(client)
-    post(client, t["id"], "quantity_change", "2026-12-01", {"notional": 5e5})
     post(client, t["id"], "quantity_change", "2026-11-20", {"notional": 8e5})
     post(client, t["id"], "quantity_change", "2026-11-20", {"notional": 7e5})
+    post(client, t["id"], "quantity_change", "2026-12-01", {"notional": 5e5})
     assert get_state(client, t["id"], "2026-11-19")["notional"] == 1e6
     assert get_state(client, t["id"], "2026-11-20")["notional"] == 7e5
     assert get_state(client, t["id"], "2026-11-30")["notional"] == 7e5
@@ -336,9 +395,9 @@ def _build_trades(client):
     post(client, b["id"], "quantity_change", "2026-11-15", {"notional": 2e6})
     assert post(client, b["id"], "termination", "2026-11-25", {"amount": -1500.0}).status_code == 201
     c = new_trade(client, "fx_option", OPTIONS["fx_option"], trade_date="2026-11-10", maturity_date="2027-03-10")
-    post(client, c["id"], "quantity_change", "2026-12-01", {"notional": 5e5})
     post(client, c["id"], "quantity_change", "2026-11-20", {"notional": 8e5})
     post(client, c["id"], "quantity_change", "2026-11-20", {"notional": 7e5})
+    post(client, c["id"], "quantity_change", "2026-12-01", {"notional": 5e5})
     post(client, c["id"], "terms_change", "2026-12-10", {"terms": {"strike": 19.6}})
     return [a["id"], b["id"], c["id"]]
 
