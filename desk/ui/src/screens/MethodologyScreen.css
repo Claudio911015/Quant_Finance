@@ -1,0 +1,55 @@
+.meth {
+  max-width: 880px;
+  font-size: var(--fs-md);
+  color: var(--text);
+}
+
+.meth-intro {
+  color: var(--text-dim);
+  margin: var(--space-2) 0 var(--space-5);
+}
+
+.meth-group {
+  margin: var(--space-5) 0 var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.meth-section {
+  border-top: 1px solid var(--border);
+  padding: var(--space-3) 0;
+}
+
+.meth-section h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.meth-list {
+  margin: 0;
+}
+
+.meth-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+
+.meth-row dt {
+  color: var(--text-dim);
+}
+
+.meth-row dd {
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .meth-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
