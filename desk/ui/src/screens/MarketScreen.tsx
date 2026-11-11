@@ -15,6 +15,7 @@ import { EChart, cssColor } from '../components/EChart';
 import { fmtNumber } from '../lib/format';
 import { asOfText, kindText } from '../lib/provenance';
 import { useSnapshot } from '../state/SnapshotContext';
+import FixingsPanel from './FixingsPanel';
 import './MarketScreen.css';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -511,6 +512,13 @@ export function MarketScreen() {
           </table>
         </section>
       </div>
+
+      <section className="market__panel" aria-labelledby="fixings-title">
+        <header className="market__panel-head">
+          <h2 id="fixings-title">Fijaciones</h2>
+        </header>
+        <FixingsPanel />
+      </section>
     </div>
   );
 }

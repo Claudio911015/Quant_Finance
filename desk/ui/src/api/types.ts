@@ -88,10 +88,34 @@ export interface PriceResponse {
   details: Record<string, unknown>;
 }
 
+export type TradeStatus = 'no_pactada' | 'viva' | 'vencida' | 'terminada' | 'ejercida';
+
+export type EventType =
+  | 'execution'
+  | 'reset'
+  | 'transfer'
+  | 'quantity_change'
+  | 'terms_change'
+  | 'exercise'
+  | 'termination';
+
+export interface TradeEvent {
+  id: number;
+  trade_id: number;
+  type: EventType;
+  event_date: string;
+  data: Record<string, unknown>;
+  prev_event_id: number | null;
+  created_at: string;
+}
+
 export interface Trade {
   id: number;
   product: ProductId;
   counterparty: string;
+  trade_date: string;
+  start_date: string;
+  maturity_date: string;
   params: Record<string, unknown>;
   notional: number;
   currency: string;
@@ -99,16 +123,64 @@ export interface Trade {
   created_at: string;
 }
 
+export type TradeDetail = Trade & { events: TradeEvent[] };
+
+export interface TradeState {
+  id: number;
+  date: string;
+  status: TradeStatus;
+  notional: number;
+  terms: Record<string, unknown>;
+}
+
+export type WarningCode =
+  | 'missing_fixing'
+  | 'fx_fallback'
+  | 'no_settlement'
+  | 'expired_unexercised';
+
+export interface Warning {
+  code: WarningCode;
+  index: string | null;
+  dates: string[];
+  message: string;
+}
+
+export type FlowKind = 'coupon' | 'settlement' | 'transfer';
+
+export interface Flow {
+  date: string;
+  kind: FlowKind;
+  status: 'settled' | 'projected';
+  amount: number;
+  currency: string;
+  df: number | null;
+  pv: number | null;
+}
+
+export interface FlowsResponse {
+  id: number;
+  snapshot: string;
+  as_of: string;
+  flows: Flow[];
+  warnings: Warning[];
+}
+
 export interface ValuationRow {
   id: number;
   product: ProductId;
   counterparty: string;
+  trade_date: string;
+  start_date: string;
+  maturity_date: string;
+  status: TradeStatus;
   notional: number;
   currency: string;
   maturity: string;
   pv: number | null;
   pv_mxn: number | null;
   error: string | null;
+  warnings: Warning[];
 }
 
 export interface ValuationResponse {
@@ -116,6 +188,46 @@ export interface ValuationResponse {
   as_of: string;
   total_mxn: number;
   rows: ValuationRow[];
+}
+
+export type FixingIndex = 'TIIE-F' | 'SOFR' | 'USDMXN';
+
+export interface Fixing {
+  index: FixingIndex;
+  date: string;
+  value: number;
+}
+
+export interface AddFixingResponse {
+  fixing: Fixing;
+  created: boolean;
+}
+
+export interface FixingsCsvResult {
+  inserted: number;
+  unchanged: number;
+}
+
+export interface PnlRow {
+  id: number;
+  product: ProductId;
+  counterparty: string;
+  status_from: TradeStatus;
+  status_to: TradeStatus;
+  pv_from: number | null;
+  pv_to: number | null;
+  settled: number | null;
+  pnl: number | null;
+  error: string | null;
+  warnings: Warning[];
+}
+
+export interface PnlResponse {
+  from: { snapshot: string; as_of: string };
+  to: { snapshot: string; as_of: string };
+  total_mxn: number;
+  totals: { pv_from: number; pv_to: number; settled: number; pnl: number };
+  rows: PnlRow[];
 }
 
 export interface TradeError {

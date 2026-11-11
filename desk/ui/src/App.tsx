@@ -4,6 +4,7 @@ import { MarketScreen } from './screens/MarketScreen';
 import { MethodologyScreen } from './screens/MethodologyScreen';
 import { PortfolioScreen } from './screens/PortfolioScreen';
 import { RiskScreen } from './screens/RiskScreen';
+import TradeScreen from './screens/TradeScreen';
 import { PricersScreen } from './screens/pricers/PricersScreen';
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/pricers" element={<Navigate to="/pricers/irs" replace />} />
         <Route path="/pricers/:product" element={<PricersScreen />} />
         <Route path="/portafolio" element={<PortfolioScreen />} />
+        <Route path="/portafolio/:id" element={<TradeScreen />} />
         <Route path="/riesgo" element={<RiskScreen />} />
         <Route path="/metodologia" element={<MethodologyScreen />} />
       </Routes>

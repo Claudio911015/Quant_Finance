@@ -1,5 +1,12 @@
 import type {
+  AddFixingResponse,
   Dv01Response,
+  EventType,
+  Fixing,
+  FixingIndex,
+  FixingsCsvResult,
+  FlowsResponse,
+  PnlResponse,
   PriceResponse,
   ProductId,
   RefreshResponse,
@@ -8,6 +15,9 @@ import type {
   Snapshot,
   SnapshotSummary,
   Trade,
+  TradeDetail,
+  TradeEvent,
+  TradeState,
   ValuationResponse,
   VarResponse,
 } from './types';
@@ -82,12 +92,75 @@ export function createTrade(body: {
   product: ProductId;
   counterparty: string;
   params: Record<string, unknown>;
+  snapshot?: string;
+  trade_date?: string;
+  start_date?: string;
+  maturity_date?: string;
 }): Promise<Trade> {
   return request('POST', '/trades', body);
 }
 
+export function getTrade(id: number): Promise<TradeDetail> {
+  return request('GET', `/trades/${id}`);
+}
+
+export function tradeState(id: number, date: string): Promise<TradeState> {
+  return request('GET', `/trades/${id}/state?date=${encodeURIComponent(date)}`);
+}
+
+export function tradeFlows(id: number, snapshot: string): Promise<FlowsResponse> {
+  return request('GET', `/trades/${id}/flows?snapshot=${encodeURIComponent(snapshot)}`);
+}
+
+/** Devuelve los eventos creados: uno, o dos si el evento genera además un `transfer`. */
+export async function postEvent(
+  id: number,
+  body: { type: EventType; event_date: string; data: Record<string, unknown> },
+): Promise<TradeEvent[]> {
+  const data = await request<{ events: TradeEvent[] }>('POST', `/trades/${id}/events`, body);
+  return data.events;
+}
+
 export function deleteTrade(id: number): Promise<void> {
   return request('DELETE', `/trades/${id}`);
+}
+
+export async function listFixings(q?: {
+  index?: FixingIndex;
+  from?: string;
+  to?: string;
+}): Promise<Fixing[]> {
+  const parts = Object.entries(q ?? {})
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`);
+  const data = await request<{ fixings: Fixing[] }>(
+    'GET',
+    `/fixings${parts.length ? `?${parts.join('&')}` : ''}`,
+  );
+  return data.fixings;
+}
+
+export function addFixing(body: {
+  index: FixingIndex;
+  date: string;
+  value: number;
+}): Promise<AddFixingResponse> {
+  return request('POST', '/fixings', body);
+}
+
+export function importFixingsCsv(csv: string): Promise<FixingsCsvResult> {
+  return request('POST', '/fixings/csv', { csv });
+}
+
+export function rollSnapshot(
+  sourceId: string,
+  body: { id: string; as_of: string },
+): Promise<Snapshot> {
+  return request('POST', `/market/${encodeURIComponent(sourceId)}/roll`, body);
+}
+
+export function pnl(from: string, to: string): Promise<PnlResponse> {
+  return request('GET', `/pnl?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
 }
 
 export function valuation(snapshot: string): Promise<ValuationResponse> {

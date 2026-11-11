@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, deleteTrade, listSnapshots, price, refreshMarket, riskVar, valuation } from './client';
+import {
+  ApiError,
+  deleteTrade,
+  importFixingsCsv,
+  listSnapshots,
+  pnl,
+  postEvent,
+  price,
+  refreshMarket,
+  riskVar,
+  valuation,
+} from './client';
 
 function mockFetch(status: number, body?: unknown) {
   const fn = vi.fn().mockResolvedValue({
@@ -80,5 +91,39 @@ describe('cliente API', () => {
     expect(err.status).toBe(status);
     expect(err.message).toBe(message);
     expect(err.field).toBeNull();
+  });
+
+  it('postEvent hace POST a /api/trades/3/events con el cuerpo y devuelve los eventos', async () => {
+    const events = [{ id: 9, trade_id: 3, type: 'termination' }];
+    const fn = mockFetch(201, { events });
+    const body = { type: 'termination' as const, event_date: '2026-12-01', data: { amount: 1500 } };
+    await expect(postEvent(3, body)).resolves.toEqual(events);
+    const [url, init] = fn.mock.calls[0];
+    expect(url).toBe('/api/trades/3/events');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual(body);
+  });
+
+  it('importFixingsCsv envía el texto en {"csv": ...}', async () => {
+    const fn = mockFetch(200, { inserted: 1, unchanged: 0 });
+    await importFixingsCsv('a');
+    const [url, init] = fn.mock.calls[0];
+    expect(url).toBe('/api/fixings/csv');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe('{"csv":"a"}');
+  });
+
+  it('pnl llama a /api/pnl con from y to', async () => {
+    const fn = mockFetch(200, {});
+    await pnl('A', 'B');
+    expect(fn.mock.calls[0][0]).toBe('/api/pnl?from=A&to=B');
+  });
+
+  it('un 409 se convierte en ApiError con status 409 y field', async () => {
+    mockFetch(409, { error: 'La operación no está viva en esa fecha', field: 'id' });
+    const err = await postEvent(3, { type: 'termination', event_date: '2026-12-01', data: { amount: 0 } }).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(409);
+    expect(err.field).toBe('id');
   });
 });

@@ -13,6 +13,7 @@ import { ApiError, deleteTrade, valuation } from '../api/client';
 import type { ValuationResponse, ValuationRow } from '../api/types';
 import { fmtDate, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
+import PnlPanel from './PnlPanel';
 import './PortfolioScreen.css';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -130,6 +131,7 @@ export function PortfolioScreen() {
   const [data, setData] = useState<ValuationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'blotter' | 'pnl'>('blotter');
   const gridEl = useRef<HTMLDivElement>(null);
   const gridApi = useRef<GridApi<GridRow> | null>(null);
   const onDelete = useRef<(row: GridRow) => void>(() => {});
@@ -213,33 +215,76 @@ export function PortfolioScreen() {
 
   return (
     <section className="portfolio">
-      <header className="portfolio__head">
-        <h1>Portafolio</h1>
-        <span className="portfolio__meta">
-          {loading
-            ? 'Cargando…'
-            : data
-              ? `${rows.length} operaciones · al ${fmtDate(data.as_of)}`
-              : ''}
-          {failed > 0 && <span className="portfolio__warn"> · {failed} con error</span>}
-        </span>
+      <div className="portfolio__tabs" role="tablist" aria-label="Vistas del portafolio">
         <button
           type="button"
-          className="portfolio__btn"
-          disabled={!data || rows.length === 0}
-          onClick={() =>
-            gridApi.current?.exportDataAsCsv({ fileName: 'portafolio.csv', columnKeys: EXPORT_COLUMNS })
-          }
+          role="tab"
+          id="portfolio-tab-blotter"
+          aria-selected={tab === 'blotter'}
+          aria-controls="portfolio-panel-blotter"
+          className="portfolio__tab"
+          onClick={() => setTab('blotter')}
         >
-          Exportar CSV
+          Operaciones
         </button>
-      </header>
-      {error && (
-        <div className="portfolio__banner" role="alert">
-          {error}
+        <button
+          type="button"
+          role="tab"
+          id="portfolio-tab-pnl"
+          aria-selected={tab === 'pnl'}
+          aria-controls="portfolio-panel-pnl"
+          className="portfolio__tab"
+          onClick={() => setTab('pnl')}
+        >
+          P&L
+        </button>
+      </div>
+      {/* El blotter sigue montado al cambiar de pestaña: AG Grid se crea una sola vez. */}
+      <div
+        role="tabpanel"
+        id="portfolio-panel-blotter"
+        aria-labelledby="portfolio-tab-blotter"
+        className="portfolio__panel"
+        hidden={tab !== 'blotter'}
+      >
+        <header className="portfolio__head">
+          <h1>Portafolio</h1>
+          <span className="portfolio__meta">
+            {loading
+              ? 'Cargando…'
+              : data
+                ? `${rows.length} operaciones · al ${fmtDate(data.as_of)}`
+                : ''}
+            {failed > 0 && <span className="portfolio__warn"> · {failed} con error</span>}
+          </span>
+          <button
+            type="button"
+            className="portfolio__btn"
+            disabled={!data || rows.length === 0}
+            onClick={() =>
+              gridApi.current?.exportDataAsCsv({ fileName: 'portafolio.csv', columnKeys: EXPORT_COLUMNS })
+            }
+          >
+            Exportar CSV
+          </button>
+        </header>
+        {error && (
+          <div className="portfolio__banner" role="alert">
+            {error}
+          </div>
+        )}
+        <div ref={gridEl} className="portfolio__grid" />
+      </div>
+      {tab === 'pnl' && (
+        <div
+          role="tabpanel"
+          id="portfolio-panel-pnl"
+          aria-labelledby="portfolio-tab-pnl"
+          className="portfolio__panel"
+        >
+          <PnlPanel />
         </div>
       )}
-      <div ref={gridEl} className="portfolio__grid" />
     </section>
   );
 }
