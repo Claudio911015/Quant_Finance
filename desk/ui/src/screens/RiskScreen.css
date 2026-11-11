@@ -7,7 +7,7 @@
 
 .risk__top {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 1fr) 460px;
   gap: var(--space-4);
   align-items: start;
 }
@@ -109,7 +109,7 @@
 /* VaR */
 .risk-var__inputs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
   margin-bottom: var(--space-3);
 }
@@ -126,6 +126,8 @@
 }
 
 .risk-field input {
+  width: 100%;
+  min-width: 0;
   height: 28px;
   padding: 0 var(--space-2);
   background: var(--bg);
@@ -182,6 +184,11 @@
 
 .risk-table th.num {
   font-family: inherit;
+}
+
+.risk-table td.num,
+.risk-table th.num {
+  white-space: nowrap;
 }
 
 .risk-table td {

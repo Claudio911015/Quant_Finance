@@ -223,19 +223,19 @@ const gridTheme = themeQuartz.withParams({
 });
 
 const columnDefs: ColDef<ScenarioRow>[] = [
-  { field: 'label', headerName: 'Operación', width: 230, pinned: 'left', sortable: false },
+  { field: 'label', headerName: 'Operación', width: 244, pinned: 'left', sortable: false, tooltipField: 'label' },
   ...SCENARIOS.map(
     (s, i): ColDef<ScenarioRow> => ({
       field: `s${i}`,
       headerName: s.name,
       flex: 1,
-      minWidth: 96,
+      minWidth: 90,
       sortable: false,
       wrapHeaderText: true,
       autoHeaderHeight: true,
       headerClass: 'ag-right-aligned-header',
       cellClass: (p) => ['num', signClass(p.value as number | null)],
-      valueFormatter: (p) => (p.value == null ? 'n/d' : fmtNumber(p.value as number, 2)),
+      valueFormatter: (p) => (p.value == null ? 'n/d' : fmtNumber(p.value as number, 0)),
       tooltipValueGetter: (p) => (p.data?.[`e${i}`] as string | null | undefined) ?? null,
     }),
   ),

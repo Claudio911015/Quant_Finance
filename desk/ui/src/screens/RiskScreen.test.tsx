@@ -273,7 +273,7 @@ describe('RiskScreen: escenarios', () => {
     await waitFor(() => expect(mocks.createGrid).toHaveBeenCalled());
     const col = mocks.createGrid.mock.calls[0][1].columnDefs[4];
     expect(col.valueFormatter({ value: null })).toBe('n/d');
-    expect(col.valueFormatter({ value: 1234.5 })).toBe('1,234.50');
+    expect(col.valueFormatter({ value: 1234.5 })).toBe('1,235'); // sin decimales: 8 escenarios caben en 1280 px
     expect(col.tooltipValueGetter({ data: { e3: 'Sin cotización' } })).toBe('Sin cotización');
     expect(await screen.findByText(/Algunas celdas no se pudieron valuar/)).toBeTruthy();
   });
