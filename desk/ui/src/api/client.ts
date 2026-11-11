@@ -29,6 +29,9 @@ import type {
   ValuationResponse,
   VarResponse,
 } from './types';
+// --- corte 3 ---
+import type { CollateralCurrency, Counterparty, HolidaysResponse } from './types';
+// --- fin corte 3 ---
 
 export class ApiError extends Error {
   status: number;
@@ -245,3 +248,27 @@ export function hedgeReport(id: number, snapshot?: string): Promise<HedgeReport>
 export function hedgeReportCsvUrl(id: number): string {
   return `${BASE}/hedges/${id}/report?format=csv`;
 }
+
+// --- corte 3 ---
+
+export async function listCounterparties(): Promise<Counterparty[]> {
+  const data = await request<{ counterparties: Counterparty[] }>('GET', '/counterparties');
+  return data.counterparties;
+}
+
+/** `effective_date` es obligatoria (la pantalla propone el `as_of` del snapshot activo); el backend rechaza fechas anteriores al último cambio (409). */
+export function setCollateral(
+  id: number,
+  body: { collateral_currency: CollateralCurrency; effective_date: string },
+): Promise<Counterparty> {
+  return request('PUT', `/counterparties/${id}`, body);
+}
+
+/** Días inhábiles de México (MX) y de la publicación de SOFR (US) entre `from` y `to` (ISO, inclusive). */
+export function holidays(from: string, to: string): Promise<HolidaysResponse> {
+  return request(
+    'GET',
+    `/calendars/holidays?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  );
+}
+// --- fin corte 3 ---

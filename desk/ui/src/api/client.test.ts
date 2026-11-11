@@ -7,7 +7,9 @@ import {
   deleteTrade,
   hedgeEffectiveness,
   hedgeReportCsvUrl,
+  holidays,
   importFixingsCsv,
+  listCounterparties,
   listHedges,
   listSnapshots,
   pnl,
@@ -16,6 +18,7 @@ import {
   refreshMarket,
   releaseHedgeReserve,
   riskVar,
+  setCollateral,
   valuation,
 } from './client';
 import type { CreateHedgeBody } from './types';
@@ -227,3 +230,53 @@ describe('cliente API: coberturas', () => {
     expect(err.field).toBe('snapshot');
   });
 });
+
+// --- corte 3 ---
+describe('cliente API: contrapartes y calendarios', () => {
+  const alfa = {
+    id: 3,
+    name: 'Banco Alfa (sintético)',
+    collateral_currency: 'USD',
+    effective_date: '2026-11-10',
+    trades: 2,
+    history: [
+      { id: 4, collateral_currency: 'USD', effective_date: '2026-11-10', created_at: '2026-11-11T18:00:00+00:00' },
+    ],
+  };
+
+  it('listCounterparties llama GET /api/counterparties y desenvuelve la lista', async () => {
+    const fn = mockFetch(200, { counterparties: [alfa] });
+    const out = await listCounterparties();
+    expect(fn).toHaveBeenCalledWith('/api/counterparties', { method: 'GET' });
+    expect(out).toEqual([alfa]);
+  });
+
+  it('setCollateral envía PUT /api/counterparties/3 con el cuerpo y devuelve la contraparte', async () => {
+    const fn = mockFetch(200, alfa);
+    const body = { collateral_currency: 'USD' as const, effective_date: '2026-11-10' };
+    const out = await setCollateral(3, body);
+    const [url, init] = fn.mock.calls[0];
+    expect(url).toBe('/api/counterparties/3');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body)).toEqual(body);
+    expect(out).toEqual(alfa);
+  });
+
+  it('holidays arma la URL con from y to', async () => {
+    const payload = { from: '2026-01-01', to: '2026-12-31', holidays: { MX: [], US: [] } };
+    const fn = mockFetch(200, payload);
+    const out = await holidays('2026-01-01', '2026-12-31');
+    expect(fn.mock.calls[0][0]).toBe('/api/calendars/holidays?from=2026-01-01&to=2026-12-31');
+    expect(out).toEqual(payload);
+  });
+
+  it('un 409 al cambiar el colateral se convierte en ApiError con status y field', async () => {
+    mockFetch(409, { error: 'La contraparte ya tiene colateral en USD', field: 'collateral_currency' });
+    const err = await setCollateral(3, { collateral_currency: 'USD', effective_date: '2026-11-10' }).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(409);
+    expect(err.field).toBe('collateral_currency');
+    expect(err.message).toBe('La contraparte ya tiene colateral en USD');
+  });
+});
+// --- fin corte 3 ---

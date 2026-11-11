@@ -289,7 +289,7 @@ describe('Paleta de comandos', () => {
   it.each([
     ['Ctrl+K', { ctrlKey: true }],
     ['Cmd+K', { metaKey: true }],
-  ])('%s abre la paleta con las seis pantallas y los siete pricers', async (_name, keys) => {
+  ])('%s abre la paleta con las seis pantallas y los ocho pricers', async (_name, keys) => {
     mockApi([DEMO]);
     renderShell();
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -298,7 +298,7 @@ describe('Paleta de comandos', () => {
 
     const dialog = await screen.findByRole('dialog');
     const specs = Object.values(PRODUCT_SPECS);
-    expect(specs).toHaveLength(7);
+    expect(specs).toHaveLength(8);
     const labels = within(dialog)
       .getAllByRole('option')
       .map((o) => o.querySelector('span')?.textContent);

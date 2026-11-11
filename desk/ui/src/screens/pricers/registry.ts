@@ -7,6 +7,7 @@ import { spec as cap_floor } from './products/cap_floor';
 import { spec as swaption } from './products/swaption';
 import { spec as bond } from './products/bond';
 import { spec as equity_option } from './products/equity_option';
+import { spec as xccy_swap } from './products/xccy_swap';
 
 export const PRODUCT_SPECS: Record<ProductId, ProductSpec> = {
   irs,
@@ -16,6 +17,7 @@ export const PRODUCT_SPECS: Record<ProductId, ProductSpec> = {
   swaption,
   bond,
   equity_option,
+  xccy_swap,
 };
 
 /** Rótulo en español de un producto (el de Pricers); un id desconocido o una fila especial se muestran tal cual. */

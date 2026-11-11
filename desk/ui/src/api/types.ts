@@ -5,7 +5,8 @@ export type ProductId =
   | 'cap_floor'
   | 'swaption'
   | 'bond'
-  | 'equity_option';
+  | 'equity_option'
+  | 'xccy_swap';
 
 export type SourceKind = 'live' | 'proxy' | 'synthetic' | 'mixed';
 export type DataQuality = 'synthetic' | 'live' | 'mixed';
@@ -54,7 +55,7 @@ export interface CurvePoint {
 export interface Snapshot extends SnapshotSummary {
   read_only: boolean;
   quotes: Quote[];
-  curves: Record<string, { currency: string; period_days: number; points: CurvePoint[] }>;
+  curves: Record<string, { currency: string; period_days: number; dependent?: boolean; points: CurvePoint[] }>;
   fx: { pair: string; spot: number };
   vol_surface: { pair: string; expiry_days: number[]; strikes: number[]; vols: number[][] };
   hw: Record<string, { a: number; sigma: number }>;
@@ -137,7 +138,8 @@ export type WarningCode =
   | 'missing_fixing'
   | 'fx_fallback'
   | 'no_settlement'
-  | 'expired_unexercised';
+  | 'expired_unexercised'
+  | 'no_csa_curve';
 
 export interface Warning {
   code: WarningCode;
@@ -146,7 +148,7 @@ export interface Warning {
   message: string;
 }
 
-export type FlowKind = 'coupon' | 'settlement' | 'transfer';
+export type FlowKind = 'coupon' | 'settlement' | 'transfer' | 'exchange' | 'redemption';
 
 export interface Flow {
   date: string;
@@ -278,7 +280,8 @@ export interface VarResponse {
 
 export type HedgeType = 'cash_flow' | 'fair_value';
 export type ItemKind = 'floating_loan' | 'fixed_loan' | 'forecast_fx';
-export type HedgeStatus = 'activa' | 'desdesignada';
+/** `concluida`: el instrumento venció antes que la partida; no admite cierres y su reserva espera el flujo cubierto. */
+export type HedgeStatus = 'activa' | 'concluida' | 'desdesignada';
 /** Causa de una desdesignación (IFRS 9 6.5.6: no hay desdesignación voluntaria sin causa). */
 export type DedesignationCause = 'instrument_ended' | 'criteria_not_met' | 'risk_objective_changed';
 /** Causa de la liberación de la reserva congelada. */
@@ -326,7 +329,7 @@ export interface HedgeEvent {
 
 /** Aviso que el alta devuelve y guarda en el evento de designación; `message` ya viene en español. */
 export interface HedgeWarning {
-  code: 'no_economic_relationship' | 'instrument_off_market' | 'forecast_date_weekend';
+  code: 'no_economic_relationship' | 'instrument_off_market' | 'forecast_date_weekend' | 'designation_backdated';
   message: string;
 }
 
@@ -558,3 +561,107 @@ export interface CreateHedgeBody {
   hedge_ratio?: number;
   documentation: HedgeDocumentation;
 }
+
+// --- corte 3 ---
+// Curvas MXN con colateral, calendarios y cross currency swap. Los campos nuevos de tipos
+// existentes se declaran aquí (fusión de interfaces) para no tocar sus cuerpos; todos son
+// opcionales para que los simulados de pruebas anteriores sigan compilando.
+
+export type CollateralCurrency = 'MXN' | 'USD';
+
+/** Punto forward USDMXN cotizado: `points` en pesos por dólar sobre el spot. */
+export interface FxForwardQuote {
+  days: number;
+  points: number;
+  label: string;
+}
+
+/** Diferencial de base de cross currency swap (decimal) sobre la pata MXN. */
+export interface XccyBasisQuote {
+  days: number;
+  spread: number;
+  label: string;
+}
+
+/** Una fila de «forward implícito vs cotizado»; `diff = implied_forward - quoted_forward`. */
+export interface ImpliedForwardRow {
+  label: string;
+  days: number;
+  quoted_points: number;
+  quoted_forward: number;
+  implied_forward: number;
+  parity_forward: number;
+  diff: number;
+}
+
+/** Estado de la curva `MXN-USD`; sin ella `available` es false y `message` explica por qué. */
+export interface CsaInfo {
+  available: boolean;
+  curve: 'MXN-USD';
+  source: Source | null;
+  message: string | null;
+  implied_vs_quoted: ImpliedForwardRow[];
+}
+
+export interface Snapshot {
+  fx_forwards?: FxForwardQuote[] | null;
+  xccy_basis?: XccyBasisQuote[] | null;
+  csa?: CsaInfo;
+}
+
+export interface ValuationRow {
+  collateral_currency?: CollateralCurrency;
+}
+
+export interface BondQuote {
+  dirty: number;
+  clean: number;
+  accrued: number;
+  currency: string;
+}
+
+export interface Flow {
+  /** Pata de un cross currency swap; `null` (o ausente) en el resto de productos. */
+  leg?: 'USD' | 'MXN' | null;
+}
+
+export interface FlowsResponse {
+  /** Precio limpio/sucio de un bono vivo; `null` en el resto de operaciones. */
+  bond?: BondQuote | null;
+}
+
+/** Flujo de `POST /api/price/xccy_swap`: el `Cashflow` genérico más pata, tipo y PV en MXN. */
+export interface XccyCashflow extends Cashflow {
+  leg: 'USD' | 'MXN';
+  kind: 'coupon' | 'exchange';
+  pv_mxn: number;
+}
+
+export interface CollateralEvent {
+  id: number;
+  collateral_currency: CollateralCurrency;
+  effective_date: string;
+  created_at: string;
+}
+
+export interface Counterparty {
+  id: number;
+  name: string;
+  collateral_currency: CollateralCurrency;
+  /** Fecha del último cambio de colateral; `null` si nunca ha cambiado. */
+  effective_date: string | null;
+  trades: number;
+  history: CollateralEvent[];
+}
+
+export interface Holiday {
+  date: string;
+  name: string;
+}
+
+export interface HolidaysResponse {
+  from: string;
+  to: string;
+  holidays: { MX: Holiday[]; US: Holiday[] };
+}
+// --- fin corte 3 ---

@@ -12,6 +12,7 @@ import type {
   TradeStatus,
   Warning,
 } from '../api/types';
+import { FLOW_KIND_EXTRA_LABEL } from '../lib/csaLabels';
 import { HEDGE_STATUS_LABEL, HEDGE_TYPE_LABEL } from '../lib/hedgeLabels';
 import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
@@ -40,6 +41,7 @@ const FLOW_KIND_LABEL: Record<FlowKind, string> = {
   coupon: 'Cupón',
   settlement: 'Liquidación',
   transfer: 'Transferencia',
+  ...FLOW_KIND_EXTRA_LABEL, // corte 3: U1 solo mantiene el tipado; U4 rotula la ficha
 };
 
 function describe(e: unknown): string {
