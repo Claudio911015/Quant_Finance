@@ -16,6 +16,7 @@ import { HEDGE_STATUS_LABEL, HEDGE_TYPE_LABEL } from '../lib/hedgeLabels';
 import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import { PRODUCT_SPECS } from './pricers/registry';
+import { TradeOpsPanel } from './ops/TradeOpsPanel'; // corte 5
 import './TradeScreen.css';
 
 const STATUS_LABEL: Record<TradeStatus, string> = {
@@ -298,6 +299,8 @@ export default function TradeScreen() {
               {HEDGE_STATUS_LABEL[h.status]}
             </Link>
           ))}
+          {/* corte 5 */}
+          <TradeOpsPanel tradeId={trade.id} product={trade.product} />
           <dl className="trade__facts">
             <div>
               <dt>Producto</dt>

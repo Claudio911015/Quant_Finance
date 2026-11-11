@@ -16,6 +16,7 @@ import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import PnlPanel from './PnlPanel';
 import { productTitle } from './pricers/registry';
+import { FpmlImport } from './ops/FpmlImport'; // corte 5
 import './PortfolioScreen.css';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -377,6 +378,8 @@ export function PortfolioScreen() {
           >
             Exportar CSV
           </button>
+          {/* corte 5 */}
+          <FpmlImport />
         </header>
         {error && (
           <div className="portfolio__banner" role="alert">
