@@ -7,14 +7,15 @@ Aquí no hay matemática financiera: se arma el instrumento envejecido y lo val�
   factor acumulado de las fijaciones diarias).
 * `fx_forward`, `fx_option`, `equity_option`, `swaption`: se acorta el plazo a lo que falta.
 * `cap_floor` y `bond` (aproximación declarada, sin C++ nuevo): se acortan los periodos con
-  `ceil`; el caplet o cupón en curso ya fijado se omite.
+  `ceil`; el caplet o cupón en curso ya fijado se omite. Viven en `aging.py`.
+* `xccy_swap`: lo valúa `xccy.pv_mxn` (gancho del corte 3).
 """
 import math
 from bisect import bisect_left
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from desk.api import lifecycle
+from desk.api import aging, lifecycle, xccy
 from desk.api.market import CURVES, MarketContext
 from desk.api.pricing import PRODUCTS
 from desk.api.pricing.base import Product
@@ -22,7 +23,7 @@ from desk.api.qf import qfpy
 
 _DAYS_PER_YEAR = 365.0
 _OPTIONS = ("fx_option", "swaption", "equity_option")
-_PV_IN_MXN = ("fx_forward", "fx_option", "equity_option")  # D6: `pv` ya viene en MXN
+_PV_IN_MXN = ("fx_forward", "fx_option", "equity_option", "xccy_swap")  # D6: `pv` ya viene en MXN
 
 Fixings = Dict[str, Dict[date, float]]
 
@@ -183,9 +184,16 @@ def value_trade(
         if name == "irs":
             pv = _irs_pv(trade, terms, mkt, fixings or {}, warnings)
             pv_mxn = pv * mkt.spot if CURVES[terms["curve"]]["currency"] == "USD" else pv
+        elif name == "xccy_swap":
+            pv_mxn = pv = float(xccy.pv_mxn(trade, terms, mkt, fixings or {}, warnings))
         else:
-            days = (trade["maturity_date"] - mkt.as_of).days
-            pv_mxn = float(product.pv_mxn(shortened(name, terms, days), mkt))
+            if name == "bond":
+                pv_mxn = aging.bond_pv_mxn(trade, terms, mkt)
+            elif name == "cap_floor":
+                pv_mxn = aging.cap_floor_pv_mxn(trade, terms, mkt)
+            else:
+                days = (trade["maturity_date"] - mkt.as_of).days
+                pv_mxn = float(product.pv_mxn(shortened(name, terms, days), mkt))
             usd = name not in _PV_IN_MXN and CURVES[terms["curve"]]["currency"] == "USD"
             pv = pv_mxn / mkt.spot if usd else pv_mxn
     elif status == "vencida" and trade["product"] in _OPTIONS:

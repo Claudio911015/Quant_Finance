@@ -9,8 +9,8 @@ from werkzeug.utils import safe_join
 
 from desk.api import db, fred
 from desk.api.errors import register_error_handlers
-from desk.api.routes import fixings, hedges, market, pnl, price, risk, trades
-from desk.api.seed_market import seed_market
+from desk.api.routes import fixings, hedges, market, pnl, price, risk, trades, counterparties, calendars
+from desk.api.seed_market import ensure_csa_quotes, seed_market
 from desk.api.seed_trades import seed_trades
 
 UI_DIST = Path(__file__).resolve().parents[1] / "ui" / "dist"
@@ -43,12 +43,16 @@ def create_app(db_path: Optional[Union[str, Path]] = None, seed: bool = True) ->
         db.init_schema(conn)
         if seed:
             _seed_if_empty(conn)
+        # --- corte 3 ---
+        ensure_csa_quotes(conn)  # bases ya sembradas: añade las cotizaciones de colateral USD a MX-DEMO
+        conn.commit()
+        # --- fin corte 3 ---
     finally:
         conn.close()
 
     register_error_handlers(app)
     app.teardown_appcontext(db.close_conn)
-    for module in (market, price, trades, risk, fixings, pnl, hedges):
+    for module in (market, price, trades, risk, fixings, pnl, hedges, counterparties, calendars):
         app.register_blueprint(module.bp)
 
     @app.get("/", defaults={"path": ""})

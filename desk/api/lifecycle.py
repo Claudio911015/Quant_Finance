@@ -21,6 +21,7 @@ NOTIONAL_FIELD = {
     "fx_option": "notional_usd",
     "bond": "face",
     "equity_option": "quantity",
+    "xccy_swap": "notional_usd",
 }
 
 

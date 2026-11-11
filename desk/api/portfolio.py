@@ -10,7 +10,7 @@ import sqlite3
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from desk.api import db, events, market
+from desk.api import collateral, db, events, market, xccy
 from desk.api import fixings as fixing_store
 from desk.api import valuation as trade_valuation
 from desk.api.errors import ApiError
@@ -33,12 +33,15 @@ def _snapshot_as_of(conn: sqlite3.Connection, snapshot_id: str) -> date:
 # ------------------------------------------------------------------ plazo <-> fechas
 
 _DAYS_PER_YEAR = 365.0
+_XCCY_PERIOD_DAYS = 28  # cupones de ambas patas del cross currency swap (convención de mercado del corte 3)
 
 
 def _tenor_days(product: str, p: Dict[str, Any]) -> int:
     """Días naturales del plazo de los términos (hasta el fin del contrato; swaption: la expiración)."""
     if product in ("irs", "cap_floor"):
         return p["periods"] * CURVES[p["curve"]]["period_days"]
+    if product == "xccy_swap":
+        return p["periods"] * _XCCY_PERIOD_DAYS
     if product in ("fx_forward", "fx_option"):
         return p["days"]
     if product == "bond":
@@ -65,13 +68,15 @@ def fit_to_maturity(
 ) -> Tuple[Dict[str, Any], date]:
     """Con `maturity_date` en la petición manda la fecha: reescribe el plazo de los términos.
 
-    `irs`, `cap_floor` y `bond` redondean a periodos enteros y devuelven el vencimiento ajustado.
+    `irs`, `cap_floor`, `xccy_swap` y `bond` redondean a periodos enteros y devuelven el vencimiento ajustado.
     Lanza 400 `field: "maturity_date"` si los términos reescritos salen de las cotas del producto.
     """
     days = (maturity - start).days
     q = dict(params)
     if product in ("irs", "cap_floor"):
         q["periods"] = max(1, int(round(days / CURVES[q["curve"]]["period_days"])))
+    elif product == "xccy_swap":
+        q["periods"] = max(1, int(round(days / _XCCY_PERIOD_DAYS)))
     elif product in ("fx_forward", "fx_option"):
         q["days"] = days
     elif product == "bond":
@@ -95,7 +100,9 @@ _SELECT_TRADES = (
 )
 
 
-def _decode(row: sqlite3.Row, trade_events: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _decode(
+    row: sqlite3.Row, trade_events: List[Dict[str, Any]], trade_collateral: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     try:
         params = json.loads(row["terms"])
     except ValueError:
@@ -110,6 +117,7 @@ def _decode(row: sqlite3.Row, trade_events: List[Dict[str, Any]]) -> Dict[str, A
         "params": params,
         "created_at": row["created_at"],
         "events": trade_events,
+        "collateral": trade_collateral,
     }
 
 
@@ -142,10 +150,12 @@ def public_trade(trade: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_trades(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     """Operaciones ordenadas por id: fechas como `date`, `params` decodificado (`None` si el
-    JSON está corrupto) y `events` en orden `(event_date, id)`."""
+    JSON está corrupto), `events` en orden `(event_date, id)` y `collateral` (historial de la
+    moneda de colateral de su contraparte, ver `collateral.history`)."""
     all_events = events.load_all_events(conn)
+    hist = collateral.history(conn)
     rows = conn.execute(_SELECT_TRADES + " ORDER BY t.id").fetchall()
-    return [_decode(r, all_events.get(r["id"], [])) for r in rows]
+    return [_decode(r, all_events.get(r["id"], []), hist.get(r["counterparty"], [])) for r in rows]
 
 
 def get_trade(conn: sqlite3.Connection, trade_id: int) -> Dict[str, Any]:
@@ -153,7 +163,8 @@ def get_trade(conn: sqlite3.Connection, trade_id: int) -> Dict[str, Any]:
     row = conn.execute(_SELECT_TRADES + " WHERE t.id = ?", (trade_id,)).fetchone()
     if row is None:
         raise ApiError(404, "Operación inexistente: %s" % trade_id, "id")
-    return _decode(row, events.load_events(conn, trade_id))
+    hist = collateral.history(conn)
+    return _decode(row, events.load_events(conn, trade_id), hist.get(row["counterparty"], []))
 
 
 def trade_pv_mxn(
@@ -253,7 +264,8 @@ def _at_par(
 def create_trade(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
     """Valida el cuerpo del contrato, guarda la operación con su `execution` y la devuelve.
 
-    Un `irs` sin `fixed_rate` nace a la par: se guarda con la tasa par del snapshot de la petición."""
+    Un `irs` sin `fixed_rate` nace a la par: se guarda con la tasa par del snapshot de la petición;
+    un `xccy_swap` sin `fx_rate` o sin `spread` se completa con el spot y el diferencial par."""
     name = choice(body, "product", tuple(PRODUCTS))
     counterparty = text(body, "counterparty")
     raw = body.get("params")
@@ -267,6 +279,8 @@ def create_trade(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
         params, maturity = fit_to_maturity(name, params, start_date, maturity)
     if name == "irs" and params["fixed_rate"] is None:
         params = _at_par(conn, body, params, start_date, maturity)
+    elif name == "xccy_swap" and (params.get("fx_rate") is None or params.get("spread") is None):
+        params = xccy.at_par(conn, body, params, start_date, maturity)
     created_at = db.now_iso()
     trade_id = insert_trade(
         conn, name, counterparty, trade_date, start_date, maturity, params, created_at

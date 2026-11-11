@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS hedge_periods (id INTEGER PRIMARY KEY AUTOINCREMENT,
   result TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (relationship_id, as_of));
 CREATE TRIGGER IF NOT EXISTS hedge_periods_no_update BEFORE UPDATE ON hedge_periods BEGIN SELECT RAISE(ABORT, 'hedge_periods es solo de inserción'); END;
 CREATE TRIGGER IF NOT EXISTS hedge_periods_no_delete BEFORE DELETE ON hedge_periods BEGIN SELECT RAISE(ABORT, 'hedge_periods es solo de inserción'); END;
+-- --- corte 3 ---
+CREATE TABLE IF NOT EXISTS counterparty_events (id INTEGER PRIMARY KEY AUTOINCREMENT,
+  counterparty_id INTEGER NOT NULL REFERENCES counterparties(id), type TEXT NOT NULL, effective_date TEXT NOT NULL,
+  data TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS counterparty_events_no_update BEFORE UPDATE ON counterparty_events BEGIN SELECT RAISE(ABORT, 'counterparty_events es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS counterparty_events_no_delete BEFORE DELETE ON counterparty_events BEGIN SELECT RAISE(ABORT, 'counterparty_events es solo de inserción'); END;
+-- --- fin corte 3 ---
 """
 
 

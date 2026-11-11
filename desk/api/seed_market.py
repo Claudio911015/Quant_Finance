@@ -93,3 +93,11 @@ def seed_market(conn: sqlite3.Connection) -> None:
         "INSERT INTO snapshots (id, label, synthetic, as_of, data) VALUES (?, ?, 1, ?, ?)",
         (SNAPSHOT_ID, LABEL, AS_OF, json.dumps(demo_data())),
     )
+
+
+# --- corte 3 ---
+def ensure_csa_quotes(conn: sqlite3.Connection) -> None:
+    """Añade al snapshot `MX-DEMO` las cotizaciones de colateral USD (puntos forward y base) en bases
+    ya sembradas (sin commit; idempotente). T6 lo implementa; hoy no hace nada."""
+    return None
+# --- fin corte 3 ---

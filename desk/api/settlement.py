@@ -6,7 +6,9 @@ Los flujos ya fijados no se guardan: se derivan de términos + fijaciones + even
   `N·(factor − 1)` con el factor de las fijaciones diarias del periodo (`qfpy.compound_overnight`).
 * `fx_forward`: al vencimiento, `notional_usd × (FIX − strike)` en MXN con el FIX `USDMXN`.
 * `transfer` (terminación o ejercicio): su importe en MXN.
-* `cap_floor`, `swaption`, `bond`: sin flujo derivado al vencer, solo el aviso `no_settlement`.
+* `cap_floor`, `swaption`, `bond`: sin flujo derivado al vencer, solo el aviso `no_settlement`
+  (el bono lo despacha a `aging`; T9 lo hará liquidar).
+* `xccy_swap`: lo despacha a `xccy.settled` (gancho del corte 3).
 
 Un pago con fecha `P` está liquidado si la operación seguía `viva` el día `P − 1`: así el último
 cupón (fecha de vencimiento, en que el estado ya es `vencida`) y el cupón del día de una
@@ -17,9 +19,8 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from desk.api import fixings as fixing_store
-from desk.api import lifecycle, market, portfolio, valuation
+from desk.api import aging, lifecycle, market, portfolio, valuation, xccy
 from desk.api.market import CURVES, MarketContext
-from desk.api.pricing import PRODUCTS
 from desk.api.qf import qfpy
 
 Fixings = Dict[str, Dict[date, float]]
@@ -28,7 +29,7 @@ Warnings = List[Dict[str, Any]]
 
 _DAY = timedelta(days=1)
 _ACT_360 = 360.0  # convención de devengo de `OisSwap` (ACT/360)
-_NO_SETTLEMENT = ("cap_floor", "swaption", "bond")
+_NO_SETTLEMENT = ("cap_floor", "swaption")  # el bono liquida por `aging.bond_settled`
 _MISSING_FIXING = (
     "Faltan fijaciones de %s en %d día(s): se usó la última publicada anterior o, "
     "si no hay, la tasa a un día de la curva"
@@ -174,8 +175,9 @@ def settled_flows(
 ) -> Tuple[Flows, Warnings]:
     """`(flujos, avisos)` liquidados con fecha en `(d0, d1]`, ordenados por fecha.
 
-    Cada flujo es `{"date" (ISO), "kind": "coupon" | "settlement" | "transfer", "amount",
-    "currency", "amount_mxn"}`. Los flujos en USD se convierten con el FIX `USDMXN` de su fecha o,
+    Cada flujo es `{"date" (ISO), "kind": "coupon" | "settlement" | "transfer" | "exchange" |
+    "redemption", "amount", "currency", "amount_mxn"}` (el del `xccy_swap` añade `"leg"`). Los
+    flujos en USD se convierten con el FIX `USDMXN` de su fecha o,
     si falta, con `fallback_spot` (aviso `fx_fallback`). `mkt` (el contexto del snapshot final) es
     necesario para los `irs`: da la tasa a un día de la curva cuando falta toda fijación anterior.
 
@@ -194,6 +196,10 @@ def settled_flows(
         _irs_coupons(trade, fixings, d0, d1, fallback_spot, mkt, flows, warnings)
     elif name == "fx_forward":
         _forward_settlement(trade, fixings, d0, d1, fallback_spot, flows, warnings)
+    elif name == "xccy_swap":
+        xccy.settled(trade, fixings, d0, d1, fallback_spot, mkt, flows, warnings)
+    elif name == "bond":
+        aging.bond_settled(trade, fixings, d0, d1, fallback_spot, flows, warnings)
     elif name in _NO_SETTLEMENT:
         _no_settlement(trade, d0, d1, warnings)
     for e in trade["events"]:
@@ -227,24 +233,6 @@ def _projected_irs(
     ]
 
 
-def _projected_bond(trade: Dict[str, Any], terms: Dict[str, Any], mkt: MarketContext) -> Flows:
-    """Flujos del bono acortado a lo que falta (el mismo que `value_trade`), según su pricer."""
-    shortened = valuation.shortened("bond", terms, (trade["maturity_date"] - mkt.as_of).days)
-    priced = PRODUCTS["bond"].price(shortened, mkt)
-    return [
-        {
-            "date": cf["date"],
-            "kind": "coupon",
-            "status": "projected",
-            "amount": cf["amount"],
-            "currency": priced["currency"],
-            "df": cf["df"],
-            "pv": cf["pv"],
-        }
-        for cf in priced["cashflows"]
-    ]
-
-
 def trade_flows(conn: sqlite3.Connection, trade_id: int, snapshot_id: str) -> Dict[str, Any]:
     """Cuerpo de `GET /api/trades/<id>/flows`: liquidados y proyectados, con avisos.
 
@@ -267,21 +255,29 @@ def trade_flows(conn: sqlite3.Connection, trade_id: int, snapshot_id: str) -> Di
             "currency": f["currency"],
             "df": None,
             "pv": None,
+            "leg": f.get("leg"),
         }
         for f in settled
     ]
     st = lifecycle.state(trade, trade["events"], mkt.as_of)
     projection_warnings = []  # type: Warnings
+    bond = None
     if st["status"] == "viva":
         if trade["product"] == "irs":
             flows += _projected_irs(trade, st["terms"], mkt, fixings, projection_warnings)
+        elif trade["product"] == "xccy_swap":
+            flows += xccy.projected(trade, st["terms"], mkt, fixings, projection_warnings)
         elif trade["product"] == "bond":
-            flows += _projected_bond(trade, st["terms"], mkt)
+            flows += aging.projected_bond(trade, st["terms"], mkt)
+            bond = aging.bond_quote(trade, st["terms"], mkt)
+    for f in flows:
+        f.setdefault("leg", None)  # solo el cross currency swap distingue la pata
     flows.sort(key=lambda f: f["date"])
     return {
         "id": trade["id"],
         "snapshot": snapshot_id,
         "as_of": mkt.as_of.isoformat(),
         "flows": flows,
+        "bond": bond,
         "warnings": merge_warnings(warnings, projection_warnings),
     }

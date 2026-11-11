@@ -151,7 +151,7 @@ def test_forward_settles_at_maturity_with_the_fix_and_has_no_projection(client):
     assert projected == [] and body["warnings"] == []
     assert settled == [
         {"date": _iso(20), "kind": "settlement", "status": "settled", "amount": pytest.approx(1e6 * (19.5 - 19.0)),
-         "currency": "MXN", "df": None, "pv": None}
+         "currency": "MXN", "df": None, "pv": None, "leg": None}
     ]
 
 
