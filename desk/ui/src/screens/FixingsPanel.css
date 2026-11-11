@@ -1,0 +1,143 @@
+.fixings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fixings__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.fixings__field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.fixings__field--col {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.fixings__input {
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.fixings__input:hover:not(:disabled) {
+  border-color: var(--text-dim);
+}
+
+.fixings__csv {
+  height: auto;
+  padding: var(--space-2);
+  resize: vertical;
+}
+
+.fixings__scroll {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.fixings__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.fixings__table th,
+.fixings__table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.fixings__table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.fixings__table th.num,
+.fixings__table td.num {
+  text-align: right;
+}
+
+.fixings__forms {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.fixings__form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fixings__form h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+}
+
+.fixings__form .fixings__field--col {
+  align-self: stretch;
+}
+
+.fixings__btn {
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.fixings__btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.fixings__btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.fixings__meta {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.fixings__ok {
+  margin: 0;
+  color: var(--pos);
+  font-size: var(--fs-sm);
+}
+
+.fixings__error {
+  margin: 0;
+  color: var(--neg);
+  font-size: var(--fs-sm);
+}

@@ -14,6 +14,9 @@ vi.mock('../components/EChart', () => ({
   },
 }));
 
+// Las fijaciones tienen su propia prueba (FixingsPanel.test.tsx) y piden /api/fixings, que los mocks de aquí no atienden.
+vi.mock('./FixingsPanel', () => ({ default: () => null }));
+
 function point(label: string, days: number, zero: number, forward: number) {
   return { label, days, t: days / 365, zero, df: 1 - zero * (days / 365), forward };
 }
