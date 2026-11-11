@@ -9,6 +9,7 @@ add_library(qf
     termstructure/yieldcurve.cpp
     termstructure/volsurface.cpp
     termstructure/bootstrap.cpp
+    termstructure/ois_bootstrap.cpp
     instruments/instrument.cpp
     instruments/iunderlying.cpp
     instruments/bond.cpp
