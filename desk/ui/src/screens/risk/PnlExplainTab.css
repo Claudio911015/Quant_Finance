@@ -1,0 +1,96 @@
+/* Corte 6: pestaña "P&L explicado". Las clases comunes (.radv-*) vienen de risk-adv.css. */
+
+.pnlx {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.pnlx-controls {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.pnlx-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pnlx-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.pnlx-select {
+  height: 28px;
+  max-width: 100%;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.pnlx-select:hover {
+  border-color: var(--text-dim);
+}
+
+.pnlx-select[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.pnlx-field-error {
+  margin: 0;
+  color: var(--neg);
+  font-size: var(--fs-xs);
+}
+
+.pnlx-meta {
+  align-self: center;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.radv-card.is-loading {
+  opacity: 0.6;
+  transition: opacity 120ms;
+}
+
+/* Tabla por operación */
+.pnlx-table th.num,
+.pnlx-table td.num {
+  text-align: right;
+}
+
+.pnlx-table .pnlx-neg {
+  color: var(--neg);
+}
+
+.pnlx-table .pnlx-error {
+  color: var(--neg);
+}
+
+.pnlx-table .pnlx-note-row td {
+  padding-top: 0;
+}
+
+.pnlx-table .pnlx-total th,
+.pnlx-table .pnlx-total td {
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 0;
+  font-weight: 600;
+}
+
+.pnlx-foot {
+  margin: var(--space-2) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
