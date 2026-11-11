@@ -1,0 +1,257 @@
+.ops-cash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.ops-cash__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.ops-cash__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ops-cash__field label {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.ops-cash__input {
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+
+.ops-cash__input:hover {
+  border-color: var(--text-dim);
+}
+
+.ops-cash__input[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.ops-cash__btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ops-cash__btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.ops-cash__btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ops-cash__export {
+  margin-left: auto;
+  text-decoration: none;
+}
+
+.ops-cash__meta,
+.ops-cash__dim {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.ops-cash__meta {
+  margin: 0;
+}
+
+.ops-cash__banner {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.ops-cash__notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-cash__note {
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border-left: 3px solid var(--warn);
+  font-size: var(--fs-sm);
+}
+
+/* El desborde horizontal queda dentro de la tabla, nunca en la página. */
+.ops-cash__scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ops-cash__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.ops-cash__table th,
+.ops-cash__table td {
+  padding: var(--space-1) 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Botón compacto dentro de la tabla: a 1280 px las doce columnas caben sin desplazar. */
+.ops-cash__table .ops-cash__btn {
+  height: 24px;
+  padding: 0 var(--space-2);
+  font-size: var(--fs-xs);
+}
+
+/* La acción de la fila queda pegada al borde derecho visible: con la tabla desplazada no se pierde de vista. */
+.ops-cash__scroll .ops-cash__table th:last-child,
+.ops-cash__scroll .ops-cash__table td:last-child {
+  position: sticky;
+  right: 0;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+}
+
+.ops-cash__table th {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.ops-cash__table th.num,
+.ops-cash__table td.num {
+  text-align: right;
+}
+
+.ops-cash__table--small {
+  width: auto;
+  min-width: 320px;
+}
+
+/* Liquidado/confirmado = ya ocurrió (atenuado); proyectado = por venir. */
+.ops-cash__row--settled,
+.ops-cash__row--confirmed {
+  color: var(--text-dim);
+}
+
+.ops-cash__row--projected td:nth-child(6) {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ops-cash__row--confirmed td:nth-child(6) {
+  color: var(--pos);
+}
+
+.ops-cash__neg {
+  color: var(--neg);
+}
+
+.ops-cash__empty {
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.ops-cash__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.ops-cash__form-row td,
+.ops-cash__scroll .ops-cash__form-row td:last-child {
+  background: var(--bg-elev);
+}
+
+.ops-cash__scroll .ops-cash__form-row td:last-child {
+  border-left: 0;
+}
+
+/* Pegado al borde visible: con la tabla desplazada, el formulario no se va fuera de la vista. */
+.ops-cash__form-wrap {
+  position: sticky;
+  left: 0;
+  width: max-content;
+  max-width: 100%;
+}
+
+.ops-cash__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  white-space: normal;
+}
+
+.ops-cash__form label {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.ops-cash__form .ops-cash__input {
+  width: 140px;
+}
+
+.ops-cash__ccy {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.ops-cash__form-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--neg);
+  font-size: var(--fs-sm);
+}
+
+.ops-cash__totals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-5);
+}
+
+.ops-cash__total-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 160px;
+}
+
+.ops-cash__total-main strong {
+  font-size: var(--fs-lg);
+}

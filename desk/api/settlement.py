@@ -218,6 +218,10 @@ def settled_flows(
     elif name in _NO_SETTLEMENT:
         _no_settlement(trade, d0, d1, warnings)
     for e in trade["events"]:
+        # --- corte 5 --- una confirmación de liquidación es registro, no un flujo nuevo
+        if e["type"] == "transfer" and e["data"].get("kind") == "settlement_confirmed":
+            continue
+        # --- fin corte 5 ---
         if e["type"] == "transfer" and d0 < e["event_date"] <= d1:
             amount = float(e["data"]["amount"])
             flows.append(_flow(e["event_date"], "transfer", amount, "MXN", amount))

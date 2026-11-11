@@ -1,0 +1,231 @@
+.ops-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 880px;
+  min-width: 0;
+}
+
+/* Barra de acciones: solo en pantalla (lleva también la clase `ops-no-print`). */
+.ops-confirm__bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.ops-confirm__actions {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.ops-confirm__company {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ops-confirm__company label {
+  color: var(--text-dim);
+}
+
+.ops-confirm__company input {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+}
+
+.ops-confirm__btn {
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ops-confirm__btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.ops-confirm__btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.ops-confirm__banner {
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.ops-confirm__head h1 {
+  margin: 0;
+}
+
+.ops-confirm__meta {
+  margin: var(--space-1) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.ops-confirm__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.ops-confirm__section h2 {
+  margin: 0;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.ops-confirm__facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.ops-confirm__fact {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--space-3);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.ops-confirm__fact dt {
+  color: var(--text-dim);
+}
+
+.ops-confirm__fact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ops-confirm__dim {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.ops-confirm__note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+
+/* El desborde horizontal queda dentro de la tabla, nunca en la página. */
+.ops-confirm__scroll {
+  overflow-x: auto;
+}
+
+.ops-confirm__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.ops-confirm__table th,
+.ops-confirm__table td {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.ops-confirm__table th {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.ops-confirm__table th.num,
+.ops-confirm__table td.num {
+  text-align: right;
+}
+
+.ops-confirm__notices {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+/* Impresión: documento claro en una columna, sin la navegación de la aplicación ni la barra de acciones. */
+@media print {
+  :root {
+    --bg: #fff;
+    --bg-elev: #fff;
+    --bg-hover: #fff;
+    --border: #c8c8c8;
+    --border-strong: #8a8a8a;
+    --text: #000;
+    --text-dim: #444;
+    --accent: #0b4ea2;
+    --warn: #5c4210;
+    --warn-soft: #fff4d6;
+  }
+
+  html,
+  body,
+  #root {
+    height: auto;
+    min-width: 0;
+    overflow: visible;
+    background: #fff;
+  }
+
+  .shell__sidebar,
+  .shell__topbar,
+  .ops-no-print {
+    display: none;
+  }
+
+  .shell,
+  .shell__body {
+    display: block;
+    height: auto;
+  }
+
+  .shell__main {
+    padding: 0;
+    overflow: visible;
+  }
+
+  .ops-confirm {
+    max-width: none;
+  }
+
+  .ops-confirm__scroll {
+    overflow: visible;
+  }
+
+  .ops-confirm__table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .ops-confirm__table thead {
+    display: table-header-group;
+  }
+}

@@ -9,6 +9,7 @@ import {
   DECL_RECYCLING,
 } from '../lib/hedgeDeclarations';
 import './MethodologyScreen.css';
+import { OPS_SECTIONS } from './ops/opsMethodology'; // corte 5
 
 interface Section {
   id: string;
@@ -399,6 +400,11 @@ export function MethodologyScreen() {
 
       <h2 className="meth-group">Contabilidad de coberturas (IFRS 9)</h2>
       {HEDGE_SECTIONS.map((s) => (
+        <SectionBlock key={s.id} section={s} />
+      ))}
+
+      {/* corte 5 */}
+      {OPS_SECTIONS.map((s) => (
         <SectionBlock key={s.id} section={s} />
       ))}
 

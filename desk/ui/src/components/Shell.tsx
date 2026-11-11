@@ -76,6 +76,18 @@ const NAV_ITEMS = [
       </Icon>
     ),
   },
+  // --- corte 5 ---
+  {
+    to: '/operaciones',
+    label: 'Operaciones',
+    icon: (
+      <Icon>
+        <path d="M2.5 5.5h10M10 3l2.5 2.5L10 8" />
+        <path d="M13.5 10.5h-10M6 8l-2.5 2.5L6 13" />
+      </Icon>
+    ),
+  },
+  // --- fin corte 5 ---
   {
     to: '/metodologia',
     label: 'Metodología',

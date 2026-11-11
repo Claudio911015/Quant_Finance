@@ -9,6 +9,10 @@ import { PortfolioScreen } from './screens/PortfolioScreen';
 import { RiskScreen } from './screens/RiskScreen';
 import TradeScreen from './screens/TradeScreen';
 import { PricersScreen } from './screens/pricers/PricersScreen';
+// --- corte 5 ---
+import ConfirmationScreen from './screens/ops/ConfirmationScreen';
+import OpsScreen from './screens/ops/OpsScreen';
+// --- fin corte 5 ---
 
 export default function App() {
   return (
@@ -25,6 +29,9 @@ export default function App() {
         <Route path="/coberturas/:id" element={<HedgeScreen />} />
         <Route path="/coberturas/:id/reporte" element={<HedgeReportScreen />} />
         <Route path="/metodologia" element={<MethodologyScreen />} />
+        {/* corte 5 */}
+        <Route path="/operaciones" element={<OpsScreen />} />
+        <Route path="/portafolio/:id/confirmacion" element={<ConfirmationScreen />} />
       </Routes>
     </Shell>
   );

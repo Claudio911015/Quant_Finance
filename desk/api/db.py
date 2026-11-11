@@ -42,6 +42,20 @@ CREATE TABLE IF NOT EXISTS counterparty_events (id INTEGER PRIMARY KEY AUTOINCRE
 CREATE TRIGGER IF NOT EXISTS counterparty_events_no_update BEFORE UPDATE ON counterparty_events BEGIN SELECT RAISE(ABORT, 'counterparty_events es solo de inserción'); END;
 CREATE TRIGGER IF NOT EXISTS counterparty_events_no_delete BEFORE DELETE ON counterparty_events BEGIN SELECT RAISE(ABORT, 'counterparty_events es solo de inserción'); END;
 -- --- fin corte 3 ---
+-- --- corte 5 ---
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS trade_refs (trade_id INTEGER PRIMARY KEY REFERENCES trades(id), ref TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS reconciliations (id INTEGER PRIMARY KEY AUTOINCREMENT,
+  snapshot_id TEXT NOT NULL, as_of TEXT NOT NULL, counterparty TEXT NOT NULL, tolerance REAL NOT NULL,
+  csv TEXT NOT NULL, summary TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS reconciliations_no_update BEFORE UPDATE ON reconciliations BEGIN SELECT RAISE(ABORT, 'reconciliations es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS reconciliations_no_delete BEFORE DELETE ON reconciliations BEGIN SELECT RAISE(ABORT, 'reconciliations es solo de inserción'); END;
+CREATE TABLE IF NOT EXISTS reconciliation_rows (id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reconciliation_id INTEGER NOT NULL REFERENCES reconciliations(id), kind TEXT NOT NULL,
+  trade_id INTEGER, result TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS reconciliation_rows_no_update BEFORE UPDATE ON reconciliation_rows BEGIN SELECT RAISE(ABORT, 'reconciliation_rows es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS reconciliation_rows_no_delete BEFORE DELETE ON reconciliation_rows BEGIN SELECT RAISE(ABORT, 'reconciliation_rows es solo de inserción'); END;
+-- --- fin corte 5 ---
 """
 
 
