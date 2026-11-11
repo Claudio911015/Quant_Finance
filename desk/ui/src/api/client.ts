@@ -245,3 +245,7 @@ export function hedgeReport(id: number, snapshot?: string): Promise<HedgeReport>
 export function hedgeReportCsvUrl(id: number): string {
   return `${BASE}/hedges/${id}/report?format=csv`;
 }
+
+// --- corte 6: acceso de las pestañas de riesgo a la capa HTTP común ---
+export { request as apiRequest };
+// --- fin corte 6 ---

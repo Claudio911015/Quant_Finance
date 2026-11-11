@@ -1,0 +1,171 @@
+/* Corte 6 (riesgo avanzado): estilos comunes de las pestañas de Riesgo. Los demás archivos solo lo leen. */
+
+/* Pestañas */
+.radv-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.radv-tab {
+  padding: var(--space-1) var(--space-3);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.radv-tab:hover {
+  color: var(--text);
+}
+
+.radv-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.radv-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* Tarjeta */
+.radv-card {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.radv-card > h2 {
+  margin-bottom: var(--space-3);
+}
+
+/* Dos columnas desde 900 px; una debajo de la otra en menos. */
+.radv-grid2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .radv-grid2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Avisos */
+.radv-note {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+
+.radv-note--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.radv-note--error {
+  color: var(--neg);
+}
+
+/* Cifras destacadas */
+.radv-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.radv-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 150px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* Tablas: el contenedor `.radv-scroll` desplaza en horizontal si no caben. */
+.radv-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.radv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.radv-table th {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  font-weight: 500;
+  text-align: left;
+}
+
+.radv-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.radv-table td.num,
+.radv-table th.num {
+  white-space: nowrap;
+}
+
+.radv-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+/* Estado de un límite: `data-status` = ok | alerta | exceso. */
+.radv-status[data-status='ok'] {
+  color: var(--pos);
+}
+
+.radv-status[data-status='alerta'] {
+  color: var(--warn);
+}
+
+.radv-status[data-status='exceso'] {
+  color: var(--neg);
+}
+
+/* Barra de uso: `--pct` es un número sin unidad (82 = 82 %); el relleno se corta en 100 %. */
+.radv-bar {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.radv-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: min(calc(var(--pct, 0) * 1%), 100%);
+  background: var(--pos);
+}
+
+.radv-bar[data-status='alerta']::after {
+  background: var(--warn);
+}
+
+.radv-bar[data-status='exceso']::after {
+  background: var(--neg);
+}

@@ -13,6 +13,9 @@ import type { Dv01Response, ScenarioSpec, ScenariosResponse, Trade, TradeError, 
 import { fmtMoney, fmtNumber, fmtRate } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import './RiskScreen.css';
+// --- corte 6: pestañas de riesgo avanzado ---
+import { RiskTabs } from './risk/RiskTabs';
+// --- fin corte 6 ---
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -421,11 +424,18 @@ export function RiskScreen() {
   return (
     <div className="risk">
       <h1>Riesgo</h1>
-      <div className="risk__top">
-        <Dv01Section />
-        <VarSection />
-      </div>
-      <ScenariosSection />
+      {/* corte 6: lo de siempre pasa a la pestaña Sensibilidades */}
+      <RiskTabs
+        sensitivities={
+          <>
+            <div className="risk__top">
+              <Dv01Section />
+              <VarSection />
+            </div>
+            <ScenariosSection />
+          </>
+        }
+      />
     </div>
   );
 }
