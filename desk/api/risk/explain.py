@@ -4,6 +4,8 @@ El P&L oficial por operación es el de `pnl.compute_pnl`. Se reparte rodando el 
 la fecha de `to` (`H0`) y sustituyendo, en orden y acumulando, las cotizaciones de cada curva, el
 tipo de cambio y la volatilidad por los de `to`. Cada paso es la diferencia entre dos
 valuaciones consecutivas, así que la suma telescopa al P&L oficial: el residuo es ruido numérico.
+Los flujos en USD liquidados en la ventana se convierten en `carry` al spot de `from`; lo que la conversión
+real (FIX de su fecha o spot de `to`) añade sobre eso va a `fx`.
 Aquí solo se suma y resta; toda valuación sale de `valuation.value_trade` y `settlement`.
 """
 import copy
@@ -114,9 +116,17 @@ def _components(
             values.append(valuation.value_trade(t0, ctx, fixings)["pv_mxn"])
     flows, _ = settlement.settled_flows(t0, fixings, from_as_of, mkt_to.as_of, mkt_to.spot, mkt_to)
     s0 = sum((f["amount_mxn"] for f in flows), 0.0)
-    comps["carry"] = values[0] - row["pv_from"] + s0
+    # Los flujos en dólares liquidados en la ventana se convierten en «Paso del tiempo» al spot de origen (el del
+    # snapshot `from`, el mismo que usa `values[0]`); lo que la conversión real de `/api/pnl` (FIX de la fecha del
+    # flujo o, a falta de él, el spot final) añade sobre eso es efecto del tipo de cambio y va a su rubro.
+    origin, _ = settlement.settled_flows(
+        t0, dict(fixings, USDMXN={}), from_as_of, mkt_to.as_of, contexts[0].spot, mkt_to
+    )
+    s0_origin = sum((f["amount_mxn"] for f in origin), 0.0)
+    comps["carry"] = values[0] - row["pv_from"] + s0_origin
     for key, before, after in zip(_CURVE_KEYS + [CSA_KEY, "fx", "vol"], values, values[1:]):
         comps[key] = after - before
+    comps["fx"] += s0 - s0_origin
     comps["events"] = (row["pv_to"] + row["settled"]) - (values[-1] + s0)
     if has_non_finite(list(comps.values())):
         raise ValueError(NON_FINITE_MESSAGE)

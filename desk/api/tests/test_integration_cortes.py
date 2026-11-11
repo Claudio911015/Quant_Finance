@@ -10,7 +10,7 @@ from desk.api import market
 from desk.api.db import connect
 from desk.api.ops_recon import context_at
 from desk.api.tests.csa_fixture import set_collateral, trade_with
-from desk.api.tests.hedge_fixture import load_fixings, roll
+from desk.api.tests.hedge_fixture import load_fixings, market_forward, par_irs, roll
 from desk.api.tests.ops_fixture import ALFA
 
 AS_OF = date(2026, 11, 10)
@@ -235,6 +235,62 @@ def test_pnl_explain_closes_with_a_xccy_and_usd_collateral_when_the_forward_poin
     assert rows[desk["bond"]]["components"]["curve:MXN-USD"] != 0.0  # el bono TIIE-F de Alfa descuenta con MXN-USD
     # una contraparte sin colateral USD no siente esos puntos
     assert rows[5]["counterparty"] != ALFA and rows[5]["components"]["curve:MXN-USD"] == 0.0
+
+
+def _explain_with_spot(client, spot):
+    """`/api/pnl/explain` de MX-DEMO a D1 con el spot de D1 puesto en `spot` (las cotizaciones no se tocan)."""
+    snap = _get(client, "/api/market/snapshots/D1")
+    quotes = [{"id": q["id"], "rate": q["rate"]} for q in snap["quotes"]]
+    r = client.put("/api/market/snapshots/D1", json={"quotes": quotes, "spot": spot})
+    assert r.status_code == 200, r.get_json()
+    return _get(client, "/api/pnl/explain?from=MX-DEMO&to=D1")
+
+
+def test_pnl_explain_sends_the_fx_on_settled_usd_flows_to_the_fx_rubric_not_to_carry(client, desk):
+    # D1 de la auditoría del corte 8: el flujo USD ya liquidado se convertía al spot final (o al FIX de su fecha)
+    # dentro de «Paso del tiempo y liquidaciones». xccy (intercambio inicial y cupones en USD), irs SOFR (cupón en
+    # USD) y fx_forward (liquidación en MXN con el FIX o, a falta de él, el spot final) liquidan en la ventana.
+    sofr = trade_with(client, "irs", ALFA, {"curve": "SOFR", "side": "payer", "notional": 20e6, "periods": 1,
+                                            "fixed_rate": 0.0250}, start=AS_OF, maturity=date(2026, 11, 30))["id"]
+    fwd = market_forward(client, "buy", 3e6, date(2026, 11, 25))["id"]
+    end = _roll_with_fixings(client)
+    spot = _spot(client, "D1")
+    watched = ((desk["xccy"], 10e6), (sofr, 20e6), (fwd, 3e6))
+
+    def rows(body):
+        return {r["id"]: r for r in body["rows"]}
+
+    def run(new_spot):
+        """Explica con el spot de D1 en `new_spot` y comprueba que cierra con /api/pnl, por fila y en total."""
+        body = _explain_with_spot(client, new_spot)
+        official = _get(client, "/api/pnl?from=MX-DEMO&to=D1")
+        assert body["totals"]["pnl"] == official["total_mxn"]
+        assert sum(body["totals"]["components"].values()) == pytest.approx(official["total_mxn"], abs=1e-6)
+        for r in body["rows"]:
+            assert r["explain_error"] is None and abs(r["components"]["residual"]) < 1e-6
+            assert sum(r["components"].values()) == pytest.approx(r["pnl"], abs=1e-6)
+        return body
+
+    def assert_only_fx_differs(base, other):
+        """Entre dos corridas solo cambia «Tipo de cambio», y por exactamente lo que cambia el P&L."""
+        for tid, notional_usd in watched:
+            a, b = rows(base)[tid], rows(other)[tid]
+            tol = 1e-6 * notional_usd * spot
+            for key in b["components"]:
+                if key not in ("fx", "residual"):
+                    assert b["components"][key] == pytest.approx(a["components"][key], abs=tol), (tid, key)
+            assert b["components"]["fx"] - a["components"]["fx"] == pytest.approx(b["pnl"] - a["pnl"], abs=tol), tid
+        return {tid: rows(other)[tid]["components"]["fx"] - rows(base)[tid]["components"]["fx"] for tid, _ in watched}
+
+    still = run(spot)
+    moved = run(spot + 0.30)
+    # sin FIX, los flujos USD se convierten al spot final: mover solo el spot no toca el paso del tiempo y todo
+    # el efecto (~0.30 por dólar liquidado) va a «Tipo de cambio»
+    shift = assert_only_fx_differs(still, moved)
+    assert all(abs(delta) > 1.0 for delta in shift.values()), shift
+    # con un FIX distinto del spot de origen el paso del tiempo tampoco cambia: la diferencia va a «Tipo de cambio»
+    load_fixings(client, "USDMXN", AS_OF, date.fromisoformat(end), spot + 1.50)
+    assert_only_fx_differs(moved, run(spot + 0.30))
 
 
 def test_pnl_explain_moves_nothing_to_the_new_rubric_when_the_points_do_not_move(client, desk):

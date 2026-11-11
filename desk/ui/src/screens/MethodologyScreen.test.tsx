@@ -48,6 +48,14 @@ describe('MethodologyScreen', () => {
     expect(row('Orden de la cascada')).toContain('puntos forward y la base que calibran la curva MXN-USD');
   });
 
+  it('la cascada convierte los flujos en dólares liquidados al spot de origen y manda la diferencia a Tipo de cambio', () => {
+    renderScreen();
+    const text = row('Orden de la cascada');
+    expect(text).toContain('Los flujos en dólares liquidados en la ventana se convierten, en el primer paso, al tipo de cambio del snapshot de origen');
+    expect(text).toContain('FIX de la fecha del flujo o, a falta de él, el spot final');
+    expect(text).toContain('va al paso de tipo de cambio');
+  });
+
   it('usa los mismos rótulos de producto que Pricers', () => {
     const { container } = renderScreen();
     const titles = [...container.querySelectorAll('h3, h2')].map((h) => h.textContent);

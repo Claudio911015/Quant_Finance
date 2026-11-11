@@ -349,7 +349,7 @@ const RISK_ADV_SECTIONS: Section[] = [
     items: [
       {
         label: 'Orden de la cascada',
-        text: 'El paso del tiempo y las liquidaciones con el mercado de origen rodado a la fecha final; luego TIIE-F, SOFR y las demás curvas en orden alfabético, los puntos forward y la base que calibran la curva MXN-USD, tipo de cambio, volatilidad (superficie y parámetros Hull-White), operaciones nuevas y eventos. Cada paso cambia un bloque del mercado de origen por el de destino.',
+        text: 'El paso del tiempo y las liquidaciones con el mercado de origen rodado a la fecha final; luego TIIE-F, SOFR y las demás curvas en orden alfabético, los puntos forward y la base que calibran la curva MXN-USD, tipo de cambio, volatilidad (superficie y parámetros Hull-White), operaciones nuevas y eventos. Cada paso cambia un bloque del mercado de origen por el de destino. Los flujos en dólares liquidados en la ventana se convierten, en el primer paso, al tipo de cambio del snapshot de origen; la diferencia con la conversión que usa la pestaña P&L (el FIX de la fecha del flujo o, a falta de él, el spot final) va al paso de tipo de cambio.',
       },
       {
         label: 'Residuo',
