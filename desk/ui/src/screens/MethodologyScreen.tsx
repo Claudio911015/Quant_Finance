@@ -103,6 +103,56 @@ const GENERAL_SECTIONS: Section[] = [
     ],
   },
   {
+    id: 'ciclo-de-vida',
+    title: 'Ciclo de vida y valuación a fecha',
+    items: [
+      {
+        label: 'Eventos',
+        text: 'Se guardan: execution, quantity_change, terms_change, exercise, termination y transfer de la liquidación. Se derivan: cupones pagados de swaps y liquidación al vencimiento de forwards FX, de términos más fijaciones. El reset no se usa; las fijaciones viven en su tabla.',
+      },
+      {
+        label: 'Fecha de valuación',
+        text: 'Es el as_of del snapshot.',
+      },
+      {
+        label: 'Convención de días',
+        text: 'Días naturales, t = días/365, devengo ACT/360, fijaciones diarias capitalizadas, sin inhábiles.',
+      },
+      {
+        label: 'Fijación faltante',
+        text: 'Se usa la última publicada anterior o la tasa a un día de la curva, con aviso.',
+      },
+      {
+        label: 'P&L',
+        text: 'PV(to) − PV(from) más lo liquidado en (from, to]. En MXN al FIX o al spot de to, con aviso.',
+      },
+      {
+        label: 'Estados',
+        text: 'no_pactada, viva, vencida, terminada y ejercida. Solo las vivas entran a riesgo. Una operación pactada dentro de la ventana del P&L entra con pv_from = 0, sin prima ni pago inicial.',
+      },
+      {
+        label: 'Vencimientos',
+        text: 'La swaption vence en su expiración. Las opciones vencidas sin ejercicio registrado valen 0, con aviso.',
+      },
+      {
+        label: 'Aproximaciones',
+        text: 'Bono y cap/floor envejecidos: periodos enteros restantes por ceil; se omite el cupón o caplet en curso ya fijado. Lo exacto llega en el corte 3.',
+      },
+      {
+        label: 'Cambios de nocional',
+        text: 'Tras un cambio a mitad de periodo, el cupón usa el nocional vigente al pago.',
+      },
+      {
+        label: 'Terminación y ejercicio',
+        text: 'Importes en MXN, positivos si cobra el tenedor. Las operaciones no se borran: se terminan.',
+      },
+      {
+        label: 'Fuera de alcance',
+        text: 'Novaciones, asignaciones, compensación, calendarios y ajuste de fechas, ejercicio automático, liquidación de caps/floors, swaptions y bonos vencidos (salen con PV 0 y aviso), historia automática de snapshots, división del paquete y textos compartidos de tablas, usuarios y aprobación.',
+      },
+    ],
+  },
+  {
     id: 'fuentes',
     title: 'Fuentes de datos',
     items: [
@@ -177,7 +227,7 @@ const LIMITS: { label: string; text: string }[] = [
   },
   {
     label: 'Operaciones',
-    text: 'No envejecen entre snapshots; los vencimientos se derivan del as_of.',
+    text: 'Envejecen a la fecha de valuación (as_of del snapshot); las terminadas se conservan.',
   },
   {
     label: 'Payoff',
