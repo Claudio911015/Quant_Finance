@@ -10,7 +10,7 @@ from typing import Any, Dict
 
 from desk.api.pricing.base import MAX_DAYS, MAX_YEARS, Product
 from desk.api.qf import qfpy
-from desk.api.validation import MAX_AMOUNT, MAX_PRICE, MAX_RATE, choice, integer, number
+from desk.api.validation import MAX_AMOUNT, MAX_PRICE, MAX_RATE, MIN_RATE, choice, integer, number
 
 _SIDE = {"buy": qfpy.FxSide.Buy, "sell": qfpy.FxSide.Sell}
 _OPTION_TYPE = {"call": qfpy.OptionType.Call, "put": qfpy.OptionType.Put}
@@ -121,7 +121,7 @@ def _equity_validate(params: Dict[str, Any]) -> Dict[str, Any]:
         "spot": number(params, "spot", gt=0, le=MAX_PRICE),
         "strike": number(params, "strike", gt=0, le=MAX_PRICE),
         "volatility": number(params, "volatility", gt=0, le=MAX_RATE),
-        "rate": number(params, "rate", le=MAX_RATE),
+        "rate": number(params, "rate", ge=MIN_RATE, le=MAX_RATE),
         "dividend_yield": number(params, "dividend_yield", ge=0, le=MAX_RATE),
         "maturity_years": number(params, "maturity_years", gt=0, le=MAX_YEARS),
         "quantity": number(params, "quantity", gt=0, le=MAX_AMOUNT, required=False, default=1.0),

@@ -12,6 +12,7 @@ from desk.api.errors import ApiError
 MAX_AMOUNT = 1e13  # montos: notional, notional_usd, face, quantity
 MAX_PRICE = 1e6  # precios y strikes de precio: spot, strike de FX y de acción
 MAX_RATE = 10.0  # tasas y volatilidades en decimal (10 = 1000 %)
+MIN_RATE = -1.0  # cota inferior de las tasas con signo (fixed_rate, rate): por debajo, exp/descuento desbordan a NaN
 
 
 def body_object() -> Dict[str, Any]:

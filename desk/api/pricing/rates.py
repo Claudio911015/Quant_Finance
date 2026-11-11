@@ -10,7 +10,7 @@ from desk.api.errors import ApiError
 from desk.api.market import CURVES, MarketContext
 from desk.api.pricing.base import MAX_BOND_YEARS, MAX_PERIODS, MAX_YEARS, Product
 from desk.api.qf import qfpy
-from desk.api.validation import MAX_AMOUNT, MAX_RATE, choice, integer, number
+from desk.api.validation import MAX_AMOUNT, MAX_RATE, MIN_RATE, choice, integer, number
 
 _CURVE_NAMES = tuple(CURVES)
 _DAYS_PER_YEAR = 365.0
@@ -65,7 +65,7 @@ def _irs_validate(d: Dict[str, Any]) -> Dict[str, Any]:
         "side": choice(d, "side", ("payer", "receiver")),
         "notional": number(d, "notional", gt=0, le=MAX_AMOUNT),
         "periods": integer(d, "periods", ge=1, le=MAX_PERIODS),
-        "fixed_rate": number(d, "fixed_rate", le=MAX_RATE, required=False),
+        "fixed_rate": number(d, "fixed_rate", ge=MIN_RATE, le=MAX_RATE, required=False),
     }
 
 

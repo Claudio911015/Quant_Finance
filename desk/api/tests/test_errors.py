@@ -539,3 +539,35 @@ def test_caso_por_defecto_de_cada_pricer_no_devuelve_nan_ni_infinito(client, pro
     r = client.post("/api/price/%s" % product, json={"snapshot": SNAP, **SPECS[product]["base"]})
     assert r.status_code == 200, r.get_json()
     assert _non_finite(r.get_json()) == []
+
+
+# --------------------------------------------------------------------------- cota inferior de tasas
+
+# Tasas con signo: por debajo de -1 (-100 %) el descuento y exp() desbordan; `equity_option` con
+# rate=-1e300 respondía 200 con NaN. -1 es la cota inclusiva. coupon_rate y dividend_yield ya
+# exigen >= 0 y quedan cubiertas por el mismo barrido.
+RATE_FLOOR = -1.0
+RATE_FIELDS = [("irs", "fixed_rate"), ("bond", "coupon_rate"),
+               ("equity_option", "rate"), ("equity_option", "dividend_yield")]
+BELOW_FLOOR = [-1.0000001, -1.5, -1e6, -1e300]
+
+
+@pytest.mark.parametrize("v", BELOW_FLOOR)
+@pytest.mark.parametrize("product,name", RATE_FIELDS)
+def test_tasa_por_debajo_de_menos_uno_da_400_con_el_campo(client, product, name, v):
+    params = {**SPECS[product]["base"], name: v}
+    for url, body in (
+        ("/api/price/%s" % product, {"snapshot": SNAP, **params}),
+        ("/api/trades", _trade_body(product)(params)),
+    ):
+        r = client.post(url, json=body)
+        assert r.status_code == 400, "%s -> %d %s" % (url, r.status_code, r.get_data(as_text=True)[:200])
+        assert r.get_json()["field"] == name
+
+
+@pytest.mark.parametrize("product,name", [("irs", "fixed_rate"), ("equity_option", "rate")])
+def test_tasa_en_menos_uno_se_acepta_con_json_finito(client, product, name):
+    r = client.post("/api/price/%s" % product,
+                    json={"snapshot": SNAP, **SPECS[product]["base"], name: RATE_FLOOR})
+    assert r.status_code == 200, r.get_json()
+    assert _non_finite(r.get_json()) == []
