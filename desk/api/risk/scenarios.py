@@ -71,6 +71,22 @@ def _shock(mkt: MarketContext, spec: Dict[str, Any]) -> MarketContext:
     return mkt.shifted(curve=spec["curve"], pillar_shifts_bp=ramp)
 
 
+shock = _shock  # pública: la usa la efectividad prospectiva de coberturas
+
+# Los ocho escenarios fijos de RiskScreen.tsx (mismo orden y mismos nombres): la efectividad
+# prospectiva de una cobertura mide la razón de cambios sobre este mismo set.
+DEFAULT_SCENARIOS = [
+    {"name": "TIIE-F +50 pb", "type": "parallel", "curve": "TIIE-F", "bp": 50.0},
+    {"name": "TIIE-F -50 pb", "type": "parallel", "curve": "TIIE-F", "bp": -50.0},
+    {"name": "SOFR +50 pb", "type": "parallel", "curve": "SOFR", "bp": 50.0},
+    {"name": "SOFR -50 pb", "type": "parallel", "curve": "SOFR", "bp": -50.0},
+    {"name": "TIIE-F steepener 25 pb", "type": "steepener", "curve": "TIIE-F", "bp": 25.0},
+    {"name": "SOFR steepener 25 pb", "type": "steepener", "curve": "SOFR", "bp": 25.0},
+    {"name": "USDMXN +10 %", "type": "fx_spot", "pct": 10.0},
+    {"name": "USDMXN -10 %", "type": "fx_spot", "pct": -10.0},
+]  # type: List[Dict[str, Any]]
+
+
 def run_scenarios(
     conn: sqlite3.Connection, snapshot_id: str, body: Dict[str, Any]
 ) -> Dict[str, Any]:
