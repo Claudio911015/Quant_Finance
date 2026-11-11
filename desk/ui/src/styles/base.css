@@ -68,6 +68,11 @@ textarea {
   color: inherit;
 }
 
+/* El navegador pone monospace a kbd; el diseño no usa fuente monoespaciada. */
+kbd {
+  font-family: inherit;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
