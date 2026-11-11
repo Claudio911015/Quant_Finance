@@ -1,7 +1,8 @@
 import json
-import sqlite3
 
 import pytest
+
+from desk.api.tests.conftest import empty_portfolio, insert_raw_trade
 
 IRS_PAYER = {"curve": "TIIE-F", "side": "payer", "notional": 100e6, "periods": 26, "fixed_rate": 0.068}
 IRS_RECEIVER = {"curve": "TIIE-F", "side": "receiver", "notional": 50e6, "periods": 65, "fixed_rate": 0.0695}
@@ -11,8 +12,7 @@ EQ = {"option_type": "call", "spot": 55.0, "strike": 55.0, "volatility": 0.25, "
 
 
 def _clear(client):
-    for t in client.get("/api/trades").get_json()["trades"]:
-        assert client.delete("/api/trades/%d" % t["id"]).status_code == 204
+    empty_portfolio(client)
 
 
 def _add(client, product, params):
@@ -34,13 +34,7 @@ def _scenarios(client, scenarios, snapshot="MX-DEMO"):
 
 
 def _insert_raw(app, product, params_text):
-    conn = sqlite3.connect(app.config["DESK_DB"])
-    conn.execute(
-        "INSERT INTO trades (product, counterparty, params, created_at) VALUES (?, 'Raw', ?, 'x')",
-        (product, params_text),
-    )
-    conn.commit()
-    conn.close()
+    insert_raw_trade(app, product, params_text)
 
 
 @pytest.fixture

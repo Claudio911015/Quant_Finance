@@ -327,3 +327,11 @@ def update_snapshot(
         "UPDATE snapshots SET data = ? WHERE id = ?", (json.dumps(data), snapshot_id)
     )
     return _payload(row, data, ctx)
+
+
+def roll_snapshot(conn: sqlite3.Connection, source_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Copia el snapshot `source_id` con otro `id` y `as_of` (`body`); devuelve el payload del nuevo.
+
+    Se implementa en T6.
+    """
+    raise NotImplementedError("market.roll_snapshot se implementa en T6")

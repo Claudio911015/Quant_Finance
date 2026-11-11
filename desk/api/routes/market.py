@@ -27,6 +27,14 @@ def update_snapshot(snapshot_id):
     return jsonify(payload)
 
 
+@bp.post("/<snapshot_id>/roll")
+def roll_snapshot(snapshot_id):
+    conn = get_conn()
+    payload = market.roll_snapshot(conn, snapshot_id, body_object())
+    conn.commit()
+    return jsonify(payload), 201
+
+
 @bp.post("/refresh")
 def refresh_market():
     return jsonify(ensure_finite(refresh.run_refresh(get_conn(), current_app.config)))

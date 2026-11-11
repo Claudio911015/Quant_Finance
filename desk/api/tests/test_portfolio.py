@@ -1,11 +1,11 @@
 import json
-import sqlite3
 
 import pytest
 
 from desk.api import portfolio
 from desk.api.app import create_app
 from desk.api.db import connect
+from desk.api.tests.conftest import empty_portfolio, insert_raw_trade
 
 IRS = {"curve": "TIIE-F", "side": "payer", "notional": 1e6, "periods": 13, "fixed_rate": 0.07}
 FWD = {"side": "buy", "notional_usd": 1e6, "days": 91, "strike": 19.0}
@@ -16,13 +16,7 @@ def _trade(product="irs", params=None, counterparty="Banco Test"):
 
 
 def _insert_raw(app, product, params_text):
-    conn = sqlite3.connect(app.config["DESK_DB"])
-    conn.execute(
-        "INSERT INTO trades (product, counterparty, params, created_at) VALUES (?, 'Raw', ?, 'x')",
-        (product, params_text),
-    )
-    conn.commit()
-    conn.close()
+    insert_raw_trade(app, product, params_text)
 
 
 def test_seed_creates_seven_trades_and_values_without_errors(client):
@@ -63,19 +57,21 @@ def test_valuation_matches_price_endpoint(client):
     assert rows[0]["pv_mxn"] == pytest.approx(price["pv_mxn"], rel=1e-12)
 
 
-def test_create_list_delete(client):
+def test_create_list_and_delete_is_refused(client):
     r = client.post("/api/trades", json=_trade())
     assert r.status_code == 201
     t = r.get_json()
     assert t["id"] == 8
     assert t["notional"] == 1e6 and t["currency"] == "MXN" and t["maturity"] == "2027-11-09"
     assert t["params"]["fixed_rate"] == 0.07 and t["created_at"]
-    assert set(t) == {"id", "product", "counterparty", "params", "notional", "currency",
-                      "maturity", "created_at"}
+    assert set(t) == {"id", "product", "counterparty", "trade_date", "start_date",
+                      "maturity_date", "params", "notional", "currency", "maturity", "created_at"}
+    assert t["trade_date"] == t["start_date"] == "2026-11-10" and t["maturity_date"] == t["maturity"]
     assert client.get("/api/trades").get_json()["trades"][-1] == t
 
-    assert client.delete("/api/trades/8").status_code == 204
-    assert len(client.get("/api/trades").get_json()["trades"]) == 7
+    r = client.delete("/api/trades/8")  # una operación no se borra: se termina
+    assert r.status_code == 409 and r.get_json()["field"] == "id"
+    assert len(client.get("/api/trades").get_json()["trades"]) == 8
 
 
 def test_create_trims_counterparty_and_stores_normalized_params(client):
@@ -99,9 +95,7 @@ def test_persistence_across_create_app(tmp_path):
 def test_emptied_portfolio_is_not_reseeded(tmp_path):
     db = tmp_path / "e.db"
     app1 = create_app(db_path=db)
-    c = app1.test_client()
-    for i in range(1, 8):
-        assert c.delete("/api/trades/%d" % i).status_code == 204
+    empty_portfolio(app1.test_client())
     app2 = create_app(db_path=db)
     assert app2.test_client().get("/api/trades").get_json()["trades"] == []
 

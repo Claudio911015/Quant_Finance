@@ -1,5 +1,7 @@
 """Helpers de validación de cuerpos JSON. Todos lanzan `ApiError(400, msg, field=name)`."""
 import math
+import re
+from datetime import date
 from typing import Any, Dict, Optional, Sequence
 
 from flask import request
@@ -15,6 +17,8 @@ MAX_RATE = 10.0  # tasas y volatilidades en decimal (10 = 1000 %)
 MIN_RATE = -1.0  # cota inferior de las tasas con signo (fixed_rate, rate): por debajo, exp/descuento desbordan a NaN
 MAX_FREQUENCY = 365.0  # pagos por año de un bono: más que uno diario no tiene sentido
 MAX_HORIZON_DAYS = 3650.0  # horizonte máximo del VaR: 10 años
+
+_ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 NON_FINITE_MESSAGE = "El cálculo produjo un valor no finito con esos parámetros"
 
@@ -149,3 +153,18 @@ def text(d: Dict[str, Any], name: str, required: bool = True) -> Optional[str]:
             raise ApiError(400, "'%s' no puede estar vacío" % name, name)
         return None
     return v
+
+
+def iso_date(d: Dict[str, Any], name: str, required: bool = True) -> Optional[date]:
+    """Fecha `AAAA-MM-DD` válida (solo ese formato). Si no es requerida y falta, `None`."""
+    if _missing(d, name):
+        if required:
+            raise ApiError(400, "Falta el parámetro '%s'" % name, name)
+        return None
+    v = d[name]
+    if isinstance(v, str) and _ISO_DATE.fullmatch(v):
+        try:
+            return date.fromisoformat(v)
+        except ValueError:
+            pass
+    raise ApiError(400, "'%s' debe ser una fecha válida AAAA-MM-DD" % name, name)

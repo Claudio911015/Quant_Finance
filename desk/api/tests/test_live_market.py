@@ -9,6 +9,7 @@ from desk.api import db, fred, live_market, market, marketdata, seed_market
 from desk.api.errors import ApiError
 from desk.api.pricing import PRODUCTS
 from desk.api.qf import qfpy
+from desk.api.tests.conftest import empty_portfolio
 from desk.api.tests.mdf_fixture import REAL_2026_11_10, make_fred_csv, make_mdf_db
 
 LIVE = "/api/market/snapshots/MKT-LIVE"
@@ -533,8 +534,7 @@ def test_key_rates_add_up_to_parallel_on_live(live_client):
 
 
 def test_sofr_key_rates_add_up_to_parallel_on_live(live_client):
-    for t in live_client.get("/api/trades").get_json()["trades"]:
-        assert live_client.delete("/api/trades/%d" % t["id"]).status_code == 204
+    empty_portfolio(live_client)
     for side, periods, fixed in (("payer", 5, 0.045), ("receiver", 10, 0.049)):
         r = live_client.post(
             "/api/trades",

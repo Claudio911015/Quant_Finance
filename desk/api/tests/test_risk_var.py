@@ -1,10 +1,10 @@
 import math
-import sqlite3
 import statistics
 
 import pytest
 
 from desk.api.qf import qfpy
+from desk.api.tests.conftest import empty_portfolio, insert_raw_trade
 
 FWD = {"side": "buy", "notional_usd": 1_000_000.0, "strike": 19.0, "days": 91}
 IRS = {"curve": "TIIE-F", "side": "payer", "notional": 100e6, "periods": 13, "fixed_rate": 0.07}
@@ -16,8 +16,7 @@ EQ = {
 
 def _only(client, *trades):
     """Vacía el portafolio sembrado y deja solo `(producto, params)`."""
-    for t in client.get("/api/trades").get_json()["trades"]:
-        assert client.delete("/api/trades/%d" % t["id"]).status_code == 204
+    empty_portfolio(client)
     for product, params in trades:
         r = client.post(
             "/api/trades",
@@ -142,14 +141,7 @@ def test_var_scales_with_sqrt_horizon(client):
 def test_corrupt_trade_is_reported_and_excluded(app, client):
     _only(client, ("fx_forward", FWD))
     clean = _ok(client)
-    conn = sqlite3.connect(app.config["DESK_DB"])
-    cur = conn.execute(
-        "INSERT INTO trades (product, counterparty, params, created_at) "
-        "VALUES ('irs', 'Raw', '{no es json', 'x')"
-    )
-    corrupt_id = cur.lastrowid
-    conn.commit()
-    conn.close()
+    corrupt_id = insert_raw_trade(app, "irs", "{no es json")
     body = _ok(client)
     assert [e["id"] for e in body["errors"]] == [corrupt_id]
     assert body["errors"][0]["error"]
