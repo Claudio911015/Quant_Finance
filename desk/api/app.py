@@ -68,6 +68,11 @@ def create_app(db_path: Optional[Union[str, Path]] = None, seed: bool = True) ->
             return send_from_directory(UI_DIST, path)
         return send_from_directory(UI_DIST, "index.html")
 
+    # corte 7
+    from desk.api.routes import validation as validation_routes
+
+    app.register_blueprint(validation_routes.bp)
+    # fin corte 7
     return app
 
 
