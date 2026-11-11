@@ -73,7 +73,7 @@
 /* Formulario de alta */
 .lim-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); /* cabe "Exposición (PV positivo neto)" en su select */
   gap: var(--space-3);
   align-items: start;
 }

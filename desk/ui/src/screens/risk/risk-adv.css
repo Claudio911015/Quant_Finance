@@ -127,6 +127,11 @@
   white-space: nowrap;
 }
 
+/* El encabezado de una columna numérica va a la derecha, sobre sus cifras (`.radv-table th` lo pone a la izquierda). */
+.radv-table th.num {
+  text-align: right;
+}
+
 .radv-table tbody tr:hover {
   background: var(--bg-hover);
 }
