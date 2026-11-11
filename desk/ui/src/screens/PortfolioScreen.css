@@ -1,0 +1,93 @@
+.portfolio {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100%;
+  min-height: 320px;
+}
+
+.portfolio__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.portfolio__meta {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.portfolio__warn {
+  color: var(--warn);
+}
+
+.portfolio__btn {
+  height: 28px;
+  margin-left: auto;
+  padding: 0 var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.portfolio__btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.portfolio__btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.portfolio__banner {
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.portfolio__grid {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Filas con error de valuación: se marcan y el texto va en el tooltip. */
+.portfolio__grid .ag-row.row-error {
+  background: var(--warn-soft);
+}
+
+.portfolio__grid .ag-row.row-total {
+  font-weight: 600;
+}
+
+.portfolio__grid .portfolio__neg {
+  color: var(--neg);
+}
+
+.portfolio__grid .portfolio__cell-error {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.portfolio__del {
+  height: 20px;
+  padding: 0 var(--space-2);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.portfolio__del:hover {
+  border-color: var(--neg);
+  color: var(--neg);
+}
