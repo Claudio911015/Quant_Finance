@@ -116,11 +116,19 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Convención de días',
-        text: 'Días naturales, t = días/365, devengo ACT/360, fijaciones diarias capitalizadas, sin inhábiles.',
+        text: 'Días naturales, t = días/365, devengo ACT/360, fijaciones diarias capitalizadas, sin calendario de inhábiles.',
+      },
+      {
+        label: 'Fines de semana',
+        text: 'Las tasas a un día solo se publican en días hábiles: la del viernes devenga también sábado y domingo (3 días), así que esos días no son fijaciones faltantes y no avisan. Una fijación cargada en sábado o domingo se usa tal cual.',
       },
       {
         label: 'Fijación faltante',
-        text: 'Se usa la última publicada anterior o la tasa a un día de la curva, con aviso.',
+        text: 'Un día de lunes a viernes sin fijación usa la última publicada anterior o la tasa a un día de la curva, con aviso. Los feriados todavía avisan: no hay calendario de inhábiles hasta el corte 3.',
+      },
+      {
+        label: 'Alta a la par',
+        text: 'Un swap dado de alta sin tasa fija nace a la par: se guarda con la tasa par del snapshot de la petición (o MX-DEMO), de modo que su PV en la fecha de pacto es cero.',
       },
       {
         label: 'P&L',
@@ -136,7 +144,7 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Aproximaciones',
-        text: 'Bono y cap/floor envejecidos: periodos enteros restantes por ceil; se omite el cupón o caplet en curso ya fijado. Lo exacto llega en el corte 3.',
+        text: 'Bono y cap/floor se valúan con el número de periodos enteros restantes (por ceil): dentro de un periodo no envejecen. El tratamiento exacto llega en el corte 3.',
       },
       {
         label: 'Cambios de nocional',

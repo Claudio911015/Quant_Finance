@@ -15,6 +15,7 @@ import type { TradeStatus, ValuationResponse, ValuationRow } from '../api/types'
 import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import PnlPanel from './PnlPanel';
+import { productTitle } from './pricers/registry';
 import './PortfolioScreen.css';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -66,6 +67,8 @@ const LOCALE_TEXT: Record<string, string> = {
   clearFilter: 'Limpiar',
   searchOoo: 'Buscar...',
 };
+
+const NO_MATCH_TEXT = 'Ninguna operación con ese estado.';
 
 const EXPORT_COLUMNS = [
   'id',
@@ -132,22 +135,28 @@ export const columnDefs: ColDef<GridRow>[] = [
     },
     ...numberCell,
   },
-  { colId: 'product', field: 'product', headerName: 'Producto', width: 92 },
-  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 148 },
+  {
+    colId: 'product',
+    field: 'product',
+    headerName: 'Producto',
+    width: 132,
+    valueFormatter: (p) => (p.value == null ? '' : productTitle(p.value)),
+  },
+  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 130 },
   {
     colId: 'notional',
     field: 'notional',
     headerName: 'Nocional',
-    width: 110,
+    width: 104,
     valueFormatter: (p) => (p.value == null ? '' : fmtNumber(p.value, 2)),
     ...numberCell,
   },
-  { colId: 'currency', field: 'currency', headerName: 'Moneda', width: 84 },
+  { colId: 'currency', field: 'currency', headerName: 'Moneda', width: 80 },
   {
     colId: 'trade_date',
     field: 'trade_date',
     headerName: 'Pacto',
-    width: 96,
+    width: 92,
     cellClass: 'num',
     valueFormatter: (p) => (p.value == null ? '' : fmtDate(p.value)),
   },
@@ -155,7 +164,7 @@ export const columnDefs: ColDef<GridRow>[] = [
     colId: 'maturity_date',
     field: 'maturity_date',
     headerName: 'Vencimiento',
-    width: 110,
+    width: 104,
     cellClass: 'num',
     valueFormatter: (p) => (p.value == null ? '' : fmtDate(p.value)),
   },
@@ -163,7 +172,7 @@ export const columnDefs: ColDef<GridRow>[] = [
     colId: 'status',
     field: 'status',
     headerName: 'Estado',
-    width: 96,
+    width: 88,
     filter: false, // el selector de arriba filtra por estado
     valueFormatter: (p) => (p.value == null ? '' : (STATUS_LABEL[p.value as TradeStatus] ?? p.value)),
   },
@@ -208,6 +217,7 @@ export function PortfolioScreen() {
   const navigate = useNavigate();
   const gridEl = useRef<HTMLDivElement>(null);
   const gridApi = useRef<GridApi<GridRow> | null>(null);
+  const noRowsText = useRef(LOCALE_TEXT.noRowsToShow as string);
   // Cada carga toma un número; solo la última escribe estado (una respuesta lenta de un
   // snapshot anterior no debe pisar la del que el usuario eligió después).
   const latest = useRef(0);
@@ -239,7 +249,8 @@ export function PortfolioScreen() {
     const api = createGrid<GridRow>(gridEl.current!, {
       theme,
       columnDefs,
-      localeText: LOCALE_TEXT,
+      getLocaleText: (p) =>
+        p.key === 'noRowsToShow' ? noRowsText.current : (LOCALE_TEXT[p.key] ?? p.defaultValue),
       defaultColDef: {
         sortable: true,
         filter: true,
@@ -273,18 +284,25 @@ export function PortfolioScreen() {
   useEffect(() => {
     const api = gridApi.current;
     if (!api) return;
-    // Si el filtro oculta todo, "agrega una desde Pricers" sería falso.
-    api.setGridOption(
-      'overlayNoRowsTemplate',
-      rows.length > 0 && shown.length === 0
-        ? '<span class="ag-overlay-no-rows-center">Ninguna operación con ese estado.</span>'
-        : undefined,
-    );
+    // Si el filtro oculta todo, "agrega una desde Pricers" sería falso. Se cambia el texto de AG Grid
+    // (no la plantilla del overlay) para que el mensaje visible y el que anuncian los lectores de
+    // pantalla sean uno solo.
+    noRowsText.current =
+      rows.length > 0 && shown.length === 0 ? NO_MATCH_TEXT : (LOCALE_TEXT.noRowsToShow as string);
     api.setGridOption('rowData', shown);
     // El total sigue siendo el del backend (todo el portafolio), no el de las filas visibles.
     api.setGridOption(
       'pinnedBottomRowData',
-      data ? [{ total: true, product: 'Total', pv_mxn: data.total_mxn }] : [],
+      data
+        ? [
+            {
+              total: true,
+              // Con filtro activo las filas son un subconjunto, pero el total es el de todo el portafolio.
+              product: statusFilter === 'all' ? 'Total' : 'Total del portafolio',
+              pv_mxn: data.total_mxn,
+            },
+          ]
+        : [],
     );
   }, [data, statusFilter]);
 

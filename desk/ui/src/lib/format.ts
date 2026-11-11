@@ -1,11 +1,13 @@
 // Locale fijo en-US: separador de miles con coma (aprobado en el diseño).
 const LOCALE = 'en-US';
 
+/** Un cero negativo (-0, o un -0.001 que redondea a cero) se muestra como cero: nunca "-0.00". */
 export function fmtNumber(v: number, decimals: number): string {
-  return v.toLocaleString(LOCALE, {
+  const s = v.toLocaleString(LOCALE, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+  return /^-0(\.0*)?$/.test(s) ? s.slice(1) : s;
 }
 
 export function fmtMoney(v: number, ccy: string): string {

@@ -17,3 +17,8 @@ export const PRODUCT_SPECS: Record<ProductId, ProductSpec> = {
   bond,
   equity_option,
 };
+
+/** Rótulo en español de un producto (el de Pricers); un id desconocido o una fila especial se muestran tal cual. */
+export function productTitle(product: string): string {
+  return (PRODUCT_SPECS as Record<string, ProductSpec | undefined>)[product]?.title ?? product;
+}

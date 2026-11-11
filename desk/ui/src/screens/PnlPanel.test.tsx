@@ -179,6 +179,33 @@ describe('PnlPanel', () => {
     expect(cellText(pinned!.querySelector('[col-id="settled"]')!)).toBe('500,000.00');
   });
 
+  it('el producto sale con el rótulo en español de Pricers, no con su id', async () => {
+    mockApi();
+    const { container } = renderPanel();
+    const { to } = await selectors();
+    await waitFor(() => expect(to.value).toBe('C'));
+    fireEvent.click(screen.getByRole('button', { name: 'Calcular' }));
+    await screen.findByText('Banco Alfa');
+    const product = (id: number) => container.querySelector(`.ag-row[row-id="${id}"] [col-id="product"]`)?.textContent;
+    expect([1, 2, 3, 4].map(product)).toEqual(['Swap de tasas (IRS)', 'Forward FX', 'Bono', 'Swaption']);
+    expect(container.textContent).not.toMatch(/\b(irs|fx_forward)\b/);
+    expect(container.querySelector('.ag-row-pinned [col-id="product"]')?.textContent).toBe('Total');
+  });
+
+  it('un P&L que redondea a cero se muestra 0.00, nunca -0.00', async () => {
+    const tiny = { ...PNL, rows: [{ ...PNL.rows[0], pv_from: -0.001, pnl: -0 }], totals: { ...PNL.totals, pv_from: -0.0004 } };
+    mockApi(() => json(tiny));
+    const { container } = renderPanel();
+    const { to } = await selectors();
+    await waitFor(() => expect(to.value).toBe('C'));
+    fireEvent.click(screen.getByRole('button', { name: 'Calcular' }));
+    await screen.findByText('Banco Alfa');
+    expect(cellText(container.querySelector('.ag-row[row-id="1"] [col-id="pv_from"]')!)).toBe('0.00');
+    expect(cellText(container.querySelector('.ag-row[row-id="1"] [col-id="pnl"]')!)).toBe('0.00');
+    expect(cellText(container.querySelector('.ag-row-pinned [col-id="pv_from"]')!)).toBe('0.00');
+    expect(container.textContent).not.toContain('-0.00');
+  });
+
   it('las columnas caben en 1280 px: la suma de anchos mínimos no pasa de 1025 px (1280 − barra lateral − márgenes − barra de desplazamiento)', () => {
     const min = columnDefs.map((c) => (c.flex ? (c.minWidth ?? 0) : (c.width ?? 0)));
     expect(min.every((w) => w > 0)).toBe(true);

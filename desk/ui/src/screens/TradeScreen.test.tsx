@@ -83,12 +83,15 @@ const FLOWS: FlowsResponse = {
   ],
 };
 
-function setup(status: TradeStatus = 'viva') {
+// Sin terminación ni ejercicio: la operación admite acciones mientras esté viva.
+const LIVE_EVENTS = EVENTS.slice(0, 2);
+
+function setup(status: TradeStatus = 'viva', events: TradeEvent[] = LIVE_EVENTS) {
   mocks.listSnapshots.mockResolvedValue([]);
   mocks.getSnapshot.mockImplementation(
     async (id: string) => ({ id, as_of: '2026-11-10' }) as unknown as Snapshot,
   );
-  mocks.getTrade.mockResolvedValue(TRADE);
+  mocks.getTrade.mockResolvedValue({ ...TRADE, events });
   mocks.tradeState.mockResolvedValue(stateOf(status));
   mocks.tradeFlows.mockResolvedValue(FLOWS);
   mocks.postEvent.mockResolvedValue([]);
@@ -229,18 +232,47 @@ describe('TradeScreen', () => {
     expect(form.contains(banner)).toBe(false);
   });
 
-  it('con estado terminada no hay botones de acción', async () => {
-    setup('terminada');
+  it('con estado terminada no hay botones de acción y una línea dice cuándo se terminó', async () => {
+    setup('terminada', EVENTS);
     renderScreen();
-    await screen.findByText('Terminada');
+    await screen.findByText('Banco Alfa');
     expect(screen.queryByRole('button', { name: 'Terminar anticipadamente' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Cambiar nocional' })).toBeNull();
+    const actions = screen.getByRole('region', { name: 'Acciones' });
+    expect(actions.textContent).toBe('AccionesTerminada el 2027-01-15');
+  });
+
+  it('una terminación registrada en una fecha posterior a la de la ficha también cierra las acciones', async () => {
+    setup('viva', EVENTS); // la ficha está a 2026-11-10 y la terminación es del 2027-01-15
+    renderScreen();
+    await screen.findByText('Banco Alfa');
+    expect(screen.queryByRole('form', { name: 'Terminar anticipadamente' })).toBeNull();
+    expect(screen.queryByRole('form', { name: 'Cambiar nocional' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Acciones' }).textContent).toBe('AccionesTerminada el 2027-01-15');
+  });
+
+  it('una opción ejercida dice "Ejercida el" con la fecha del ejercicio', async () => {
+    setup('ejercida', [ev(1, 'execution', '2026-11-10'), ev(2, 'exercise', '2026-12-05', { amount: 4000 })]);
+    renderScreen();
+    await screen.findByText('Banco Alfa');
+    expect(screen.getByRole('region', { name: 'Acciones' }).textContent).toBe('AccionesEjercida el 2026-12-05');
+    expect(screen.queryByRole('form')).toBeNull();
+  });
+
+  it('una operación vencida sin terminación ni ejercicio no deja un encabezado Acciones vacío', async () => {
+    setup('vencida');
+    renderScreen();
+    await screen.findByText('Banco Alfa');
+    expect(screen.queryByRole('region', { name: 'Acciones' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Acciones' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Línea de tiempo' })).toBeTruthy();
   });
 
   it('con estado no_pactada avisa y no ofrece acciones', async () => {
     setup('no_pactada');
     renderScreen();
     await screen.findByText('No pactada a esta fecha');
+    expect(screen.getByRole('heading', { name: 'Acciones' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Terminar anticipadamente' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Cambiar nocional' })).toBeNull();
   });

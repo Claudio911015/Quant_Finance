@@ -191,9 +191,35 @@ describe('PortfolioScreen', () => {
         'Ninguna operación con ese estado.',
       ),
     );
+    // Un solo mensaje: ni el visible ni el que AG Grid anuncia a lectores de pantalla sugieren agregar.
+    await waitFor(() => expect(container.textContent).not.toContain('Sin operaciones'));
+    // Con filtro activo la fila fija aclara que su total es el de todo el portafolio.
+    expect(container.querySelector('.ag-row-pinned')?.textContent).toContain('Total del portafolio');
 
     fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'all' } });
     await waitFor(() => expect(container.querySelectorAll('.ag-row:not(.ag-row-pinned)')).toHaveLength(4));
+  });
+
+  it('la fila de total se llama "Total" sin filtro y "Total del portafolio" con un filtro activo', async () => {
+    mockApi();
+    const { container } = renderScreen();
+    await screen.findByText('Banco Alfa');
+    const pinned = () => container.querySelector('.ag-row-pinned [col-id="product"]')?.textContent;
+    expect(pinned()).toBe('Total');
+    fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'viva' } });
+    await waitFor(() => expect(pinned()).toBe('Total del portafolio'));
+    fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'all' } });
+    await waitFor(() => expect(pinned()).toBe('Total'));
+  });
+
+  it('el producto sale con el rótulo en español de Pricers, no con su id', async () => {
+    mockApi();
+    const { container } = renderScreen();
+    await screen.findByText('Banco Alfa');
+    const product = (id: number) => container.querySelector(`.ag-row[row-id="${id}"] [col-id="product"]`)?.textContent;
+    expect(product(1)).toBe('Swap de tasas (IRS)');
+    expect(product(2)).toBe('Opción FX');
+    expect(container.textContent).not.toMatch(/\b(irs|fx_option|fx_forward)\b/);
   });
 
   it('el selector de estado ofrece los cinco estados y "Todas"', async () => {

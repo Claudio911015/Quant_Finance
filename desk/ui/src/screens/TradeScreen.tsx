@@ -245,6 +245,9 @@ export default function TradeScreen() {
     : [];
   const status = state?.status;
   const spec = trade ? PRODUCT_SPECS[trade.product] : null;
+  // Una terminación o un ejercicio, en cualquier fecha, cierra la operación: ya no admite acciones.
+  const closing = events.find((ev) => ev.type === 'termination' || ev.type === 'exercise');
+  const showActions = closing != null || status === 'no_pactada' || (status === 'viva' && asOf != null);
   const rows = [...(flows?.flows ?? [])].sort((a, b) => a.date.localeCompare(b.date));
 
   return (
@@ -313,43 +316,50 @@ export default function TradeScreen() {
               </ol>
             </section>
 
-            <section className="trade__block" aria-label="Acciones">
-              <h2>Acciones</h2>
-              {actionError && (
-                <div className="trade__banner" role="alert">
-                  {actionError}
-                </div>
-              )}
-              {status === 'no_pactada' && <p className="trade__meta">No pactada a esta fecha</p>}
-              {status === 'viva' && asOf != null && (
-                <>
-                  <EventForm
-                    key={`termination-${asOf}`}
-                    tradeId={trade.id}
-                    type="termination"
-                    field="amount"
-                    title="Terminar anticipadamente"
-                    valueLabel="Importe (MXN)"
-                    submitLabel="Terminar anticipadamente"
-                    defaultDate={asOf}
-                    onPosted={load}
-                    onBanner={setActionError}
-                  />
-                  <EventForm
-                    key={`quantity_change-${asOf}`}
-                    tradeId={trade.id}
-                    type="quantity_change"
-                    field="notional"
-                    title="Cambiar nocional"
-                    valueLabel="Nuevo nocional"
-                    submitLabel="Cambiar nocional"
-                    defaultDate={asOf}
-                    onPosted={load}
-                    onBanner={setActionError}
-                  />
-                </>
-              )}
-            </section>
+            {showActions && (
+              <section className="trade__block" aria-label="Acciones">
+                <h2>Acciones</h2>
+                {actionError && (
+                  <div className="trade__banner" role="alert">
+                    {actionError}
+                  </div>
+                )}
+                {closing != null ? (
+                  <p className="trade__meta">
+                    {closing.type === 'termination' ? 'Terminada' : 'Ejercida'} el {fmtDate(closing.event_date)}
+                  </p>
+                ) : status === 'no_pactada' ? (
+                  <p className="trade__meta">No pactada a esta fecha</p>
+                ) : (
+                  <>
+                    <EventForm
+                      key={`termination-${asOf}`}
+                      tradeId={trade.id}
+                      type="termination"
+                      field="amount"
+                      title="Terminar anticipadamente"
+                      valueLabel="Importe (MXN)"
+                      submitLabel="Terminar anticipadamente"
+                      defaultDate={asOf!}
+                      onPosted={load}
+                      onBanner={setActionError}
+                    />
+                    <EventForm
+                      key={`quantity_change-${asOf}`}
+                      tradeId={trade.id}
+                      type="quantity_change"
+                      field="notional"
+                      title="Cambiar nocional"
+                      valueLabel="Nuevo nocional"
+                      submitLabel="Cambiar nocional"
+                      defaultDate={asOf!}
+                      onPosted={load}
+                      onBanner={setActionError}
+                    />
+                  </>
+                )}
+              </section>
+            )}
           </div>
         </>
       )}

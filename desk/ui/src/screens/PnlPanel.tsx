@@ -12,6 +12,7 @@ import { ApiError, pnl } from '../api/client';
 import type { PnlResponse, PnlRow, SnapshotSummary, TradeStatus } from '../api/types';
 import { fmtDate, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
+import { productTitle } from './pricers/registry';
 import './PnlPanel.css';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -56,7 +57,7 @@ function moneyCol(colId: keyof PnlRow, headerName: string, showError = false): C
     colId,
     field: colId,
     headerName,
-    width: 118,
+    width: 112,
     valueFormatter: (p) =>
       showError && p.data?.error ? 'Error' : p.value == null ? '' : fmtNumber(p.value, 2),
     cellClassRules: {
@@ -70,10 +71,16 @@ function moneyCol(colId: keyof PnlRow, headerName: string, showError = false): C
 /** Exportadas para la prueba de anchos: la suma de los anchos mínimos debe caber en 1280 px. */
 export const columnDefs: ColDef<GridRow>[] = [
   { colId: 'id', field: 'id', headerName: 'ID', width: 56, ...numberCell },
-  { colId: 'product', field: 'product', headerName: 'Producto', width: 92 },
-  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 148 },
-  { colId: 'status_from', field: 'status_from', headerName: 'Estado desde', width: 112, valueFormatter: statusFormatter },
-  { colId: 'status_to', field: 'status_to', headerName: 'Estado hasta', width: 112, valueFormatter: statusFormatter },
+  {
+    colId: 'product',
+    field: 'product',
+    headerName: 'Producto',
+    width: 132,
+    valueFormatter: (p) => (p.value == null ? '' : productTitle(p.value)),
+  },
+  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 130 },
+  { colId: 'status_from', field: 'status_from', headerName: 'Estado desde', width: 100, valueFormatter: statusFormatter },
+  { colId: 'status_to', field: 'status_to', headerName: 'Estado hasta', width: 100, valueFormatter: statusFormatter },
   moneyCol('pv_from', 'PV desde'),
   moneyCol('pv_to', 'PV hasta'),
   moneyCol('settled', 'Liquidado'),
