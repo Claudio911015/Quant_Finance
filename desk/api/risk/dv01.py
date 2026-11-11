@@ -14,7 +14,7 @@ del paralelo). La central lo cancela y las rampas suman exactamente un desplazam
 import sqlite3
 from typing import Any, Dict, List
 
-from desk.api import market, portfolio
+from desk.api import fixings as fixing_store, market, portfolio, valuation
 from desk.api.market import MarketContext
 
 
@@ -37,10 +37,11 @@ def _shocked_contexts(mkt: MarketContext) -> Dict[str, Dict[str, Any]]:
 def compute_dv01(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
     """Cuerpo de `POST /api/risk/dv01`; 404 `field: "snapshot"` si no existe.
 
-    Una operación que no se puede valuar (base o cualquier choque) se reporta en `errors`
-    y no aporta a ningún total.
+    Solo entran las operaciones `viva` en el `as_of` del snapshot. Una operación que no se puede
+    valuar (base o cualquier choque) se reporta en `errors` y no aporta a ningún total.
     """
     mkt = market.load_context(conn, snapshot_id)
+    fixings = fixing_store.load_all(conn)
     shocked = _shocked_contexts(mkt)
     curves = {
         c: {
@@ -54,13 +55,19 @@ def compute_dv01(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
     errors: List[Dict[str, Any]] = []
 
     for trade in portfolio.load_trades(conn):
+        if not valuation.is_live(trade, mkt.as_of):
+            continue
         try:
-            base = portfolio.trade_pv_mxn(trade, mkt)
+            base = portfolio.trade_pv_mxn(trade, mkt, fixings)
             contrib = {
                 c: {
-                    "parallel": base - portfolio.trade_pv_mxn(trade, s["parallel"]),
+                    "parallel": base - portfolio.trade_pv_mxn(trade, s["parallel"], fixings),
                     "points": [
-                        (portfolio.trade_pv_mxn(trade, down) - portfolio.trade_pv_mxn(trade, up)) / 2.0
+                        (
+                            portfolio.trade_pv_mxn(trade, down, fixings)
+                            - portfolio.trade_pv_mxn(trade, up, fixings)
+                        )
+                        / 2.0
                         for down, up in s["pillars"]
                     ],
                 }

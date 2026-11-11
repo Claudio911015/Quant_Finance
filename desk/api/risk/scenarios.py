@@ -7,7 +7,7 @@ y se suma.
 import sqlite3
 from typing import Any, Dict, List
 
-from desk.api import market, portfolio
+from desk.api import fixings as fixing_store, market, portfolio, valuation
 from desk.api.errors import ApiError
 from desk.api.market import MarketContext
 from desk.api.validation import finite_number
@@ -76,17 +76,18 @@ def run_scenarios(
 ) -> Dict[str, Any]:
     """Cuerpo de `POST /api/risk/scenarios`; valida `body["scenarios"]` (400 `field: "scenarios"`).
 
-    Una operación que no se puede valuar se reporta en su fila (`error`, `pnl_mxn` nulo) y no
-    suma al total del escenario.
+    Solo entran las operaciones `viva` en el `as_of` del snapshot. Una operación que no se puede
+    valuar se reporta en su fila (`error`, `pnl_mxn` nulo) y no suma al total del escenario.
     """
     specs = _validate(body)
     mkt = market.load_context(conn, snapshot_id)
-    trades = portfolio.load_trades(conn)
+    fixings = fixing_store.load_all(conn)
+    trades = [t for t in portfolio.load_trades(conn) if valuation.is_live(t, mkt.as_of)]
 
     base: Dict[int, Any] = {}
     for t in trades:
         try:
-            base[t["id"]] = portfolio.trade_pv_mxn(t, mkt)
+            base[t["id"]] = portfolio.trade_pv_mxn(t, mkt, fixings)
         except Exception as e:
             base[t["id"]] = e
 
@@ -100,7 +101,7 @@ def run_scenarios(
             try:
                 if isinstance(base[t["id"]], Exception):
                     raise base[t["id"]]
-                row["pnl_mxn"] = portfolio.trade_pv_mxn(t, shocked) - base[t["id"]]
+                row["pnl_mxn"] = portfolio.trade_pv_mxn(t, shocked, fixings) - base[t["id"]]
                 total += row["pnl_mxn"]
             except Exception as e:
                 row["error"] = str(e)

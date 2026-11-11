@@ -128,7 +128,7 @@ AGED_CASES = [
          "dividend_yield": 0.0, "maturity_years": 1.0, "quantity": 10},
         {"maturity_years": (365 - 10) / 365.0},
     ),
-    # Aproximación declarada: periods = ceil(días / period_days) y ceil(días × frecuencia / 365).
+    # Aproximación declarada: periods = ceil(días / period_days) y ceil((días − 0.5) × frecuencia / 365).
     (
         "cap_floor",
         {"curve": "TIIE-F", "cap_type": "cap", "notional": 1e8, "strike": 0.0675, "periods": 13},
@@ -137,7 +137,7 @@ AGED_CASES = [
     (
         "bond",
         {"curve": "TIIE-F", "face": 100.0, "coupon_rate": 0.08, "periods": 24, "frequency": 12.0},
-        {"periods": math.ceil((730 - 40) * 12.0 / 365.0)},
+        {"periods": math.ceil((730 - 40 - 0.5) * 12.0 / 365.0)},
     ),
 ]
 
@@ -159,7 +159,21 @@ def test_aged_value_is_the_price_of_the_shortened_term(client, product, params, 
 def test_cap_and_bond_ceil_changes_the_period_count():
     # Los casos de arriba deben ejercitar el ceil: con 40 días menos cambia el número de periodos.
     assert math.ceil((13 * 28 - 40) / 28.0) == 12 != 13
-    assert math.ceil((730 - 40) * 12.0 / 365.0) == 23 != 24
+    assert math.ceil((730 - 40 - 0.5) * 12.0 / 365.0) == 23 != 24
+
+
+def test_bond_valued_on_its_trade_date_is_the_price_even_when_maturity_rounded_half_a_day(client):
+    # periods=3, frequency=2: 3/2 × 365 = 547.5 días, que `maturity_date` redondea a 548; con
+    # ceil(548 × 2 / 365) = 4 el bono saldría con un periodo de más el mismo día del pacto.
+    params = {"curve": "TIIE-F", "face": 100.0, "coupon_rate": 0.08, "periods": 3, "frequency": 2.0}
+    tid = _book(client, "bond", params)
+    row = _rows(client, "MX-DEMO")[tid]
+    assert row["maturity_date"] == _iso(548)
+    assert math.ceil(548 * 2.0 / 365.0) == 4  # la fórmula anterior se pasaba
+    expected = _price(client, "bond", "MX-DEMO", params)
+    assert row["status"] == "viva" and row["error"] is None
+    assert row["pv_mxn"] == pytest.approx(expected["pv_mxn"], rel=1e-9)
+    assert row["pv"] == pytest.approx(expected["pv"], rel=1e-9)
 
 
 def test_future_start_forward_uses_total_term_from_as_of(client):

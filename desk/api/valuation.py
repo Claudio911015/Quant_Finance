@@ -125,7 +125,8 @@ def _shortened(product: str, terms: Dict[str, Any], days: int) -> Dict[str, Any]
     elif product == "cap_floor":
         t["periods"] = -(-days // CURVES[t["curve"]]["period_days"])
     else:  # bond
-        t["periods"] = int(math.ceil(days * t["frequency"] / _DAYS_PER_YEAR))
+        # medio día menos: el día del pacto da `periods` exactos aunque `maturity_date` redondeó
+        t["periods"] = int(math.ceil((days - 0.5) * t["frequency"] / _DAYS_PER_YEAR))
     return t
 
 

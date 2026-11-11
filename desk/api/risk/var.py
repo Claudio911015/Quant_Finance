@@ -4,9 +4,10 @@ Las exposiciones salen de re-valuar cada operación con choques pequeños del me
 (P&L en MXN); el VaR lo calcula `qfpy.delta_normal_var`. Aquí no hay fórmulas de VaR.
 """
 import sqlite3
+from datetime import date
 from typing import Any, Callable, Dict, List
 
-from desk.api import market, portfolio
+from desk.api import fixings as fixing_store, market, portfolio, valuation
 from desk.api.errors import ApiError
 from desk.api.market import MarketContext
 from desk.api.qf import qfpy
@@ -19,20 +20,22 @@ _FX_BUMP_PCT = 1.0  # el delta FX se toma por diferencia central de ±1 %
 _MAX_FACTOR_VOL = {"bp": 1000.0, "ret": 1.0}
 
 
-def _exposure_fns(mkt: MarketContext) -> List[Callable[[Dict[str, Any], float], float]]:
+def _exposure_fns(
+    mkt: MarketContext, fixings: Dict[str, Dict[date, float]]
+) -> List[Callable[[Dict[str, Any], float], float]]:
     """Una función `(operación, PV base) -> exposición MXN` por factor, en orden de `mkt.factors`."""
     fns = []
     for name in mkt.factors["names"]:
         if name in market.CURVES:
             bumped = mkt.shifted(curve=name, parallel_bp=1.0)
-            fns.append(lambda t, base, b=bumped: portfolio.trade_pv_mxn(t, b) - base)
+            fns.append(lambda t, base, b=bumped: portfolio.trade_pv_mxn(t, b, fixings) - base)
         elif name == _FX_FACTOR:
             up = mkt.shifted(spot_pct=_FX_BUMP_PCT)
             down = mkt.shifted(spot_pct=-_FX_BUMP_PCT)
             width = 2 * _FX_BUMP_PCT / 100.0
             fns.append(
                 lambda t, base, u=up, d=down: (
-                    portfolio.trade_pv_mxn(t, u) - portfolio.trade_pv_mxn(t, d)
+                    portfolio.trade_pv_mxn(t, u, fixings) - portfolio.trade_pv_mxn(t, d, fixings)
                 )
                 / width
             )
@@ -76,7 +79,10 @@ def _factor_vols(
 def compute_var(
     conn: sqlite3.Connection, snapshot_id: str, body: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Cuerpo de `POST /api/risk/var`; valida `horizon_days`, `confidence` y `factor_vols`."""
+    """Cuerpo de `POST /api/risk/var`; valida `horizon_days`, `confidence` y `factor_vols`.
+
+    Solo entran las operaciones `viva` en el `as_of` del snapshot.
+    """
     horizon = number(body, "horizon_days", gt=0, le=MAX_HORIZON_DAYS)
     confidence = number(body, "confidence", gt=0, lt=1)
     mkt = market.load_context(conn, snapshot_id)
@@ -86,12 +92,15 @@ def compute_var(
     overrides = _factor_vols(body, names, units)
     vols = [overrides.get(n, v) for n, v in zip(names, vols)]
 
-    fns = _exposure_fns(mkt)
+    fixings = fixing_store.load_all(conn)
+    fns = _exposure_fns(mkt, fixings)
     exposures = [0.0] * len(names)
     errors = []
     for trade in portfolio.load_trades(conn):
+        if not valuation.is_live(trade, mkt.as_of):
+            continue
         try:
-            base = portfolio.trade_pv_mxn(trade, mkt)
+            base = portfolio.trade_pv_mxn(trade, mkt, fixings)
             per_factor = [fn(trade, base) for fn in fns]
         except Exception as e:  # la operación se excluye de todos los factores
             errors.append({"id": trade["id"], "error": str(e)})
