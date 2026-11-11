@@ -1,0 +1,190 @@
+.vld {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.vld-dim {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.vld-provenance {
+  overflow-wrap: anywhere;
+}
+
+.vld-warning,
+.vld-empty,
+.vld-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+.vld-warning {
+  background: var(--warn-soft);
+  border-left: 3px solid var(--warn);
+}
+
+.vld-empty {
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+}
+
+.vld-error {
+  border-left: 3px solid var(--neg);
+  color: var(--neg);
+}
+
+.vld-totals {
+  margin: 0;
+  font-size: var(--fs-lg);
+}
+
+.vld-totals__fail {
+  color: var(--neg);
+}
+
+.vld-card {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.vld-card > h2 {
+  margin-bottom: var(--space-3);
+}
+
+/* Las tablas anchas se desplazan dentro de su tarjeta: la página nunca desborda. */
+.vld-scroll {
+  overflow-x: auto;
+}
+
+.vld-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.vld-table th,
+.vld-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.vld-table th {
+  border-bottom-color: var(--border-strong);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.vld-table th.num,
+.vld-table td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.vld-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+/* Descripciones y métodos largos: envuelven en vez de ensanchar la tabla. */
+.vld-table td.vld-wrap {
+  min-width: 220px;
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
+.vld-tag {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.vld-ok,
+.vld-verdict--ok {
+  color: var(--pos);
+}
+
+.vld-fail,
+.vld-verdict--fail {
+  color: var(--neg);
+}
+
+.vld-verdict--explained {
+  color: var(--warn);
+}
+
+.vld-verdict {
+  white-space: nowrap;
+}
+
+.vld-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.vld-select {
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.vld-select:hover {
+  border-color: var(--text-dim);
+}
+
+.vld-known + .vld-known {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.vld-known dl {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.vld-known dt {
+  color: var(--text-dim);
+}
+
+.vld-known dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.vld-pre {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
