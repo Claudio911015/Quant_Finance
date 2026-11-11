@@ -14,6 +14,7 @@ add_library(qf
     instruments/iunderlying.cpp
     instruments/bond.cpp
     instruments/swap.cpp
+    instruments/ois_swap.cpp
     instruments/option.cpp
     instruments/capfloor.cpp
     instruments/swaption.cpp

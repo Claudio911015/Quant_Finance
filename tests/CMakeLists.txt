@@ -27,6 +27,7 @@ if(GTest_FOUND)
         test_volsurface.cpp
         test_dualcurve.cpp
         test_ois_bootstrap.cpp
+        test_ois_swap.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)
