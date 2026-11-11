@@ -154,6 +154,11 @@ def _load(path, default: Optional[dict] = None) -> dict:
         return json.load(f)
 
 
+def _count(n: int, singular: str, plural: str) -> str:
+    """«1 explicada», «2 explicadas»: concordancia de número en la salida de consola."""
+    return "%d %s" % (n, singular if n == 1 else plural)
+
+
 def main() -> None:
     report = compare(
         _load(common.CASES_PATH),
@@ -164,7 +169,8 @@ def main() -> None:
         json.dump(report, f, indent=2, ensure_ascii=False)
         f.write("\n")
     t = report["totals"]
-    print("report.json: %d casos · %d dentro · %d explicadas · %d fuera" % (t["cases"], t["within"], t["explained"], t["failed"]))
+    print("report.json: %s · %d dentro · %s · %d fuera" % (
+        _count(t["cases"], "caso", "casos"), t["within"], _count(t["explained"], "explicada", "explicadas"), t["failed"]))
     if t["failed"] > 0 or not all(c["ok"] for c in report["curves"]):
         sys.exit(1)
 

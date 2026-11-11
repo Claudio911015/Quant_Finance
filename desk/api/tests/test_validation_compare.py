@@ -19,3 +19,9 @@ def test_el_reporte_versionado_trae_los_pasos_de_compare():
     with open(common.REPORT_PATH, encoding="utf-8") as f:
         report = json.load(f)
     assert report["reproduce"]["steps"] == compare.STEPS, "regenera el reporte con desk/validation/make_report.sh"
+
+
+def test_la_salida_de_consola_concuerda_en_numero():
+    assert compare._count(1, "explicada", "explicadas") == "1 explicada"
+    assert compare._count(0, "explicada", "explicadas") == "0 explicadas"
+    assert compare._count(62, "caso", "casos") == "62 casos"
