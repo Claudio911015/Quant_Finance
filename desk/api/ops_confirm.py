@@ -92,7 +92,7 @@ def _irs(trade: Dict[str, Any]):
         fixed = p["notional"] * p["fixed_rate"] * (k - previous) / _ACT_360
         previous = k
         schedule.append(_step(
-            "Cupón %d: pierna fija contra pierna variable" % n,
+            "Cupón %d: solo pierna fija (el neto a liquidar depende de la pierna variable)" % n,
             start + timedelta(days=k),
             -fixed if payer else fixed,
             currency,

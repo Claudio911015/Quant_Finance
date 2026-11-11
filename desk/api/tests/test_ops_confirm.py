@@ -158,7 +158,8 @@ def test_irs_schedule_matches_payment_days_and_fixed_leg(client, trade_id, side_
     assert {s["currency"] for s in c["schedule"]} == {currency}
     expected = side_sign * p["notional"] * p["fixed_rate"] * sum(_irs_tau(trade, pay))
     assert sum(s["amount"] for s in c["schedule"]) == pytest.approx(expected, rel=1e-12)
-    assert c["schedule"][0]["description"] == "Cupón 1: pierna fija contra pierna variable"
+    # Auditoría corte 5: el renglón es solo la pierna fija; no debe leerse como el neto a cotejar
+    assert c["schedule"][0]["description"] == "Cupón 1: solo pierna fija (el neto a liquidar depende de la pierna variable)"
     notional = c["terms"][0]
     assert notional["format"] == "amount" and notional["currency"] == currency
     assert c["terms"][1]["format"] == "rate" and c["terms"][1]["value"] == p["fixed_rate"]
