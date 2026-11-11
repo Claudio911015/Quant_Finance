@@ -1,4 +1,5 @@
 import re
+import shutil
 
 import pytest
 
@@ -80,6 +81,12 @@ def test_check_days_son_diez_y_estrictamente_interiores():
     assert all(1 < d < 3640 for d in days)
 
 
+# Sin git o sin .git (p. ej. un tarball del repo) no hay commit que leer: `desk_commit()` devuelve None, que es el
+# comportamiento diseñado (la ruta responde `commit_matches: null`), no un fallo de la suite.
+_HAY_GIT = shutil.which("git") is not None and (common.REPO_ROOT / ".git").exists()
+
+
+@pytest.mark.skipif(not _HAY_GIT, reason="no hay git o no hay .git en este árbol")
 def test_desk_commit_es_un_sha_de_40_hex_en_este_worktree():
     assert re.fullmatch(r"[0-9a-f]{40}", common.desk_commit())
 
