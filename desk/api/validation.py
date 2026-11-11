@@ -21,6 +21,16 @@ def _missing(d: Dict[str, Any], name: str) -> bool:
     return name not in d or d[name] is None
 
 
+def finite_number(v: Any) -> bool:
+    """`int`/`float` finito que no sea `bool`; un entero fuera del rango de `float` no lo es."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    try:
+        return math.isfinite(v)
+    except OverflowError:
+        return False
+
+
 def number(
     d: Dict[str, Any],
     name: str,
@@ -28,6 +38,7 @@ def number(
     gt: Optional[float] = None,
     ge: Optional[float] = None,
     lt: Optional[float] = None,
+    le: Optional[float] = None,
     required: bool = True,
     default: Optional[float] = None,
 ) -> Optional[float]:
@@ -37,7 +48,7 @@ def number(
             raise ApiError(400, "Falta el parámetro '%s'" % name, name)
         return default
     v = d[name]
-    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+    if not finite_number(v):
         raise ApiError(400, "'%s' debe ser un número finito" % name, name)
     if gt is not None and not v > gt:
         raise ApiError(400, "'%s' debe ser mayor que %s" % (name, gt), name)
@@ -45,13 +56,20 @@ def number(
         raise ApiError(400, "'%s' debe ser mayor o igual que %s" % (name, ge), name)
     if lt is not None and not v < lt:
         raise ApiError(400, "'%s' debe ser menor que %s" % (name, lt), name)
+    if le is not None and not v <= le:
+        raise ApiError(400, "'%s' debe ser menor o igual que %s" % (name, le), name)
     return float(v)
 
 
 def integer(
-    d: Dict[str, Any], name: str, *, ge: Optional[int] = None, required: bool = True
+    d: Dict[str, Any],
+    name: str,
+    *,
+    ge: Optional[int] = None,
+    le: Optional[int] = None,
+    required: bool = True,
 ) -> Optional[int]:
-    """Entero (rechaza bool y flotantes) con cota inferior opcional."""
+    """Entero (rechaza bool y flotantes) con cotas inferior y superior opcionales."""
     if _missing(d, name):
         if required:
             raise ApiError(400, "Falta el parámetro '%s'" % name, name)
@@ -61,6 +79,8 @@ def integer(
         raise ApiError(400, "'%s' debe ser un entero" % name, name)
     if ge is not None and v < ge:
         raise ApiError(400, "'%s' debe ser mayor o igual que %s" % (name, ge), name)
+    if le is not None and v > le:
+        raise ApiError(400, "'%s' debe ser menor o igual que %s" % (name, le), name)
     return v
 
 

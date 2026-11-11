@@ -26,6 +26,8 @@ def list_trades():
 def delete_trade(trade_id):
     try:
         tid = int(trade_id)
+        if abs(tid) >= 2 ** 63:  # fuera del rango de enteros de SQLite: no puede existir
+            raise ValueError(trade_id)
     except ValueError:
         raise ApiError(404, "Operación inexistente", "id")
     conn = get_conn()

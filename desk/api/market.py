@@ -5,14 +5,13 @@ El snapshot vive en SQLite como JSON (`data`); las curvas se arman con
 financieras: solo se arman objetos de qfpy y se leen sus resultados.
 """
 import json
-import math
 import sqlite3
 from datetime import date
 from typing import Any, Dict, List, Optional
 
 from desk.api.errors import ApiError
 from desk.api.qf import qfpy
-from desk.api.validation import number
+from desk.api.validation import finite_number, number
 
 CURVES = {
     "TIIE-F": {"currency": "MXN", "period_days": 28},
@@ -241,11 +240,7 @@ def _quote_rate(item: Any, known: Dict[str, Dict[str, Any]]) -> Any:
     if not isinstance(qid, str) or qid not in known:
         raise ApiError(400, "Cotización desconocida: %s" % (qid,), "quotes")
     rate = item.get("rate")
-    if (
-        isinstance(rate, bool)
-        or not isinstance(rate, (int, float))
-        or not math.isfinite(rate)
-    ):
+    if not finite_number(rate):
         raise ApiError(400, "La tasa de %s debe ser un número" % qid, "quotes")
     if not _RATE_MIN < rate < _RATE_MAX:
         raise ApiError(

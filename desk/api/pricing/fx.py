@@ -8,7 +8,7 @@ del mercado.
 from datetime import date, timedelta
 from typing import Any, Dict
 
-from desk.api.pricing.base import Product
+from desk.api.pricing.base import MAX_DAYS, MAX_YEARS, Product
 from desk.api.qf import qfpy
 from desk.api.validation import choice, integer, number
 
@@ -26,7 +26,7 @@ def _fx_params(d: Dict[str, Any], with_option_type: bool) -> Dict[str, Any]:
         out["option_type"] = choice(d, "option_type", ["call", "put"])
     out["notional_usd"] = number(d, "notional_usd", gt=0)
     out["strike"] = number(d, "strike", gt=0)
-    out["days"] = integer(d, "days", ge=1)
+    out["days"] = integer(d, "days", ge=1, le=MAX_DAYS)
     return out
 
 
@@ -123,7 +123,7 @@ def _equity_validate(params: Dict[str, Any]) -> Dict[str, Any]:
         "volatility": number(params, "volatility", gt=0),
         "rate": number(params, "rate"),
         "dividend_yield": number(params, "dividend_yield", ge=0),
-        "maturity_years": number(params, "maturity_years", gt=0),
+        "maturity_years": number(params, "maturity_years", gt=0, le=MAX_YEARS),
         "quantity": number(params, "quantity", gt=0, required=False, default=1.0),
     }
 

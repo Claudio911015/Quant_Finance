@@ -4,13 +4,18 @@ P&L por operación = `pv_mxn(choque) − pv_mxn(base)`; la revaluación la hace 
 (vía `portfolio.trade_pv_mxn`). Aquí solo se validan los escenarios, se arman los choques
 y se suma.
 """
-import math
 import sqlite3
 from typing import Any, Dict, List
 
 from desk.api import market, portfolio
 from desk.api.errors import ApiError
 from desk.api.market import MarketContext
+from desk.api.validation import finite_number
+
+
+_MAX_BP = 1000.0  # |bp| máximo de un choque de curva
+_MIN_PCT = -90.0  # exclusivo
+_MAX_PCT = 500.0  # inclusivo
 
 
 def _bad(index: int, msg: str) -> ApiError:
@@ -19,7 +24,7 @@ def _bad(index: int, msg: str) -> ApiError:
 
 def _finite(spec: Dict[str, Any], key: str, index: int) -> float:
     v = spec.get(key)
-    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+    if not finite_number(v):
         raise _bad(index, "'%s' debe ser un número finito" % key)
     return float(v)
 
@@ -39,14 +44,16 @@ def _validate(body: Dict[str, Any]) -> List[Dict[str, Any]]:
         kind = spec.get("type")
         if kind in ("parallel", "steepener"):
             curve = spec.get("curve")
-            if curve not in market.CURVES:
+            if not isinstance(curve, str) or curve not in market.CURVES:
                 raise _bad(i, "'curve' debe ser una de: %s" % ", ".join(market.CURVES))
-            out.append({"name": name.strip(), "type": kind, "curve": curve,
-                        "bp": _finite(spec, "bp", i)})
+            bp = _finite(spec, "bp", i)
+            if abs(bp) > _MAX_BP:
+                raise _bad(i, "'bp' debe estar entre -%g y %g" % (_MAX_BP, _MAX_BP))
+            out.append({"name": name.strip(), "type": kind, "curve": curve, "bp": bp})
         elif kind == "fx_spot":
             pct = _finite(spec, "pct", i)
-            if not pct > -100:
-                raise _bad(i, "'pct' debe ser mayor que -100")
+            if not _MIN_PCT < pct <= _MAX_PCT:
+                raise _bad(i, "'pct' debe ser mayor que %g y no mayor que %g" % (_MIN_PCT, _MAX_PCT))
             out.append({"name": name.strip(), "type": kind, "pct": pct})
         else:
             raise _bad(i, "'type' debe ser uno de: parallel, steepener, fx_spot")

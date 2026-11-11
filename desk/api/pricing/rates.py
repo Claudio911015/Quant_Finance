@@ -6,8 +6,9 @@ toda la matemática (bootstrap, descuento, Hull-White, par rate) vive en C++.
 from datetime import date, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
+from desk.api.errors import ApiError
 from desk.api.market import CURVES, MarketContext
-from desk.api.pricing.base import Product
+from desk.api.pricing.base import MAX_BOND_YEARS, MAX_PERIODS, MAX_YEARS, Product
 from desk.api.qf import qfpy
 from desk.api.validation import choice, integer, number
 
@@ -63,7 +64,7 @@ def _irs_validate(d: Dict[str, Any]) -> Dict[str, Any]:
         "curve": _curve(d),
         "side": choice(d, "side", ("payer", "receiver")),
         "notional": number(d, "notional", gt=0),
-        "periods": integer(d, "periods", ge=1),
+        "periods": integer(d, "periods", ge=1, le=MAX_PERIODS),
         "fixed_rate": number(d, "fixed_rate", required=False),
     }
 
@@ -132,7 +133,7 @@ def _cap_floor_validate(d: Dict[str, Any]) -> Dict[str, Any]:
         "cap_type": choice(d, "cap_type", ("cap", "floor")),
         "notional": number(d, "notional", gt=0),
         "strike": number(d, "strike", gt=0),
-        "periods": integer(d, "periods", ge=1),
+        "periods": integer(d, "periods", ge=1, le=MAX_PERIODS),
     }
 
 
@@ -176,14 +177,24 @@ def _cap_floor_describe(p: Dict[str, Any], as_of: date) -> Dict[str, Any]:
 # -------------------------------------------------------------------------- swaption
 
 def _swaption_validate(d: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    p = {
         "curve": _curve(d),
         "swaption_type": choice(d, "swaption_type", ("payer", "receiver")),
         "notional": number(d, "notional", gt=0),
         "strike": number(d, "strike", gt=0),
-        "expiry_years": number(d, "expiry_years", gt=0),
-        "swap_tenor_years": number(d, "swap_tenor_years", gt=0),
+        "expiry_years": number(d, "expiry_years", gt=0, le=MAX_YEARS),
+        "swap_tenor_years": number(d, "swap_tenor_years", gt=0, le=MAX_YEARS),
     }
+    # `Swaption::price` redondea tenor × frecuencia al número de pagos; con 0 pagos escribe
+    # fuera de rango y tumba el proceso (segfault), así que se exige al menos un pago.
+    frequency = _DAYS_PER_YEAR / CURVES[p["curve"]]["period_days"]
+    if p["swap_tenor_years"] * frequency < 0.5:
+        raise ApiError(
+            400,
+            "'swap_tenor_years' debe cubrir al menos medio periodo de pago (%.4f años)" % (0.5 / frequency),
+            "swap_tenor_years",
+        )
+    return p
 
 
 def _swaption_instrument(p: Dict[str, Any], mkt: MarketContext) -> "qfpy.Swaption":
@@ -236,13 +247,21 @@ def _swaption_describe(p: Dict[str, Any], as_of: date) -> Dict[str, Any]:
 # ----------------------------------------------------------------------------- bond
 
 def _bond_validate(d: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    p = {
         "curve": _curve(d, default="TIIE-F"),
         "face": number(d, "face", gt=0),
         "coupon_rate": number(d, "coupon_rate", ge=0),
-        "periods": integer(d, "periods", ge=1),
+        "periods": integer(d, "periods", ge=1, le=MAX_PERIODS),
         "frequency": number(d, "frequency", gt=0, required=False, default=2.0),
     }
+    if p["periods"] / p["frequency"] > MAX_BOND_YEARS:
+        raise ApiError(
+            400,
+            "'frequency' es demasiado baja: el bono duraría más de %d años (periods / frequency)"
+            % MAX_BOND_YEARS,
+            "frequency",
+        )
+    return p
 
 
 def _bond_instrument(p: Dict[str, Any]) -> "qfpy.Bond":

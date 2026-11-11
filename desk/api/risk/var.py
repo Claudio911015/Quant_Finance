@@ -3,7 +3,6 @@
 Las exposiciones salen de re-valuar cada operación con choques pequeños del mercado
 (P&L en MXN); el VaR lo calcula `qfpy.delta_normal_var`. Aquí no hay fórmulas de VaR.
 """
-import math
 import sqlite3
 from typing import Any, Callable, Dict, List
 
@@ -11,7 +10,7 @@ from desk.api import market, portfolio
 from desk.api.errors import ApiError
 from desk.api.market import MarketContext
 from desk.api.qf import qfpy
-from desk.api.validation import number
+from desk.api.validation import finite_number, number
 
 _FX_FACTOR = "USDMXN"
 _FX_BUMP_PCT = 1.0  # el delta FX se toma por diferencia central de ±1 %
@@ -54,7 +53,7 @@ def _factor_vols(body: Dict[str, Any], names: List[str]) -> Dict[str, float]:
                 "Factor desconocido en 'factor_vols': %s (válidos: %s)" % (key, ", ".join(names)),
                 "factor_vols",
             )
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
+        if not finite_number(v) or v < 0:
             raise ApiError(
                 400, "La vol de '%s' en 'factor_vols' debe ser un número >= 0" % key, "factor_vols"
             )
