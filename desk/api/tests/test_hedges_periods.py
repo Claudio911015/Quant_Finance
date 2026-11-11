@@ -142,10 +142,14 @@ def test_matching_forward_is_perfectly_effective_before_and_at_maturity(client):
 
 def test_over_hedge_books_only_the_hypothetical_change_to_oci(client):
     _, hid = _hedge(client, notional=1.2 * NOTIONAL, hedge_ratio=1.0)
-    (d1,) = _snapshots(client, 35)
+    (d1,) = _snapshots(client, 35)  # D1 cruza el cupón del día 28
     p = _closed(client, hid, d1)
     assert abs(p["oci"]) == pytest.approx(abs(p["hypo_cum"]), abs=1e-9)
-    assert p["ineffectiveness"] == pytest.approx(p["d_inst_cum"] - p["d_oci"], abs=1e-9)
+    # C3: lo liquidado entra a la regla del menor, así que el exceso del cupón también es inefectividad.
+    assert p["ineffectiveness"] == pytest.approx(
+        p["d_inst_cum"] + p["settled_period"] - p["d_oci"] - p["recycled"], abs=1e-9
+    )
+    assert p["ineffectiveness"] == pytest.approx(p["inst_total"] - p["hypo_total"], abs=1e-6)
     assert p["ineffectiveness"] != 0
     assert abs(p["inst_cum"]) > abs(p["hypo_cum"])
 
@@ -165,9 +169,11 @@ def test_opposite_signs_leave_oci_at_zero_and_everything_in_profit_or_loss(clien
     (d1,) = _snapshots(client, 35)
     p = _closed(client, hid, d1)
     assert p["inst_cum"] * p["hypo_cum"] < 0
-    assert p["oci"] == 0 and p["d_oci"] == 0
-    assert p["ineffectiveness"] == pytest.approx(p["d_inst_cum"], abs=1e-9)
-    assert _net(p["entries"], hedges.ACC_OCI) == 0
+    assert p["oci"] == 0 and p["d_oci"] == 0 and p["effective_cum"] == 0 and p["recycled"] == 0
+    # Sin parte efectiva, todo lo que hizo el instrumento (cambio de valor y cupón) es inefectividad.
+    assert p["ineffectiveness"] == pytest.approx(p["d_inst_cum"] + p["settled_period"], abs=1e-9)
+    assert p["settled_period"] != 0
+    assert _net(p["entries"], hedges.ACC_OCI) == 0 and hedges.ACC_RECYCLING not in _accounts(p["entries"])
 
 
 # ------------------------------------------------------------------------- R4: fracción y cuadre
@@ -196,10 +202,10 @@ def test_a_coupon_in_the_period_is_settled_in_cash_and_recycled(client):
         p = _closed(client, hid, snapshot)
         assert len(p["settled_flows"]) == 1 and p["settled_flows"][0]["kind"] == "coupon"
         assert p["settled_period"] == pytest.approx(p["settled_flows"][0]["amount_mxn"], abs=1e-9)
-        assert p["recycled"] == p["settled_period"] and p["settled_period"] != 0
-        cents = _cents(round(p["settled_period"], 2))
-        assert _net(p["entries"], hedges.ACC_CASH) == cents
-        assert _net(p["entries"], hedges.ACC_RECYCLING) == -cents
+        assert p["recycled"] == pytest.approx(p["settled_period"], abs=1e-6) and p["settled_period"] != 0
+        assert p["hypo_settled_period"] == pytest.approx(p["settled_period"], abs=1e-6)
+        assert _net(p["entries"], hedges.ACC_CASH) == _cents(round(p["settled_period"], 2))
+        assert abs(_net(p["entries"], hedges.ACC_RECYCLING) + _cents(round(p["recycled"], 2))) <= 1
     assert hedges.ACC_INEFFECTIVENESS not in _accounts(p["entries"])  # cobertura perfecta: sin inefectividad
 
 
@@ -224,6 +230,92 @@ def test_forward_settlement_is_recycled_and_the_reserve_ends_at_zero(client):
     assert _balanced(first["entries"]) and _balanced(last["entries"])
 
 
+# ------------------------------------------------------------------------- C3: regla del menor sobre acumulados con lo liquidado
+
+def test_over_hedge_with_coupons_recycles_only_what_the_hypothetical_settles(client):
+    _, hid = _hedge(client, notional=1.2 * NOTIONAL, hedge_ratio=1.0)
+    d1, d2 = _snapshots(client, 35, 70)
+    periods = [_closed(client, hid, s) for s in (d1, d2)]
+    for p in periods:
+        assert abs(p["settled_period"]) > abs(p["hypo_settled_period"]) > 0
+        assert p["settled_period"] == pytest.approx(1.2 * p["hypo_settled_period"], abs=1e-6)
+        assert p["recycled"] == pytest.approx(p["hypo_settled_period"], abs=1e-9)  # no todo el cupón del swap
+        assert p["effective_cum"] == pytest.approx(p["hypo_total"], abs=1e-9)
+        assert abs(p["inst_total"]) > abs(p["hypo_total"])
+        assert abs(p["identity_residual"]) <= 1e-6 and _balanced(p["entries"])
+    # La reserva es lo efectivo acumulado menos lo reciclado, y el exceso del cupón sale por inefectividad.
+    assert periods[1]["oci"] == pytest.approx(periods[1]["effective_cum"] - sum(p["recycled"] for p in periods), abs=1e-9)
+    assert periods[1]["oci"] == pytest.approx(periods[1]["hypo_cum"], abs=1e-6)
+    total_ineffectiveness = sum(p["ineffectiveness"] for p in periods)
+    assert total_ineffectiveness == pytest.approx(periods[1]["inst_total"] - periods[1]["hypo_total"], abs=1e-6)
+    assert _net(periods[0]["entries"], hedges.ACC_RECYCLING) == -_cents(round(periods[0]["hypo_settled_period"], 2))
+
+
+def test_under_hedge_with_coupons_recycles_the_whole_instrument_settlement(client):
+    _, hid = _hedge(client, notional=0.8 * NOTIONAL)
+    d1, d2 = _snapshots(client, 35, 70)
+    for snapshot in (d1, d2):
+        p = _closed(client, hid, snapshot)
+        assert abs(p["settled_period"]) < abs(p["hypo_settled_period"])
+        assert p["recycled"] == pytest.approx(p["settled_period"], abs=1e-9)
+        assert p["effective_cum"] == pytest.approx(p["inst_total"], abs=1e-9)
+        assert abs(p["oci"]) == pytest.approx(abs(p["inst_cum"]), abs=1e-6)
+        assert p["ineffectiveness"] == pytest.approx(0, abs=1e-6)
+
+
+def test_the_final_close_leaves_the_reserve_and_the_booked_balances_at_exactly_zero(client):
+    """C3/C4: cierre final con la operación `vencida` y un forward a mercado en tres cierres, con fracción 0.7."""
+    trade = market_forward(client, "buy", 10e6, FWD_END)
+    r = designate(client, trade["id"], "forecast_fx", _fx(date=FWD_END.isoformat()), fraction=0.7)
+    assert r.status_code == 201, r.get_json()
+    hid = r.get_json()["id"]
+    for i, days in enumerate((5, 12, 35), 1):
+        roll(client, "MX-DEMO", "F%d" % i, days)
+    fix = trade["params"]["strike"] + 0.37
+    load_fixings(client, "USDMXN", FWD_END, FWD_END + timedelta(days=1), fix)
+    periods = [_closed(client, hid, "F%d" % i) for i in (1, 2, 3)]
+    final = periods[-1]
+    assert [p["trade_status"] for p in periods] == ["viva", "viva", "vencida"]
+    assert final["oci"] == 0 and final["pv_inst"] == 0
+    entries = [e for p in periods for e in p["entries"]]
+    assert _net(entries, hedges.ACC_OCI) == 0 and _net(entries, hedges.ACC_DERIVATIVE) == 0
+    expected = 0.7 * 10e6 * 0.37
+    assert _net(entries, hedges.ACC_CASH) == _cents(round(expected, 2))
+    assert sum(p["recycled"] for p in periods) == pytest.approx(expected, abs=1e-6)
+    assert all(abs(p["identity_residual"]) <= 1e-6 and _balanced(p["entries"]) for p in periods)
+    assert client.get("/api/hedges/%d" % hid).get_json()["oci_balance"] == 0
+
+
+def test_the_final_close_zeroes_the_reserve_even_when_the_hypothetical_outlives_the_instrument(client):
+    """El forward vence antes que la partida: la reserva no puede quedar para un cierre que ya no habrá."""
+    trade = market_forward(client, "buy", 10e6, FWD_END)
+    r = designate(client, trade["id"], "forecast_fx", _fx(date=(FWD_END + timedelta(days=30)).isoformat()))
+    assert r.status_code == 201, r.get_json()
+    hid = r.get_json()["id"]
+    roll(client, "MX-DEMO", "F1", 10)
+    roll(client, "MX-DEMO", "F2", 25)
+    load_fixings(client, "USDMXN", FWD_END, FWD_END + timedelta(days=1), trade["params"]["strike"] + 0.25)
+    first, final = _closed(client, hid, "F1"), _closed(client, hid, "F2")
+    assert first["oci"] != 0 and final["trade_status"] == "vencida"
+    assert final["oci"] == 0 and final["d_oci"] == pytest.approx(-first["oci"], abs=1e-9)
+    assert abs(final["identity_residual"]) <= 1e-6 and _balanced(final["entries"])
+
+
+# ------------------------------------------------------------------------- C4: el acumulado de asientos coincide con los saldos
+
+def test_accumulated_entries_match_the_rounded_balances_after_several_closes(client):
+    _, hid = _hedge(client)
+    d1, d2, d3 = _snapshots(client, 35, 70, 105)
+    periods = [_closed(client, hid, s) for s in (d1, d2, d3)]
+    entries = [e for p in periods for e in p["entries"]]
+    last = periods[-1]
+    assert _net(entries, hedges.ACC_DERIVATIVE) == _cents(round(last["inst_cum"], 2))
+    assert _net(entries, hedges.ACC_OCI) == -_cents(round(last["oci"], 2))
+    cash = sum(p["settled_period"] for p in periods)
+    assert _net(entries, hedges.ACC_CASH) == _cents(round(cash, 2))
+    assert _balanced(entries)
+
+
 # ------------------------------------------------------------------------- R6: valor razonable
 
 def test_fair_value_hedge_of_a_fixed_loan_books_everything_to_profit_or_loss(client):
@@ -243,7 +335,7 @@ def test_fair_value_hedge_of_a_fixed_loan_books_everything_to_profit_or_loss(cli
         assert _balanced(e)
         # El neto de resultados sin la línea de liquidación es la inefectividad (abono = ganancia).
         net = -_net(e, hedges.ACC_FV_RESULT, skip_memo=SETTLEMENT_MEMO)
-        assert net / 100 == pytest.approx(p["ineffectiveness"], abs=0.011)
+        assert net / 100 == pytest.approx(p["ineffectiveness"], abs=0.021)  # dos saldos redondeados
         assert p["fv_result"] == pytest.approx(p["ineffectiveness"] + p["settled_period"], abs=1e-9)
 
 
@@ -252,7 +344,8 @@ def test_fair_value_hedge_of_a_fixed_loan_books_everything_to_profit_or_loss(cli
 def test_rounding_residual_is_created_in_the_main_result_account_when_missing():
     entries = hedge_measure.journal(
         "cash_flow",
-        {"d_inst_cum": 0.016, "d_oci": 0.004, "ineffectiveness": 0.004, "settled_period": 0.0, "recycled": 0.0},
+        {"ineffectiveness": 0.004, "recycled": 0.0},
+        {hedges.ACC_DERIVATIVE: 0.016, hedges.ACC_OCI: -0.004, hedges.ACC_CASH: 0.0},
     )
     assert [(e["account"], e["debit"], e["credit"]) for e in entries] == [
         (hedges.ACC_DERIVATIVE, 0.02, 0.0),
@@ -262,14 +355,44 @@ def test_rounding_residual_is_created_in_the_main_result_account_when_missing():
 
 
 def test_rounding_residual_is_absorbed_by_the_last_main_result_line():
-    figures = {"d_inst_cum": 0.026, "d_oci": 0.006, "ineffectiveness": 0.014, "settled_period": 0.0, "recycled": 0.0}
-    entries = hedge_measure.journal("cash_flow", figures)
+    figures = {"ineffectiveness": 0.014, "recycled": 0.0}
+    entries = hedge_measure.journal(
+        "cash_flow", figures, {hedges.ACC_DERIVATIVE: 0.026, hedges.ACC_OCI: -0.006, hedges.ACC_CASH: 0.0}
+    )
     assert [(e["account"], e["debit"], e["credit"]) for e in entries] == [
         (hedges.ACC_DERIVATIVE, 0.03, 0.0),
         (hedges.ACC_OCI, 0.0, 0.01),
         (hedges.ACC_INEFFECTIVENESS, 0.0, 0.02),
     ]
     assert entries[2]["memo"] == "Inefectividad del periodo" and _balanced(entries)
+
+
+def test_balance_accounts_book_the_difference_of_rounded_balances_so_nothing_drifts():
+    """C4: tres periodos que suben 0.004 cada uno suman el saldo redondeado (0.01), no 3 × redondeo(0.004) = 0."""
+    booked = {}
+    for k in (1, 2, 3):
+        balance = 0.004 * k
+        entries = hedge_measure.journal(
+            "cash_flow", {"ineffectiveness": 0.0, "recycled": 0.0},
+            {hedges.ACC_DERIVATIVE: balance, hedges.ACC_OCI: -balance, hedges.ACC_CASH: 0.0}, booked,
+        )
+        for e in entries:
+            booked[e["account"]] = booked.get(e["account"], 0) + _cents(e["debit"]) - _cents(e["credit"])
+        assert _balanced(entries)
+    assert booked[hedges.ACC_DERIVATIVE] == 1 and booked[hedges.ACC_OCI] == -1  # redondeo(0.012) = 0.01, sin deriva
+
+
+def test_fair_value_counterparts_are_the_exact_negatives_of_the_balance_lines():
+    entries = hedge_measure.journal(
+        "fair_value", {},
+        {hedges.ACC_DERIVATIVE: 0.026, hedges.ACC_ITEM_ADJ: -0.026, hedges.ACC_CASH: 0.014},
+    )
+    assert _balanced(entries)
+    assert [(e["account"], e["debit"], e["credit"]) for e in entries] == [
+        (hedges.ACC_DERIVATIVE, 0.03, 0.0), (hedges.ACC_FV_RESULT, 0.0, 0.03),
+        (hedges.ACC_ITEM_ADJ, 0.0, 0.03), (hedges.ACC_FV_RESULT, 0.03, 0.0),
+        (hedges.ACC_CASH, 0.01, 0.0), (hedges.ACC_FV_RESULT, 0.0, 0.01),
+    ]
 
 
 # ------------------------------------------------------------------------- persistencia

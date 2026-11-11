@@ -3,6 +3,8 @@ import csv
 import io
 from datetime import date, timedelta
 
+import pytest
+
 from desk.api import hedges
 from desk.api.tests.hedge_fixture import designate, load_fixings, par_irs, roll
 
@@ -15,7 +17,7 @@ TIIE = 0.07  # por encima de la tasa par: el swap que paga fija gana y hay reser
 NOTICE = "Asientos sugeridos. Metodología pendiente de revisión por un contador con experiencia en IFRS 9"
 REPORT_KEYS = {
     "id", "generated_at", "notice", "relationship", "documentation", "prospective", "periods",
-    "entries_by_period", "entries_total", "fair_value_hierarchy", "reserve",
+    "entries_by_period", "reserve_releases", "entries_total", "fair_value_hierarchy", "reserve",
 }
 PERIOD_KEYS = {
     "id", "snapshot", "as_of", "data_quality", "inst_cum", "hypo_cum", "oci", "d_oci", "ineffectiveness",
@@ -105,7 +107,9 @@ def test_report_has_every_section_of_the_contract(client):
     for block, period in zip(report["entries_by_period"], periods):
         assert block == {"period_id": period["id"], "as_of": period["as_of"], "entries": period["entries"]}
 
-    assert report["reserve"] == {"balance": periods[-1]["oci"], "frozen": False, "note": None}
+    assert report["reserve"] == {"balance": periods[-1]["oci"], "frozen": False, "note": None, "released": 0}
+    assert report["reserve_releases"] == []
+    assert report["relationship"]["warnings"] == []
     assert periods[-1]["oci"] != 0
 
 
@@ -170,7 +174,7 @@ def test_fair_value_report_totals_land_in_the_fair_value_result_account(client):
     assert hedges.ACC_OCI not in accounts and hedges.ACC_RECYCLING not in accounts
     assert report["relationship"]["hedge_type"] == "fair_value"
     assert report["documentation"]["hedged_item"]["item_kind"] == "fixed_loan"
-    assert report["reserve"] == {"balance": 0.0, "frozen": False, "note": None}
+    assert report["reserve"] == {"balance": 0.0, "frozen": False, "note": None, "released": 0}
 
 
 def test_a_relationship_without_closes_reports_empty_sections(client):
@@ -213,17 +217,55 @@ def test_csv_debits_equal_credits_to_the_cent(client):
     assert any(float(r[4]) > 0 for r in rows) and any(float(r[5]) > 0 for r in rows)
 
 
+def _dedesignate(client, hid, snapshot):
+    r = client.post(
+        "/api/hedges/%d/dedesignate" % hid, json={"snapshot": snapshot, "reason": "Prepago del crédito", "cause": "instrument_ended"}
+    )
+    assert r.status_code == 201, r.get_json()
+    return r.get_json()
+
+
 def test_dedesignated_relationship_reports_the_frozen_reserve(client):
     hid, periods = _two_closes(client)
-    when = (date.fromisoformat(periods[-1]["as_of"]) + timedelta(days=1)).isoformat()
-    r = client.post("/api/hedges/%d/dedesignate" % hid, json={"date": when, "reason": "Prepago del crédito"})
-    assert r.status_code == 201, r.get_json()
+    _dedesignate(client, hid, "D70")
 
     report = _report(client, hid)
 
-    assert report["reserve"] == {"balance": periods[-1]["oci"], "frozen": True, "note": hedges.FROZEN_NOTE}
+    assert report["reserve"] == {"balance": periods[-1]["oci"], "frozen": True, "note": hedges.FROZEN_NOTE, "released": 0}
     assert report["relationship"]["status"] == "desdesignada"
-    assert report["relationship"]["dedesignation"]["frozen_oci"] == periods[-1]["oci"]
+    dedesignation = report["relationship"]["dedesignation"]
+    assert dedesignation["frozen_oci"] == periods[-1]["oci"] and dedesignation["cause"] == "instrument_ended"
+    assert dedesignation["snapshot"] == "D70"
+
+
+def test_reserve_releases_appear_in_the_report_the_totals_and_the_csv(client):
+    hid, periods = _two_closes(client)
+    detail = _dedesignate(client, hid, "D70")
+    frozen = detail["oci_balance"]
+    part = round(frozen / 4, 2)
+    for body in ({"amount": part, "cause": "flow_occurred"}, {"cause": "flow_no_longer_expected"}):
+        r = client.post("/api/hedges/%d/release" % hid, json={"snapshot": "D70", **body})
+        assert r.status_code == 201, r.get_json()
+
+    report = _report(client, hid)
+
+    first, second = report["reserve_releases"]
+    assert (first["snapshot"], first["as_of"], first["cause"], first["amount"]) == ("D70", periods[-1]["as_of"], "flow_occurred", part)
+    assert second["cause"] == "flow_no_longer_expected" and second["reserve_after"] == 0.0
+    assert second["amount"] == pytest.approx(frozen - part, abs=1e-9)
+    assert report["reserve"] == {"balance": 0.0, "frozen": True, "note": None, "released": pytest.approx(frozen, abs=1e-9)}
+    # Los totales por cuenta suman cierres y liberaciones: ORI queda en 0.00 y los asientos siguen cuadrando.
+    total = {t["account"]: (_cents(t["debit"]), _cents(t["credit"])) for t in report["entries_total"]}
+    assert total[hedges.ACC_OCI][0] == total[hedges.ACC_OCI][1]
+    assert hedges.ACC_INEFFECTIVENESS in total
+    assert sum(d for d, _ in total.values()) == sum(c for _, c in total.values())
+    rows = _csv_rows(client, hid)
+    release_rows = [r for r in rows if r[0] == ""]
+    assert len(rows) == sum(len(p["entries"]) for p in periods) + 4 and len(release_rows) == 4
+    assert {r[2] for r in release_rows} == {"D70"} and {r[1] for r in release_rows} == {periods[-1]["as_of"]}
+    assert sum(_cents(float(r[4])) for r in rows) == sum(_cents(float(r[5])) for r in rows)
+    ori = sum(_cents(float(r[4])) - _cents(float(r[5])) for r in rows if r[3] == hedges.ACC_OCI)
+    assert ori == 0  # el acumulado de ORI en el CSV (cierres + liberaciones) es 0.00
 
 
 def test_prospective_snapshot_after_maturity_is_reported_as_an_error_not_a_failure(client):

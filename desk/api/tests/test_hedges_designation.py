@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from desk.api.tests.hedge_fixture import DOC, designate, market_forward, par_irs
+from desk.api.tests.hedge_fixture import DOC, designate, load_fixings, market_forward, par_irs, roll
 
 D0 = date(2026, 11, 10)
 LOAN_END = D0 + timedelta(days=364)  # 13 periodos de 28 días: el swap tiene exactamente las fechas del crédito
@@ -288,3 +288,131 @@ def test_active_fractions_of_one_trade_cannot_exceed_one(app, client, loan_trade
     assert rest.status_code == 201, rest.get_json()
     assert _counts(app) == [2, 2, 0]
     assert [h["fraction"] for h in client.get("/api/hedges?trade_id=%d" % loan_trade["id"]).get_json()["hedges"]] == [0.6, 0.4]
+
+
+# ------------------------------------------------------------------------- C1: designar en orden y sin solapar
+
+def _later_snapshot(client, days=35):
+    """Rueda MX-DEMO `days` días con TIIE-F cargada; devuelve el id del snapshot y su fecha."""
+    sid = "D%d" % days
+    as_of = date.fromisoformat(roll(client, "MX-DEMO", sid, days))
+    load_fixings(client, "TIIE-F", D0, as_of, 0.07)
+    return sid, as_of
+
+
+def test_a_designation_dated_before_the_last_event_of_the_trade_is_409_on_snapshot(app, client, loan_trade):
+    first = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=0.5)
+    assert first.status_code == 201, first.get_json()
+    sid, as_of = _later_snapshot(client)
+    assert client.post("/api/hedges/%d/periods" % first.get_json()["id"], json={"snapshot": sid}).status_code == 201
+    before = _counts(app)
+
+    r = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=0.5)  # con MX-DEMO (2026-11-10)
+
+    assert r.status_code == 409 and r.get_json()["field"] == "snapshot"
+    assert as_of.isoformat() in r.get_json()["error"] and "#%d" % first.get_json()["id"] in r.get_json()["error"]
+    assert _counts(app) == before
+    # En la fecha del último evento sí se puede, y la fracción cuenta lo vigente ese día.
+    ok = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=0.5, snapshot=sid)
+    assert ok.status_code == 201, ok.get_json()
+    assert ok.get_json()["designation_date"] == as_of.isoformat() and ok.get_json()["designation_snapshot"] == sid
+
+
+def test_designating_again_with_an_old_snapshot_after_a_dedesignation_is_no_longer_a_150_percent_overlap(app, client, loan_trade):
+    half = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=0.5).get_json()["id"]
+    sid, _ = _later_snapshot(client)
+    assert client.post("/api/hedges/%d/periods" % half, json={"snapshot": sid}).status_code == 201
+    r = client.post(
+        "/api/hedges/%d/dedesignate" % half, json={"snapshot": sid, "reason": "Prepago", "cause": "instrument_ended"}
+    )
+    assert r.status_code == 201, r.get_json()
+    before = _counts(app)
+
+    retro = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=1.0)  # MX-DEMO es anterior a la desdesignación
+
+    assert retro.status_code == 409 and retro.get_json()["field"] == "snapshot"
+    assert _counts(app) == before
+    same_day = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=1.0, snapshot=sid)
+    assert same_day.status_code == 201, same_day.get_json()  # la desdesignada ese día ya no cuenta
+
+
+def test_the_fraction_limit_counts_what_is_in_force_on_the_designation_date(client, loan_trade):
+    first = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=0.5)
+    assert first.status_code == 201, first.get_json()
+    sid, _ = _later_snapshot(client)
+
+    ok = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=0.5, snapshot=sid)
+    over = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=0.1, snapshot=sid)
+
+    assert ok.status_code == 201, ok.get_json()
+    assert over.status_code == 409 and over.get_json()["field"] == "fraction"
+
+
+def test_other_trades_do_not_constrain_the_designation_date(client, loan_trade):
+    sid, _ = _later_snapshot(client)
+    other = par_irs(client, "TIIE-F", 500e6, D0, LOAN_END)
+    assert designate(client, other["id"], "floating_loan", _loan(), snapshot=sid).status_code == 201
+
+    assert designate(client, loan_trade["id"], "floating_loan", _loan()).status_code == 201  # MX-DEMO, otra operación
+
+
+# ------------------------------------------------------------------------- C6: avisos al designar
+
+def _codes(body):
+    return [w["code"] for w in body["warnings"]]
+
+
+def test_a_clean_designation_has_no_warnings(client, loan_trade):
+    r = designate(client, loan_trade["id"], "floating_loan", _loan())
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["warnings"] == []
+    assert r.get_json()["events"][0]["data"]["warnings"] == []
+
+
+def test_a_relationship_without_economic_relationship_is_accepted_with_a_warning(client):
+    trade = par_irs(client, "TIIE-F", 500e6, D0, LOAN_END, side="receiver")  # recibe fija: se mueve al revés que la deuda
+
+    r = designate(client, trade["id"], "floating_loan", _loan(side="pays_floating"))
+
+    assert r.status_code == 201, r.get_json()
+    d = r.get_json()
+    assert _codes(d) == ["no_economic_relationship"]
+    assert set(d["warnings"][0]) == {"code", "message"} and "relación económica" in d["warnings"][0]["message"]
+    assert d["events"][0]["data"]["warnings"] == d["warnings"]  # queda en el evento de designación
+    assert client.get("/api/hedges/%d" % d["id"]).get_json()["warnings"] == d["warnings"]
+
+
+def test_an_off_market_instrument_is_accepted_with_a_warning_that_states_its_value(client):
+    trade = _book_at(client, D0.isoformat(), D0.isoformat(), LOAN_END.isoformat())  # fija 7 %, lejos de la par
+
+    r = designate(client, trade["id"], "floating_loan", _loan())
+
+    assert r.status_code == 201, r.get_json()
+    d = r.get_json()
+    assert _codes(d) == ["instrument_off_market"]
+    assert abs(d["designation"]["pv_inst"]) > 1e-6 * 500e6
+    assert "%.2f" % d["designation"]["pv_inst"] in d["warnings"][0]["message"]
+    assert "inefectividad" in d["warnings"][0]["message"]
+
+
+def test_a_forecast_flow_on_a_weekend_is_accepted_with_a_warning(client):
+    saturday = date(2027, 5, 15)
+    trade = market_forward(client, "buy", 10e6, saturday)
+
+    r = designate(client, trade["id"], "forecast_fx", _fx(date=saturday.isoformat()))
+
+    assert r.status_code == 201, r.get_json()
+    assert _codes(r.get_json()) == ["forecast_date_weekend"]
+    assert saturday.isoformat() in r.get_json()["warnings"][0]["message"]
+    weekday = market_forward(client, "buy", 10e6, FX_END)  # martes
+    assert designate(client, weekday["id"], "forecast_fx", _fx()).get_json()["warnings"] == []
+
+
+def test_several_warnings_come_in_a_stable_order(client):
+    saturday = date(2027, 5, 15)
+    trade = market_forward(client, "sell", 10e6, saturday)  # vende USD: al revés de la compra pronosticada
+
+    r = designate(client, trade["id"], "forecast_fx", _fx(date=saturday.isoformat(), side="buy_usd"))
+
+    assert r.status_code == 201, r.get_json()
+    assert _codes(r.get_json()) == ["no_economic_relationship", "forecast_date_weekend"]

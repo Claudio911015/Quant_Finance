@@ -72,7 +72,16 @@ def close_period(hedge_id):
 def dedesignate(hedge_id):
     hid = _hedge_id(hedge_id)
     conn = get_conn()
-    detail = hedges.dedesignate(conn, hid, body_object())
+    detail = hedge_measure.dedesignate(conn, hid, body_object())
+    conn.commit()
+    return jsonify(ensure_finite(detail)), 201
+
+
+@bp.post("/api/hedges/<hedge_id>/release")
+def release_reserve(hedge_id):
+    hid = _hedge_id(hedge_id)
+    conn = get_conn()
+    detail = hedge_measure.release_reserve(conn, hid, body_object())
     conn.commit()
     return jsonify(ensure_finite(detail)), 201
 

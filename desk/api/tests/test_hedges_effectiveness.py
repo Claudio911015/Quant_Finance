@@ -60,13 +60,14 @@ def test_identical_loan_swap_matches_every_term_and_every_ratio_is_one(client):
     trade = par_irs(client, "TIIE-F", 500e6, D0, LOAN_END)
     body = _ok(client, _hedge(client, trade, "floating_loan", _loan()))
     assert (body["snapshot"], body["as_of"]) == ("MX-DEMO", D0.isoformat())
-    assert [t["term"] for t in body["critical_terms"]] == ["notional", "index", "start_date", "maturity_date"]
-    assert [t["label"] for t in body["critical_terms"]] == ["Nocional", "Índice", "Inicio", "Vencimiento"]
+    assert [t["term"] for t in body["critical_terms"]] == ["notional", "index", "start_date", "maturity_date", "side"]
+    assert [t["label"] for t in body["critical_terms"]] == ["Nocional", "Índice", "Inicio", "Vencimiento", "Sentido"]
     assert set(_results(body).values()) == {"match"}
     notional = body["critical_terms"][0]
     assert (notional["instrument"], notional["item"]) == (500e6, 500e6)
     assert [(t["instrument"], t["item"]) for t in body["critical_terms"][1:]] == [
         ("TIIE-F", "TIIE-F"), (D0.isoformat(), D0.isoformat()), (LOAN_END.isoformat(), LOAN_END.isoformat()),
+        ("payer", "pays_floating"),  # el swap que paga fija compensa al crédito que paga variable
     ]
     counted = [s for s in body["scenarios"] if s["ratio"] is not None]
     assert counted and body["scenarios_counted"] == len(counted)
@@ -192,7 +193,10 @@ def test_opposite_signs_mean_no_economic_relationship(client):
     assert counted and all(r == pytest.approx(-1.0, abs=1e-6) for r in counted)
     assert body["economic_relationship"] is False
     assert body["in_reference_range"] == 0
-    assert set(_results(body).values()) == {"match"}  # los términos críticos no ven el sentido de un swap
+    results = _results(body)  # C6 / D-4: el término `side` delata el swap del lado equivocado
+    assert results.pop("side") == "mismatch" and set(results.values()) == {"match"}
+    side = next(t for t in body["critical_terms"] if t["term"] == "side")
+    assert (side["instrument"], side["item"]) == ("receiver", "pays_floating")
 
 
 def test_a_half_fraction_of_a_double_notional_swap_matches_the_loan_notional(client):
@@ -265,3 +269,25 @@ def test_a_swap_that_matured_before_the_loan_is_a_409_on_the_trade(client):
     r = _effectiveness(client, hedge_id, "ENTRE")
     assert r.status_code == 409 and r.get_json()["field"] == "snapshot"
     assert "operación" in r.get_json()["error"]
+
+
+@pytest.mark.parametrize(
+    "item_kind, loan_side, swap_side, expected",
+    [
+        ("floating_loan", "pays_floating", "payer", "match"),
+        ("floating_loan", "receives_floating", "receiver", "match"),
+        ("floating_loan", "receives_floating", "payer", "mismatch"),
+        ("fixed_loan", "pays_fixed", "receiver", "match"),
+        ("fixed_loan", "receives_fixed", "payer", "match"),
+        ("fixed_loan", "pays_fixed", "payer", "mismatch"),
+    ],
+)
+def test_the_side_term_compares_the_swap_with_the_side_that_offsets_the_loan(
+    client, item_kind, loan_side, swap_side, expected
+):
+    fair = item_kind == "fixed_loan"
+    trade = par_irs(client, "TIIE-F", 300e6, D0, FIXED_END, side=swap_side)
+    terms = _fixed_loan(side=loan_side) if fair else _loan(notional=300e6, maturity_date=FIXED_END.isoformat(), side=loan_side)
+    body = _ok(client, _hedge(client, trade, item_kind, terms, hedge_type="fair_value" if fair else "cash_flow"))
+    side = next(t for t in body["critical_terms"] if t["term"] == "side")
+    assert (side["instrument"], side["item"], side["result"]) == (swap_side, loan_side, expected)

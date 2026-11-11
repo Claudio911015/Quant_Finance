@@ -35,7 +35,10 @@ LOAN_INDICES = ("TIIE-F", "SOFR")
 LOAN_SIDES = ("pays_floating", "receives_floating")
 FIXED_LOAN_SIDES = ("pays_fixed", "receives_fixed")
 FX_SIDES = ("buy_usd", "sell_usd")
-HEDGE_EVENT_TYPES = ("designation", "period_close", "dedesignation")
+HEDGE_EVENT_TYPES = ("designation", "period_close", "dedesignation", "reserve_release")
+# IFRS 9 6.5.6: no hay desdesignación voluntaria sin causa; 6.5.12: qué pasa con la reserva congelada.
+DEDESIGNATION_CAUSES = ("instrument_ended", "criteria_not_met", "risk_objective_changed")
+RELEASE_CAUSES = ("flow_occurred", "flow_no_longer_expected")
 STATUS_ACTIVE, STATUS_DEDESIGNATED = "activa", "desdesignada"
 DOC_FIELDS = ("risk_management_objective", "hedged_risk", "effectiveness_method", "ineffectiveness_sources")
 NOTICE = "Asientos sugeridos. Metodología pendiente de revisión por un contador con experiencia en IFRS 9"
@@ -156,13 +159,25 @@ def status(rel: Dict[str, Any]) -> str:
 
 
 def oci_balance(rel: Dict[str, Any]) -> float:
-    """Reserva de cobertura: el `oci` del último periodo (0 si no hay periodos)."""
+    """Reserva de cobertura vigente: el `oci` del último periodo menos lo ya liberado (0 si no hay periodos).
+
+    Cada `reserve_release` guarda el saldo que deja (`reserve_after`), así una liberación total
+    deja exactamente 0 sin residuo de punto flotante.
+    """
+    released = [e for e in rel["events"] if e["type"] == "reserve_release"]
+    if released:
+        return float(released[-1]["data"]["reserve_after"])
     return float(rel["periods"][-1]["result"]["oci"]) if rel["periods"] else 0.0
 
 
 def last_close(rel: Dict[str, Any]) -> Optional[date]:
     """`as_of` del último cierre de periodo, o `None` si no hay."""
     return rel["periods"][-1]["as_of"] if rel["periods"] else None
+
+
+def last_event_date(rel: Dict[str, Any]) -> date:
+    """Fecha del último evento de la relación (siempre hay al menos la designación)."""
+    return max(e["event_date"] for e in rel["events"])
 
 
 # ------------------------------------------------------------------------------ forma HTTP
@@ -212,8 +227,11 @@ def public_relationship(rel: Dict[str, Any]) -> Dict[str, Any]:
         else {
             "date": closing["event_date"].isoformat(),
             "reason": closing["data"]["reason"],
+            "cause": closing["data"].get("cause"),
+            "snapshot": closing["data"].get("snapshot"),
             "frozen_oci": closing["data"]["frozen_oci"],
         },
+        "warnings": designation.get("warnings", []),
         "oci_balance": oci_balance(rel),
         "last_close": last.isoformat() if last else None,
         "events": [public_event(e) for e in rel["events"]],
@@ -309,6 +327,7 @@ def hypothetical_trade(rel: Dict[str, Any]) -> Dict[str, Any]:
 # ------------------------------------------------------------------------------ designación
 
 _MAX_ID = 2 ** 63 - 1  # mayor entero de SQLite
+OFF_MARKET_TOLERANCE = 1e-6  # |PV| / nocional bajo la cual el instrumento cuenta como a mercado
 
 
 def build_hypothetical(
@@ -397,10 +416,54 @@ def _documentation(raw: Any) -> Dict[str, str]:
     return {name: text(raw, name) for name in DOC_FIELDS}
 
 
+def _in_force(rel: Dict[str, Any], on: date) -> bool:
+    """La relación cuenta su fracción en `on`: designada en o antes de esa fecha y no desdesignada en o antes de ella."""
+    return rel["designation_date"] <= on and not any(
+        e["type"] == "dedesignation" and e["event_date"] <= on for e in rel["events"]
+    )
+
+
+def _designation_warnings(
+    rel: Dict[str, Any], trade: Dict[str, Any], v_inst: Dict[str, Any], mkt: Any, fixings: Any
+) -> List[Dict[str, str]]:
+    """Avisos `{code, message}` al designar (C6). No bloquean: el contador decide con ellos a la vista."""
+    from desk.api import hedge_effectiveness  # import tardío: hedge_effectiveness importa este módulo
+
+    out = []  # type: List[Dict[str, str]]
+    if not hedge_effectiveness.assess(rel, trade, mkt, fixings)["economic_relationship"]:
+        out.append(
+            {
+                "code": "no_economic_relationship",
+                "message": "La prueba prospectiva al snapshot de designación no muestra relación económica "
+                "(IFRS 9 6.4.1(c)(i)): revisa el instrumento y la partida cubierta",
+            }
+        )
+    notional_mxn = float(v_inst["notional"]) * (mkt.spot if v_inst["currency"] == "USD" else 1.0)
+    if abs(v_inst["pv_mxn"]) > OFF_MARKET_TOLERANCE * notional_mxn:
+        out.append(
+            {
+                "code": "instrument_off_market",
+                "message": "El instrumento no está a mercado al designar (valor %.2f MXN): su valor inicial ya está "
+                "en libros, no genera asiento y es fuente de inefectividad" % v_inst["pv_mxn"],
+            }
+        )
+    if rel["item_kind"] == "forecast_fx" and rel["item_terms"]["date"].weekday() >= 5:
+        out.append(
+            {
+                "code": "forecast_date_weekend",
+                "message": "La fecha del flujo pronosticado (%s) es sábado o domingo: se liquidará con el spot "
+                "del snapshot, sin FIX publicado" % rel["item_terms"]["date"].isoformat(),
+            }
+        )
+    return out
+
+
 def create_hedge(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
     """Valida el cuerpo de `POST /api/hedges` en el orden del contrato, guarda la relación y el
-    evento `designation` (con el derivado hipotético de D3) y devuelve el detalle.
+    evento `designation` (con el derivado hipotético de D3 y los avisos de C6) y devuelve el detalle.
 
+    La fecha de designación no puede ser anterior al último evento de ninguna relación de la misma
+    operación (C1, 409 `snapshot`) y el límite de fracción cuenta las relaciones vigentes a esa fecha.
     Quien llama hace `commit`; nada se inserta si algo falla.
     """
     trade_id = integer(body, "trade_id", ge=1, le=_MAX_ID)
@@ -439,7 +502,19 @@ def create_hedge(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
         raise ApiError(
             409, "La operación no está viva al %s (estado: %s)" % (designation_date.isoformat(), state), "trade_id"
         )
-    committed = sum(r["fraction"] for r in load_relationships(conn, trade_id) if status(r) == STATUS_ACTIVE)
+    siblings = load_relationships(conn, trade_id)
+    # C1: la designación va en orden. Una fecha anterior al último evento de cualquier relación de la
+    # operación sería retroactiva (IFRS 9 6.4.1(b) pide documentar al inicio) y podría solapar fracciones.
+    if siblings:
+        latest, owner = max((last_event_date(r), r["id"]) for r in siblings)
+        if designation_date < latest:
+            raise ApiError(
+                409,
+                "La fecha de designación (%s) es anterior al último evento (%s) de la cobertura #%d de esta "
+                "operación: no se admite designar hacia atrás" % (designation_date.isoformat(), latest.isoformat(), owner),
+                "snapshot",
+            )
+    committed = sum(r["fraction"] for r in siblings if _in_force(r, designation_date))
     if committed + fraction > 1 + 1e-12:
         raise ApiError(
             409,
@@ -449,11 +524,19 @@ def create_hedge(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
 
     fixings = fixing_store.load_all(conn)
     hypothetical = build_hypothetical(item_kind, item_terms, designation_date, mkt, fixings)
-    pv_inst = float(trade_valuation.value_trade(trade, mkt, fixings)["pv_mxn"])
+    v_inst = trade_valuation.value_trade(trade, mkt, fixings)
+    pv_inst = float(v_inst["pv_mxn"])
     pv_hypo = float(
         trade_valuation.value_trade(hypothetical_trade({"designation": {"hypothetical": hypothetical}}), mkt, fixings)[
             "pv_mxn"
         ]
+    )
+    warnings = _designation_warnings(
+        {
+            "fraction": fraction, "hedge_ratio": hedge_ratio, "item_kind": item_kind, "item_terms": item_terms,
+            "designation": {"hypothetical": hypothetical},
+        },
+        trade, v_inst, mkt, fixings,
     )
     snapshot_row = conn.execute("SELECT data FROM snapshots WHERE id = ?", (snapshot_id,)).fetchone()
     sources = market.sources_of(json.loads(snapshot_row["data"]))
@@ -477,33 +560,7 @@ def create_hedge(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
             "pv_inst": pv_inst,
             "pv_hypo": pv_hypo,
             "hypothetical": hypothetical,
+            "warnings": warnings,
         },
     )
     return public_relationship(load_relationship(conn, cur.lastrowid))
-
-
-# ------------------------------------------------------------------------------ desdesignación
-
-def dedesignate(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Desdesignación (`POST /api/hedges/<id>/dedesignate`): registra el evento `dedesignation` con la
-    reserva de cobertura congelada (`frozen_oci`) y devuelve el detalle.
-
-    Quien llama hace `commit`; si algo falla no se escribe nada. La relación deja de contar su
-    fracción como comprometida y ya no admite cierres.
-    """
-    rel = load_relationship(conn, hedge_id)
-    when = iso_date(body, "date")
-    reason = text(body, "reason")
-    if status(rel) == STATUS_DEDESIGNATED:
-        raise ApiError(409, "La cobertura ya está desdesignada", "id")
-    last = last_close(rel)
-    since = last if last is not None else rel["designation_date"]
-    if when < since:
-        raise ApiError(
-            409,
-            "La fecha (%s) no puede ser anterior a %s, %s de la cobertura"
-            % (when.isoformat(), since.isoformat(), "el último cierre" if last is not None else "la designación"),
-            "date",
-        )
-    insert_event(conn, hedge_id, "dedesignation", when, {"reason": reason, "frozen_oci": oci_balance(rel)})
-    return public_relationship(load_relationship(conn, hedge_id))

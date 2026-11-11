@@ -118,7 +118,7 @@ def test_detail_of_a_relationship_inserted_by_sql(app, client):
     assert r.status_code == 200, r.get_json()
     d = r.get_json()
     assert d["status"] == "activa" and d["oci_balance"] == 0 and d["last_close"] is None
-    assert d["dedesignation"] is None and d["periods"] == []
+    assert d["dedesignation"] is None and d["periods"] == [] and d["warnings"] == []
     assert (d["id"], d["trade_id"], d["product"], d["counterparty"]) == (
         hid, trade_id, trade["product"], trade["counterparty"],
     )
@@ -168,7 +168,10 @@ def test_periods_and_dedesignation_show_up_in_the_detail_and_the_summary(app, cl
     assert set(first) == {"id", "snapshot", "as_of", "created_at", "oci", "trade_status"}
     assert [e["type"] for e in d["events"]] == ["designation", "period_close", "dedesignation"]
     assert d["status"] == "desdesignada"
-    assert d["dedesignation"] == {"date": "2027-01-20", "reason": "Prepago", "frozen_oci": -300.0}
+    # Una desdesignación guardada antes de C2 no trae causa ni snapshot: el detalle los muestra vacíos.
+    assert d["dedesignation"] == {
+        "date": "2027-01-20", "reason": "Prepago", "cause": None, "snapshot": None, "frozen_oci": -300.0,
+    }
     assert (d["oci_balance"], d["last_close"]) == (-300.0, "2027-01-12")
 
     summary = client.get("/api/hedges").get_json()["hedges"][0]
