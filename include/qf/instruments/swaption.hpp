@@ -47,6 +47,7 @@ public:
     /// @brief Analytical price via Jamshidian decomposition.
     /// @param curve  Market yield curve used for discounting.
     /// @return       Present value of the swaption.
+    /// @throws std::invalid_argument if swapTenor * frequency rounds to zero payments.
     double price(const termstructure::YieldCurve& curve) const;
 
     /// @brief Implement Instrument interface — delegates to price(env.curve()).

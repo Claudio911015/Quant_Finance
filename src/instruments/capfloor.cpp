@@ -91,6 +91,10 @@ CapFloor::CapFloor(CapFloorType type, double notional, double strike,
 double CapFloor::price(const termstructure::YieldCurve& curve) const
 {
     int n = static_cast<int>(std::round(maturity() * frequency_));
+    if (n < 1)
+        throw std::invalid_argument(
+            "CapFloor: maturity must cover at least half a payment period "
+            "(maturity * frequency rounds to zero periods)");
 
     // dt:  uniform time step between payment dates (calendar schedule, not affected by DCC).
     // tau: accrual fraction for interest calculation (affected by DCC).

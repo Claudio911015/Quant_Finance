@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from desk.api.errors import ApiError
 from desk.api.qf import qfpy
-from desk.api.validation import finite_number, number
+from desk.api.validation import MAX_PRICE, finite_number, number
 
 CURVES = {
     "TIIE-F": {"currency": "MXN", "period_days": 28},
@@ -269,7 +269,7 @@ def update_snapshot(
             raise ApiError(400, "'quotes' debe ser una lista no vacía", "quotes")
         known = {q["id"]: q for q in data["quotes"]}
         changes = [_quote_rate(item, known) for item in new_quotes]
-    spot = number(body, "spot", gt=0) if has_spot else None
+    spot = number(body, "spot", gt=0, le=MAX_PRICE) if has_spot else None
 
     for quote, rate in changes:
         quote["rate"] = rate

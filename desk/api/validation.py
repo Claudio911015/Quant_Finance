@@ -6,6 +6,13 @@ from flask import request
 
 from desk.api.errors import ApiError
 
+# Cotas superiores (inclusivas) de las entradas numéricas: por encima de ellas la valuación
+# desborda a Infinity/NaN, que no es JSON válido. Se definen aquí (y no en pricing/base.py)
+# porque `market.py` también las usa y `pricing` importa `market`.
+MAX_AMOUNT = 1e13  # montos: notional, notional_usd, face, quantity
+MAX_PRICE = 1e6  # precios y strikes de precio: spot, strike de FX y de acción
+MAX_RATE = 10.0  # tasas y volatilidades en decimal (10 = 1000 %)
+
 
 def body_object() -> Dict[str, Any]:
     """Cuerpo de la petición como objeto JSON; 400 si falta, está mal formado o no es objeto."""

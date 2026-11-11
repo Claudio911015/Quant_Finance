@@ -10,7 +10,7 @@ from typing import Any, Dict
 
 from desk.api.pricing.base import MAX_DAYS, MAX_YEARS, Product
 from desk.api.qf import qfpy
-from desk.api.validation import choice, integer, number
+from desk.api.validation import MAX_AMOUNT, MAX_PRICE, MAX_RATE, choice, integer, number
 
 _SIDE = {"buy": qfpy.FxSide.Buy, "sell": qfpy.FxSide.Sell}
 _OPTION_TYPE = {"call": qfpy.OptionType.Call, "put": qfpy.OptionType.Put}
@@ -24,8 +24,8 @@ def _fx_params(d: Dict[str, Any], with_option_type: bool) -> Dict[str, Any]:
     out = {"side": choice(d, "side", ["buy", "sell"])}
     if with_option_type:
         out["option_type"] = choice(d, "option_type", ["call", "put"])
-    out["notional_usd"] = number(d, "notional_usd", gt=0)
-    out["strike"] = number(d, "strike", gt=0)
+    out["notional_usd"] = number(d, "notional_usd", gt=0, le=MAX_AMOUNT)
+    out["strike"] = number(d, "strike", gt=0, le=MAX_PRICE)
     out["days"] = integer(d, "days", ge=1, le=MAX_DAYS)
     return out
 
@@ -118,13 +118,13 @@ def _fx_option_price(params: Dict[str, Any], mkt) -> Dict[str, Any]:
 def _equity_validate(params: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "option_type": choice(params, "option_type", ["call", "put"]),
-        "spot": number(params, "spot", gt=0),
-        "strike": number(params, "strike", gt=0),
-        "volatility": number(params, "volatility", gt=0),
-        "rate": number(params, "rate"),
-        "dividend_yield": number(params, "dividend_yield", ge=0),
+        "spot": number(params, "spot", gt=0, le=MAX_PRICE),
+        "strike": number(params, "strike", gt=0, le=MAX_PRICE),
+        "volatility": number(params, "volatility", gt=0, le=MAX_RATE),
+        "rate": number(params, "rate", le=MAX_RATE),
+        "dividend_yield": number(params, "dividend_yield", ge=0, le=MAX_RATE),
         "maturity_years": number(params, "maturity_years", gt=0, le=MAX_YEARS),
-        "quantity": number(params, "quantity", gt=0, required=False, default=1.0),
+        "quantity": number(params, "quantity", gt=0, le=MAX_AMOUNT, required=False, default=1.0),
     }
 
 

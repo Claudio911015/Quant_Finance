@@ -224,3 +224,19 @@ TEST(Swaption, CalculatePVMatchesPrice) {
     Swaption s(SwaptionType::Payer, 1e6, 0.05, 1.0, 5.0, 2.0, 0.1, 0.01);
     EXPECT_DOUBLE_EQ(s.calculatePV(env), s.price(curve));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Guard: a swap tenor shorter than half a payment period rounds to zero payments
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(Swaption, PriceThrowsWhenTenorCoversNoPayments) {
+    auto curve = flatCurve();
+    // 0.1y tenor at 2 payments/year -> round(0.2) = 0 payments (used to write c[-1]).
+    Swaption none(SwaptionType::Payer, 1e6, 0.05, 1.0, 0.1, 2.0, 0.1, 0.01);
+    EXPECT_THROW(none.price(curve), std::invalid_argument);
+    EXPECT_THROW(none.calculatePV(MarketEnvironment(curve)), std::invalid_argument);
+
+    // Exactly half a period rounds up to one payment and still prices.
+    Swaption one(SwaptionType::Payer, 1e6, 0.05, 1.0, 0.25, 2.0, 0.1, 0.01);
+    EXPECT_NO_THROW(one.price(curve));
+}

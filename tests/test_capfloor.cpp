@@ -207,3 +207,19 @@ TEST(CapFloor, PriceScalesWithNotional) {
     CapFloor cap2(CapFloorType::Cap,  2e6, 0.05, 5.0, 4.0, 0.1, 0.01);
     EXPECT_NEAR(cap2.price(curve), 2.0 * cap1.price(curve), 1e-6);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Guard: a maturity shorter than half a payment period rounds to zero periods
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(CapFloor, PriceThrowsWhenMaturityCoversNoPeriods) {
+    auto curve = flatCurve();
+    // 0.1y maturity at 2 periods/year -> round(0.2) = 0 caplets (used to return 0 silently).
+    CapFloor none(CapFloorType::Cap, 1e6, 0.05, 0.1, 2.0, 0.1, 0.01);
+    EXPECT_THROW(none.price(curve), std::invalid_argument);
+    EXPECT_THROW(none.calculatePV(MarketEnvironment(curve)), std::invalid_argument);
+
+    // Exactly half a period rounds up to one caplet and still prices.
+    CapFloor one(CapFloorType::Cap, 1e6, 0.05, 0.25, 2.0, 0.1, 0.01);
+    EXPECT_NO_THROW(one.price(curve));
+}

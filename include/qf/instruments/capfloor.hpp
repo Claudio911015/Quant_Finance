@@ -49,6 +49,7 @@ public:
     /// @brief Analytical price using the stored Hull-White parameters.
     /// @param curve  Market yield curve P(0,T) used for discounting.
     /// @return       Present value of all caplets (or floorlets).
+    /// @throws std::invalid_argument if maturity * frequency rounds to zero payments.
     double price(const termstructure::YieldCurve& curve) const;
 
     /// @brief Implement Instrument interface — delegates to price(env.curve()).

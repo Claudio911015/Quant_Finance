@@ -10,7 +10,7 @@ from desk.api.errors import ApiError
 from desk.api.market import CURVES, MarketContext
 from desk.api.pricing.base import MAX_BOND_YEARS, MAX_PERIODS, MAX_YEARS, Product
 from desk.api.qf import qfpy
-from desk.api.validation import choice, integer, number
+from desk.api.validation import MAX_AMOUNT, MAX_RATE, choice, integer, number
 
 _CURVE_NAMES = tuple(CURVES)
 _DAYS_PER_YEAR = 365.0
@@ -63,9 +63,9 @@ def _irs_validate(d: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "curve": _curve(d),
         "side": choice(d, "side", ("payer", "receiver")),
-        "notional": number(d, "notional", gt=0),
+        "notional": number(d, "notional", gt=0, le=MAX_AMOUNT),
         "periods": integer(d, "periods", ge=1, le=MAX_PERIODS),
-        "fixed_rate": number(d, "fixed_rate", required=False),
+        "fixed_rate": number(d, "fixed_rate", le=MAX_RATE, required=False),
     }
 
 
@@ -131,8 +131,8 @@ def _cap_floor_validate(d: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "curve": _curve(d),
         "cap_type": choice(d, "cap_type", ("cap", "floor")),
-        "notional": number(d, "notional", gt=0),
-        "strike": number(d, "strike", gt=0),
+        "notional": number(d, "notional", gt=0, le=MAX_AMOUNT),
+        "strike": number(d, "strike", gt=0, le=MAX_RATE),  # el strike de un cap/floor es una tasa
         "periods": integer(d, "periods", ge=1, le=MAX_PERIODS),
     }
 
@@ -180,8 +180,8 @@ def _swaption_validate(d: Dict[str, Any]) -> Dict[str, Any]:
     p = {
         "curve": _curve(d),
         "swaption_type": choice(d, "swaption_type", ("payer", "receiver")),
-        "notional": number(d, "notional", gt=0),
-        "strike": number(d, "strike", gt=0),
+        "notional": number(d, "notional", gt=0, le=MAX_AMOUNT),
+        "strike": number(d, "strike", gt=0, le=MAX_RATE),  # el strike de una swaption es una tasa
         "expiry_years": number(d, "expiry_years", gt=0, le=MAX_YEARS),
         "swap_tenor_years": number(d, "swap_tenor_years", gt=0, le=MAX_YEARS),
     }
@@ -249,8 +249,8 @@ def _swaption_describe(p: Dict[str, Any], as_of: date) -> Dict[str, Any]:
 def _bond_validate(d: Dict[str, Any]) -> Dict[str, Any]:
     p = {
         "curve": _curve(d, default="TIIE-F"),
-        "face": number(d, "face", gt=0),
-        "coupon_rate": number(d, "coupon_rate", ge=0),
+        "face": number(d, "face", gt=0, le=MAX_AMOUNT),
+        "coupon_rate": number(d, "coupon_rate", ge=0, le=MAX_RATE),
         "periods": integer(d, "periods", ge=1, le=MAX_PERIODS),
         "frequency": number(d, "frequency", gt=0, required=False, default=2.0),
     }

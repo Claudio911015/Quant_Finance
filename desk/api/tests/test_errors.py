@@ -452,3 +452,90 @@ def test_cotas_de_escenarios_son_inclusivas(client, curve):
     r = client.post("/api/risk/scenarios", json={"snapshot": SNAP, "scenarios": scenarios})
     assert r.status_code == 200, r.get_json()
     assert len(r.get_json()["scenarios"]) == len(scenarios)
+
+
+# --------------------------------------------------------------------------- cotas de magnitud
+
+# Cotas superiores inclusivas (la matemática vive en C++): por encima, la valuación desborda a
+# Infinity/NaN y la respuesta deja de ser JSON válido. Los valores son el contrato, no las
+# constantes del backend: montos 1e13, precios y strikes de precio 1e6, tasas y vols 10.
+AMOUNT, PRICE, RATE = 1e13, 1e6, 10.0
+MAGNITUDE_CAPS: Dict[str, Dict[str, float]] = {
+    "irs": {"notional": AMOUNT, "fixed_rate": RATE},
+    "cap_floor": {"notional": AMOUNT, "strike": RATE},  # el strike de un cap/floor es una tasa
+    "swaption": {"notional": AMOUNT, "strike": RATE},  # ídem para la swaption
+    "bond": {"face": AMOUNT, "coupon_rate": RATE},
+    "fx_forward": {"notional_usd": AMOUNT, "strike": PRICE},
+    "fx_option": {"notional_usd": AMOUNT, "strike": PRICE},
+    "equity_option": {"spot": PRICE, "strike": PRICE, "volatility": RATE, "rate": RATE,
+                      "dividend_yield": RATE, "quantity": AMOUNT},
+}
+
+
+def _magnitude_fields():
+    return [(p, name, cap) for p, caps in MAGNITUDE_CAPS.items() for name, cap in caps.items()]
+
+
+def _just_above(cap: float) -> float:
+    return cap * (1 + 1e-9)
+
+
+def _non_finite(obj: Any, path: str = "") -> List[str]:
+    """Rutas de los números NaN/inf dentro de un JSON ya decodificado."""
+    if isinstance(obj, float):
+        return [] if obj == obj and abs(obj) != float("inf") else [path or "<raíz>"]
+    if isinstance(obj, dict):
+        return [p for k, v in obj.items() for p in _non_finite(v, "%s.%s" % (path, k))]
+    if isinstance(obj, list):
+        return [p for i, v in enumerate(obj) for p in _non_finite(v, "%s[%d]" % (path, i))]
+    return []
+
+
+def test_las_cotas_de_magnitud_cubren_los_productos_del_contrato():
+    assert set(MAGNITUDE_CAPS) == set(PRODUCTS)
+
+
+@pytest.mark.parametrize("product,name,cap", _magnitude_fields())
+def test_magnitud_en_la_cota_valua_con_json_finito(client, product, name, cap):
+    r = client.post("/api/price/%s" % product,
+                    json={"snapshot": SNAP, **SPECS[product]["base"], name: cap})
+    assert r.status_code == 200, r.get_json()
+    assert _non_finite(r.get_json()) == []
+
+
+@pytest.mark.parametrize("product,name,cap", _magnitude_fields())
+def test_magnitud_justo_arriba_de_la_cota_da_400_con_el_campo(client, product, name, cap):
+    params = {**SPECS[product]["base"], name: _just_above(cap)}
+    for url, body in (
+        ("/api/price/%s" % product, {"snapshot": SNAP, **params}),
+        ("/api/trades", _trade_body(product)(params)),
+    ):
+        r = client.post(url, json=body)
+        assert r.status_code == 400, "%s -> %d %s" % (url, r.status_code, r.get_data(as_text=True)[:200])
+        assert r.get_json()["field"] == name
+
+
+@pytest.mark.parametrize("product,name", [(p, n) for p, n, _ in _magnitude_fields()])
+def test_magnitud_absurda_1e300_da_400_y_no_json_invalido(client, product, name):
+    r = client.post("/api/price/%s" % product,
+                    json={"snapshot": SNAP, **SPECS[product]["base"], name: 1e300})
+    assert r.status_code == 400, r.get_data(as_text=True)[:200]
+    assert r.get_json()["field"] == name
+
+
+def test_spot_de_mercado_en_la_cota_se_acepta_y_justo_arriba_da_400(client):
+    url = "/api/market/snapshots/%s" % SNAP
+    r = client.put(url, json={"spot": PRICE})
+    assert r.status_code == 200, r.get_json()
+    assert _non_finite(r.get_json()) == []
+    r = client.put(url, json={"spot": _just_above(PRICE)})
+    assert r.status_code == 400 and r.get_json()["field"] == "spot"
+    r = client.put(url, json={"spot": 1e300})
+    assert r.status_code == 400 and r.get_json()["field"] == "spot"
+
+
+@pytest.mark.parametrize("product", list(SPECS))
+def test_caso_por_defecto_de_cada_pricer_no_devuelve_nan_ni_infinito(client, product):
+    r = client.post("/api/price/%s" % product, json={"snapshot": SNAP, **SPECS[product]["base"]})
+    assert r.status_code == 200, r.get_json()
+    assert _non_finite(r.get_json()) == []

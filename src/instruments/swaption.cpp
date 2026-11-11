@@ -105,6 +105,10 @@ Swaption::Swaption(SwaptionType type, double notional, double strike,
 double Swaption::price(const termstructure::YieldCurve& curve) const
 {
     int n = static_cast<int>(std::round(swapTenor_ * frequency_));
+    if (n < 1)
+        throw std::invalid_argument(
+            "Swaption: swapTenor must cover at least half a payment period "
+            "(swapTenor * frequency rounds to zero payments)");
 
     // dt:  time step between payment dates in calendar years (drives the schedule).
     // tau: accrual fraction per period for interest calculation (driven by DCC).
