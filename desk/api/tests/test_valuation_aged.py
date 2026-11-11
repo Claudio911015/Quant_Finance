@@ -60,6 +60,19 @@ def _csv(client, index, values):
     assert r.status_code == 200, r.get_json()
 
 
+def _business(n):
+    """Fechas ISO de lunes a viernes de los `n` días que empiezan en AS_OF (martes)."""
+    return [_iso(i) for i in range(n) if (AS_OF + timedelta(days=i)).weekday() < 5]
+
+
+def _csv_business(client, index, values, n):
+    """Carga fijaciones de `index` solo en los días hábiles de los `n` días desde AS_OF (como se publican)."""
+    days = _business(n)
+    lines = ["index,date,value"] + ["%s,%s,%r" % (index, d, values(d) if callable(values) else values) for d in days]
+    r = client.post("/api/fixings/csv", json={"csv": "\n".join(lines)})
+    assert r.status_code == 200, r.get_json()
+
+
 def _price(client, product, snap_id, params):
     r = client.post("/api/price/%s" % product, json={**params, "snapshot": snap_id})
     assert r.status_code == 200, r.get_json()
@@ -293,9 +306,9 @@ def test_r7_missing_fixings_warn_and_loaded_fixings_clear_the_warning(client):
     assert row["error"] is None and row["status"] == "viva"
     assert [w["code"] for w in row["warnings"]] == ["missing_fixing"]
     w = row["warnings"][0]
-    assert w["index"] == "TIIE-F" and w["dates"] == [_iso(i) for i in range(10)] and w["message"]
+    assert w["index"] == "TIIE-F" and w["dates"] == _business(10) and w["message"]
     sofr = _rows(client, "D10")[3]  # irs SOFR: aviso del otro índice, valuado en MXN
-    assert sofr["warnings"][0]["index"] == "SOFR" and len(sofr["warnings"][0]["dates"]) == 10
+    assert sofr["warnings"][0]["index"] == "SOFR" and sofr["warnings"][0]["dates"] == _business(10)
     assert sofr["pv_mxn"] == pytest.approx(sofr["pv"] * 18.60, rel=1e-12)
 
     _csv(client, "TIIE-F", [0.0701 + 0.0001 * i for i in range(10)])
@@ -308,9 +321,9 @@ def test_missing_day_takes_last_published_before_it(client):
     _roll(client, "D10", 10)
     _csv(client, "TIIE-F", [0.0705])  # solo el día 0 está publicado
     row = _rows(client, "D10")[1]
-    assert row["warnings"][0]["dates"] == [_iso(i) for i in range(1, 10)]
+    assert row["warnings"][0]["dates"] == _business(10)[1:]  # sábado y domingo no son faltantes
     pv_carried = row["pv_mxn"]
-    _csv(client, "TIIE-F", [0.0705] * 10)  # los días 1-9 con la misma tasa (día 0 ya existe igual)
+    _csv_business(client, "TIIE-F", 0.0705, 10)  # los hábiles 1-9 con la misma tasa (el día 0 ya existe igual)
     full = _rows(client, "D10")[1]
     assert full["warnings"] == []
     assert pv_carried == pytest.approx(full["pv_mxn"], rel=1e-12)
@@ -321,10 +334,85 @@ def test_missing_day_without_any_fixing_uses_the_curve_overnight_rate(client, ap
     row = _rows(client, "D10")[1]
     curve = _context(app, "D10").curves["TIIE-F"]
     overnight = (1.0 / curve.discount_factor(1.0 / 365.0) - 1.0) * 360.0
-    _csv(client, "TIIE-F", [overnight] * 10)
+    _csv_business(client, "TIIE-F", overnight, 10)
     full = _rows(client, "D10")[1]
     assert full["warnings"] == []
     assert row["pv_mxn"] == pytest.approx(full["pv_mxn"], rel=1e-12)
+
+
+# ------------------------------------------------- fines de semana y fijaciones
+
+MON = date(2026, 11, 9)  # lunes
+
+
+def _factor_of(app, published, first, on):
+    """`(factor, avisos)` de `valuation.accrued_factor` para TIIE-F con las fijaciones `published`."""
+    warnings = []
+    mkt = _context(app, "MX-DEMO")
+    factor = valuation.accrued_factor("TIIE-F", first, on, {"TIIE-F": published}, mkt, warnings)
+    return factor, warnings
+
+
+def test_weekend_is_grouped_with_the_friday_fixing_and_does_not_warn(app):
+    rates = [0.0701, 0.0702, 0.0703, 0.0704, 0.0705]  # lunes a viernes
+    published = {MON + timedelta(days=i): r for i, r in enumerate(rates)}
+    factor, warnings = _factor_of(app, published, MON, MON + timedelta(days=7))
+    assert warnings == []
+    assert factor == qfpy.compound_overnight(rates, [1, 1, 1, 1, 3], 360.0)
+
+
+def test_period_ending_on_saturday_leaves_friday_with_one_day(app):
+    rates = [0.0701, 0.0702, 0.0703, 0.0704, 0.0705]
+    published = {MON + timedelta(days=i): r for i, r in enumerate(rates)}
+    factor, warnings = _factor_of(app, published, MON, MON + timedelta(days=5))  # [lun, sáb)
+    assert warnings == [] and factor == qfpy.compound_overnight(rates, [1] * 5, 360.0)
+
+
+def test_period_starting_on_a_weekend_carries_the_friday_fixing_without_warning(app):
+    friday, monday = date(2026, 11, 13), date(2026, 11, 16)
+    published = {friday: 0.0705, monday: 0.0706}
+    factor, warnings = _factor_of(app, published, date(2026, 11, 14), monday + timedelta(days=1))
+    assert warnings == []
+    assert factor == qfpy.compound_overnight([0.0705, 0.0706], [2, 1], 360.0)
+
+
+def test_only_a_missing_weekday_warns_and_carries_the_previous_rate(app):
+    wed = MON + timedelta(days=2)
+    rates = {MON: 0.0701, MON + timedelta(days=1): 0.0702, MON + timedelta(days=3): 0.0704, MON + timedelta(days=4): 0.0705}
+    factor, warnings = _factor_of(app, rates, MON, MON + timedelta(days=7))
+    assert [(w["code"], w["index"], w["dates"]) for w in warnings] == [("missing_fixing", "TIIE-F", [wed.isoformat()])]
+    assert factor == qfpy.compound_overnight([0.0701, 0.0702, 0.0702, 0.0704, 0.0705], [1, 1, 1, 1, 3], 360.0)
+
+
+def test_weekend_fixings_that_were_loaded_are_used_as_they_are(app):
+    rates = [0.0705, 0.0706, 0.0707]  # viernes, sábado y domingo publicados
+    friday = date(2026, 11, 13)
+    published = {friday + timedelta(days=i): r for i, r in enumerate(rates)}
+    factor, warnings = _factor_of(app, published, friday, friday + timedelta(days=3))
+    assert warnings == [] and factor == qfpy.compound_overnight(rates, [1, 1, 1], 360.0)
+
+
+def test_irs_valued_across_a_weekend_with_business_day_fixings_has_no_warning(client):
+    _roll(client, "D7", 7)  # martes 10 -> martes 17: cruza un fin de semana
+    _csv_business(client, "TIIE-F", lambda d: 0.0701, 7)
+    row = _rows(client, "D7")[1]
+    assert row["error"] is None and row["status"] == "viva" and row["warnings"] == []
+
+
+def test_public_helpers_build_the_instrument_value_trade_prices(app):
+    from desk.api import portfolio
+
+    conn = connect(app.config["DESK_DB"])
+    try:
+        mkt = market.load_context(conn, "MX-DEMO")
+        trade = portfolio.get_trade(conn, 1)
+    finally:
+        conn.close()
+    warnings = []
+    swap = valuation.aged_swap(trade, trade["params"], mkt, {}, warnings)
+    assert warnings == []
+    assert float(swap.npv(mkt.env)) == valuation.value_trade(trade, mkt, {})["pv"]
+    assert valuation.shortened("fx_forward", {"days": 91}, 30)["days"] == 30
 
 
 def test_irs_without_fixed_rate_is_a_row_error(app, client):

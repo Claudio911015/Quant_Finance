@@ -205,12 +205,6 @@ def _trades_cases() -> List:
         out.append(_case("POST", url, _raw({**ok, "counterparty": v}), "counterparty", "counterparty=%s" % label))
     for label, v in (("lista", []), ("texto", "x"), ("número", 5), ("bool", True)):
         out.append(_case("POST", url, _raw({**ok, "params": v}), "params", "params=%s" % label))
-    # En el blotter irs exige tasa fija explícita (a diferencia del pricer).
-    irs = SPECS["irs"]["base"]
-    out.append(_case("POST", url, _raw(_trade_body("irs")(_drop(irs, "fixed_rate"))), "fixed_rate",
-                     "irs sin fixed_rate"))
-    out.append(_case("POST", url, _raw(_trade_body("irs")({**irs, "fixed_rate": None})), "fixed_rate",
-                     "irs con fixed_rate null"))
     for product in SPECS:
         out += _product_cases(product, wrap=_trade_body(product), url=url)
     return out

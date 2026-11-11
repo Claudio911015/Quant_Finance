@@ -331,12 +331,14 @@ def update_snapshot(
 
 
 _ROLL_ID = re.compile(r"[A-Za-z0-9_-]{1,40}")
+_ROLLED_SUFFIX = re.compile(r" · rodado al \d{4}-\d{2}-\d{2}$")
 
 
 def roll_snapshot(conn: sqlite3.Connection, source_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """Copia el snapshot `source_id` con otro `id` y `as_of` (`body`); devuelve el payload del nuevo.
 
-    El copia es editable aunque el origen sea `MKT-LIVE`. Errores: 400 `id`/`as_of`,
+    El rótulo es el del origen más ` · rodado al <as_of>`; si el origen ya lo traía, se reemplaza en
+    vez de encadenarse. La copia es editable aunque el origen sea `MKT-LIVE`. Errores: 400 `id`/`as_of`,
     404 `snapshot` si el origen no existe, 409 `id` si el nuevo ya existe.
     """
     new_id = text(body, "id")
@@ -354,7 +356,7 @@ def roll_snapshot(conn: sqlite3.Connection, source_id: str, body: Dict[str, Any]
         "INSERT INTO snapshots (id, label, synthetic, as_of, data) VALUES (?, ?, ?, ?, ?)",
         (
             new_id,
-            "%s · rodado al %s" % (row["label"], as_of),
+            "%s · rodado al %s" % (_ROLLED_SUFFIX.sub("", row["label"]), as_of),
             row["synthetic"],
             as_of,
             row["data"],

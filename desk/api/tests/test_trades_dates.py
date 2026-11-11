@@ -217,18 +217,6 @@ def test_delete_is_always_409_and_missing_is_404(client):
 
 # ----------------------------------------------------------------- rutas nuevas y sus 501
 
-# Cada tarea posterior borra de aquí las rutas que implementa (T4: state y events; T5: fixings;
-# T6: roll; T9: flows y pnl).
-STUB_ROUTES = []
-
-
-@pytest.mark.parametrize("task, method, url, body", STUB_ROUTES, ids=[r[2] for r in STUB_ROUTES])
-def test_unimplemented_routes_answer_501_json(client, task, method, url, body):
-    r = getattr(client, method)(url, json=body) if body is not None else getattr(client, method)(url)
-    assert r.status_code == 501, (task, r.get_json())
-    assert r.get_json() == {"error": "No implementado", "field": None}
-
-
 @pytest.mark.parametrize(
     "method, url, body, status, field",
     [

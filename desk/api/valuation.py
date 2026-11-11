@@ -41,7 +41,7 @@ def _warning(code: str, index: Optional[str], dates: List[date], message: str) -
     return {"code": code, "index": index, "dates": [d.isoformat() for d in dates], "message": message}
 
 
-def _accrued_factor(
+def accrued_factor(
     index: str,
     first_day: date,
     on: date,
@@ -51,21 +51,33 @@ def _accrued_factor(
 ) -> float:
     """Factor acumulado de las fijaciones diarias de `[first_day, on)` (1 si el rango es vacío).
 
-    Un día sin fijación usa la última publicada anterior del índice y, si no hay, la tasa a un día
-    de la curva del snapshot; todos los días así se reportan en un aviso `missing_fixing`.
+    Las tasas a un día solo se publican en días hábiles: la del viernes devenga también sábado y
+    domingo (3 días), así que un sábado o domingo sin fijación no se espera ni se avisa, y se
+    agrupa con el día anterior. Una fijación cargada en sábado o domingo se usa tal cual, como un
+    día más. Un día de lunes a viernes sin fijación usa la última publicada anterior del índice
+    y, si no hay, la tasa a un día de la curva del snapshot, y todos esos días se reportan en un
+    aviso `missing_fixing` (los feriados todavía avisan: no hay calendario de inhábiles).
     """
     published = fixings.get(index, {})
-    days = [first_day + timedelta(days=i) for i in range((on - first_day).days)]
-    missing = [d for d in days if d not in published]
-    ordered = sorted(published) if missing else []
+    ordered = sorted(published)
     overnight = (1.0 / mkt.curves[index].discount_factor(1.0 / _DAYS_PER_YEAR) - 1.0) * 360.0
-    rates = []
-    for d in days:
+
+    def carried(d: date) -> float:  # última publicada anterior a `d`, o la tasa a un día de la curva
+        j = bisect_left(ordered, d)  # ordered[:j] son las fijaciones anteriores a `d`
+        return published[ordered[j - 1]] if j else overnight
+
+    missing = []  # type: List[date]
+    entries = []  # type: List[List[float]]  # [tasa, días que devenga]
+    for i in range((on - first_day).days):
+        d = first_day + timedelta(days=i)
         if d in published:
-            rates.append(published[d])
+            entries.append([published[d], 1])
+        elif d.weekday() >= 5 and entries:  # sábado o domingo sin publicar: sigue la tasa anterior
+            entries[-1][1] += 1
         else:
-            j = bisect_left(ordered, d)  # ordered[:j] son las fijaciones anteriores a `d`
-            rates.append(published[ordered[j - 1]] if j else overnight)
+            if d.weekday() < 5:
+                missing.append(d)
+            entries.append([carried(d), 1])
     if missing:
         warnings.append(
             _warning(
@@ -76,7 +88,47 @@ def _accrued_factor(
                 "si no hay, la tasa a un día de la curva" % (index, len(missing)),
             )
         )
-    return qfpy.compound_overnight(rates, [1] * len(days), 360.0)
+    return qfpy.compound_overnight([e[0] for e in entries], [int(e[1]) for e in entries], 360.0)
+
+
+def aged_swap(
+    trade: Dict[str, Any],
+    terms: Dict[str, Any],
+    mkt: MarketContext,
+    fixings: Fixings,
+    warnings: List[Dict[str, Any]],
+) -> "qfpy.OisSwap":
+    """El swap de la operación envejecido a `mkt.as_of`: calendario por fechas desde `start_date`
+    y periodo en curso con el factor acumulado de las fijaciones diarias.
+
+    Es el instrumento que valúa `value_trade` y cuyos flujos proyecta la ficha. `terms` son los
+    términos vigentes (`lifecycle.state`); los avisos de fijaciones faltantes se añaden a `warnings`.
+
+    @raise ValueError si falta `fixed_rate` o `mkt.as_of` es posterior al último pago.
+    """
+    curve = terms["curve"]
+    if terms["fixed_rate"] is None:
+        raise ValueError("Falta el parámetro 'fixed_rate'")
+    start, on = trade["start_date"], mkt.as_of
+    pay = qfpy.ois_payment_days((trade["maturity_date"] - start).days, CURVES[curve]["period_days"])
+    elapsed = (on - start).days  # negativo si la operación aún no empieza
+    first = next((i for i, k in enumerate(pay) if k > elapsed), None)  # el periodo en curso en `on`
+    if first is None:
+        raise ValueError("El swap ya no tiene pagos pendientes al %s" % on.isoformat())
+    period_start = pay[first - 1] if first else 0
+    factor = 1.0
+    if period_start < elapsed:
+        factor = accrued_factor(curve, start + timedelta(days=period_start), on, fixings, mkt, warnings)
+    side = qfpy.SwapType.Payer if terms["side"] == "payer" else qfpy.SwapType.Receiver
+    return qfpy.OisSwap(
+        terms["notional"],
+        terms["fixed_rate"],
+        period_start - elapsed,
+        [k - elapsed for k in pay[first:]],
+        factor,
+        side,
+        curve,
+    )
 
 
 def _irs_pv(
@@ -86,34 +138,11 @@ def _irs_pv(
     fixings: Fixings,
     warnings: List[Dict[str, Any]],
 ) -> float:
-    """PV (moneda de la curva) del swap: calendario por fechas y periodo en curso con su factor."""
-    curve = terms["curve"]
-    if terms["fixed_rate"] is None:
-        raise ValueError("Falta el parámetro 'fixed_rate'")
-    start, on = trade["start_date"], mkt.as_of
-    pay = qfpy.ois_payment_days((trade["maturity_date"] - start).days, CURVES[curve]["period_days"])
-    elapsed = (on - start).days  # negativo si la operación aún no empieza
-    first = next(i for i, k in enumerate(pay) if k > elapsed)  # el periodo en curso en `on`
-    period_start = pay[first - 1] if first else 0
-    factor = 1.0
-    if period_start < elapsed:
-        factor = _accrued_factor(
-            curve, start + timedelta(days=period_start), on, fixings, mkt, warnings
-        )
-    side = qfpy.SwapType.Payer if terms["side"] == "payer" else qfpy.SwapType.Receiver
-    swap = qfpy.OisSwap(
-        terms["notional"],
-        terms["fixed_rate"],
-        period_start - elapsed,
-        [k - elapsed for k in pay[first:]],
-        factor,
-        side,
-        curve,
-    )
-    return float(swap.npv(mkt.env))
+    """PV (moneda de la curva) del swap envejecido a `mkt.as_of`."""
+    return float(aged_swap(trade, terms, mkt, fixings, warnings).npv(mkt.env))
 
 
-def _shortened(product: str, terms: Dict[str, Any], days: int) -> Dict[str, Any]:
+def shortened(product: str, terms: Dict[str, Any], days: int) -> Dict[str, Any]:
     """Términos con el plazo reescrito a los `days` días que faltan hasta el vencimiento."""
     t = dict(terms)
     if product in ("fx_forward", "fx_option"):
@@ -156,7 +185,7 @@ def value_trade(
             pv_mxn = pv * mkt.spot if CURVES[terms["curve"]]["currency"] == "USD" else pv
         else:
             days = (trade["maturity_date"] - mkt.as_of).days
-            pv_mxn = float(product.pv_mxn(_shortened(name, terms, days), mkt))
+            pv_mxn = float(product.pv_mxn(shortened(name, terms, days), mkt))
             usd = name not in _PV_IN_MXN and CURVES[terms["curve"]]["currency"] == "USD"
             pv = pv_mxn / mkt.spot if usd else pv_mxn
     elif status == "vencida" and trade["product"] in _OPTIONS:

@@ -164,9 +164,6 @@ def test_valuation_unknown_snapshot_is_404(client):
         (_trade(params={**IRS, "notional": -5}), "notional"),
         (_trade(params={k: v for k, v in IRS.items() if k != "periods"}), "periods"),
         (_trade("fx_forward", {**FWD, "side": "x"}), "side"),
-        # irs sin tasa fija explícita no se guarda (decisión de Fable)
-        (_trade(params={k: v for k, v in IRS.items() if k != "fixed_rate"}), "fixed_rate"),
-        (_trade(params={**IRS, "fixed_rate": None}), "fixed_rate"),
     ],
 )
 def test_create_invalid_is_400_with_field(client, body, field):
@@ -174,6 +171,36 @@ def test_create_invalid_is_400_with_field(client, body, field):
     assert r.status_code == 400
     assert r.get_json()["field"] == field
     assert len(client.get("/api/trades").get_json()["trades"]) == 7
+
+
+@pytest.mark.parametrize("omit", [True, False], ids=["sin fixed_rate", "fixed_rate null"])
+@pytest.mark.parametrize("curve, periods", [("TIIE-F", 13), ("SOFR", 3)])
+def test_irs_without_fixed_rate_is_booked_at_par(client, omit, curve, periods):
+    params = {**IRS, "curve": curve, "periods": periods, "notional": 5e8}
+    params = {k: v for k, v in params.items() if k != "fixed_rate"} if omit else {**params, "fixed_rate": None}
+    r = client.post("/api/trades", json=_trade(params=params))
+    assert r.status_code == 201, r.get_json()
+    trade = r.get_json()
+    assert isinstance(trade["params"]["fixed_rate"], float)
+    par = client.post("/api/price/irs", json={**params, "fixed_rate": None, "snapshot": "MX-DEMO"})
+    assert trade["params"]["fixed_rate"] == pytest.approx(par.get_json()["risk"]["par_rate"], rel=1e-9)
+    assert client.get("/api/trades/%d" % trade["id"]).get_json()["params"]["fixed_rate"] == trade["params"]["fixed_rate"]
+    row = {r["id"]: r for r in client.get("/api/portfolio/valuation?snapshot=MX-DEMO").get_json()["rows"]}[trade["id"]]
+    assert row["error"] is None and row["status"] == "viva"
+    assert abs(row["pv"]) < 1e-6 * 5e8  # nace a la par: PV 0 en la fecha de pacto
+
+
+def test_irs_at_par_uses_the_request_snapshot_and_the_final_dates(client):
+    r = client.post("/api/market/MX-DEMO/roll", json={"id": "D35", "as_of": "2026-12-15"})
+    assert r.status_code == 201
+    params = {k: v for k, v in IRS.items() if k not in ("fixed_rate", "periods")}
+    body = {**_trade(params={**params, "periods": 4}), "snapshot": "D35", "maturity_date": "2027-04-27"}
+    trade = client.post("/api/trades", json=body).get_json()
+    # 133 días = 4.75 periodos de 28: se ajusta a 5 periodos (140 días)
+    assert trade["trade_date"] == "2026-12-15" and trade["params"]["periods"] == 5
+    assert trade["maturity_date"] == "2027-05-04"
+    row = {r["id"]: r for r in client.get("/api/portfolio/valuation?snapshot=D35").get_json()["rows"]}[trade["id"]]
+    assert abs(row["pv"]) < 1e-6 * 1e6
 
 
 def test_equity_option_trade_values_in_mxn(client):

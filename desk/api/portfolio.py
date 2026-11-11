@@ -234,21 +234,39 @@ def _dates_from_body(conn: sqlite3.Connection, body: Dict[str, Any]) -> Tuple[da
     return trade, start, maturity
 
 
+def _at_par(
+    conn: sqlite3.Connection, body: Dict[str, Any], params: Dict[str, Any], start: date, maturity: date
+) -> Dict[str, Any]:
+    """`params` de un `irs` sin tasa fija con `fixed_rate` = la tasa par del swap con sus fechas
+    finales, en el snapshot de la petición (o `MX-DEMO`): el swap nace a la par y queda guardado
+    con esa tasa. Es el mismo instrumento que luego valúa `valuation.aged_swap`."""
+    mkt = market.load_context(conn, text(body, "snapshot", required=False) or SNAPSHOT_ID)
+    try:
+        swap = trade_valuation.aged_swap(
+            {"start_date": start, "maturity_date": maturity}, {**params, "fixed_rate": 0.0}, mkt, {}, []
+        )
+    except ValueError as e:
+        raise ApiError(400, "No se pudo fijar la tasa par: %s" % e, "fixed_rate")
+    return PRODUCTS["irs"].validate({**params, "fixed_rate": float(swap.par_rate(mkt.env))})
+
+
 def create_trade(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Valida el cuerpo del contrato, guarda la operación con su `execution` y la devuelve."""
+    """Valida el cuerpo del contrato, guarda la operación con su `execution` y la devuelve.
+
+    Un `irs` sin `fixed_rate` nace a la par: se guarda con la tasa par del snapshot de la petición."""
     name = choice(body, "product", tuple(PRODUCTS))
     counterparty = text(body, "counterparty")
     raw = body.get("params")
     if not isinstance(raw, dict):
         raise ApiError(400, "'params' debe ser un objeto con los parámetros del producto", "params")
     params = PRODUCTS[name].validate(raw)
-    if name == "irs" and params["fixed_rate"] is None:
-        raise ApiError(400, "Falta el parámetro 'fixed_rate'", "fixed_rate")
     trade_date, start_date, maturity = _dates_from_body(conn, body)
     if maturity is None:
         maturity = default_maturity(name, params, start_date)
     else:
         params, maturity = fit_to_maturity(name, params, start_date, maturity)
+    if name == "irs" and params["fixed_rate"] is None:
+        params = _at_par(conn, body, params, start_date, maturity)
     created_at = db.now_iso()
     trade_id = insert_trade(
         conn, name, counterparty, trade_date, start_date, maturity, params, created_at

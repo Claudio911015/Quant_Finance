@@ -1,4 +1,6 @@
 """Rodar un snapshot (`POST /api/market/<id>/roll`): copia editable y contrato de errores (R13)."""
+import sqlite3
+
 import pytest
 
 from desk.api import db
@@ -28,6 +30,25 @@ def test_roll_creates_editable_copy_with_same_quotes_and_sources(client):
     assert new["synthetic"] == origin["synthetic"]
     assert new["read_only"] is False
     assert client.get(SRC).get_json()["as_of"] == origin["as_of"]  # el origen no cambia
+
+
+def test_rolling_a_rolled_snapshot_replaces_the_suffix_instead_of_chaining_it(client):
+    origin = client.get(SRC).get_json()
+    client.post(ROLL, json={"id": "D1", "as_of": "2026-12-08"})
+    r = client.post("/api/market/D1/roll", json={"id": "D2", "as_of": "2027-01-05"})
+    assert r.status_code == 201
+    assert r.get_json()["label"] == origin["label"] + " · rodado al 2027-01-05"
+    r = client.post("/api/market/D2/roll", json={"id": "D3", "as_of": "2027-02-02"})
+    assert r.get_json()["label"] == origin["label"] + " · rodado al 2027-02-02"
+
+
+def test_a_suffix_that_is_not_at_the_end_of_the_label_is_kept(app, client):
+    conn = sqlite3.connect(app.config["DESK_DB"])
+    conn.execute("UPDATE snapshots SET label = ? WHERE id = 'MX-DEMO'", ("Cierre rodado al 2026-01-01 revisado",))
+    conn.commit()
+    conn.close()
+    r = client.post(ROLL, json={"id": "D1", "as_of": "2026-12-08"})
+    assert r.get_json()["label"] == "Cierre rodado al 2026-01-01 revisado · rodado al 2026-12-08"
 
 
 def test_put_on_rolled_snapshot_works(client):

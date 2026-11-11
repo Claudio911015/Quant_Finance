@@ -119,8 +119,8 @@ def post_event(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) ->
 
     @param body `{"type", "event_date", "data"}` con `data` según el tipo.
     @return eventos insertados con `event_date` como `date`.
-    @raise ApiError 404 (operación), 400 (tipo, fecha o `data`) o 409 (la operación no está viva en
-        `event_date`, o `event_date` es anterior al último evento registrado).
+    @raise ApiError 404 (operación), 400 (tipo, fecha o `data`) o 409 (la operación no tiene eventos, no está
+        viva en `event_date`, o `event_date` es anterior al último evento registrado).
     """
     from desk.api import portfolio  # import tardío: portfolio importa este módulo
 
@@ -135,6 +135,10 @@ def post_event(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) ->
     event_date = iso_date(body, "event_date")
     if event_date < trade["trade_date"]:
         raise ApiError(400, "'event_date' no puede ser anterior a 'trade_date'", "event_date")
+    if not trade["events"]:  # operación sin su `execution` (BD externa): no hay con qué encadenar ni ordenar
+        raise ApiError(
+            409, "La operación no tiene eventos registrados (falta su 'execution'): no admite más", "id"
+        )
     data = body.get("data")
     if data is None:
         data = {}

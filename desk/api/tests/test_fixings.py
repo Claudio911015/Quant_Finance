@@ -173,6 +173,20 @@ def test_csv_trailing_blank_lines_and_crlf_are_ignored(client, app):
     assert _count(app) == 2
 
 
+def test_csv_utf8_bom_and_crlf_from_excel_are_tolerated(client, app):
+    text = "\ufeff" + HEADER + "\r\nSOFR,2026-11-10,0.04\r\nTIIE-F,2026-11-10,0.0701\r\n"
+    r = _csv(client, text)
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json() == {"inserted": 2, "unchanged": 0}
+    assert _count(app) == 2
+
+
+def test_csv_bom_is_only_tolerated_at_the_very_start(client, app):
+    r = _csv(client, HEADER + "\n\ufeffSOFR,2026-11-10,0.04\n")
+    assert r.status_code == 400 and r.get_json()["field"] == "csv" and "Fila 2" in r.get_json()["error"]
+    assert _count(app) == 0
+
+
 def test_csv_conflict_with_stored_value_is_409_and_saves_nothing(client, app):
     _post(client, "SOFR", "2026-11-10", 0.04)
     text = "\n".join([HEADER, "TIIE-F,2026-11-10,0.07", "SOFR,2026-11-10,0.05"])

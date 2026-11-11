@@ -113,7 +113,7 @@ def _irs_coupons(
         if day <= d0 or lifecycle.state(trade, events, day - _DAY)["status"] != "viva":
             continue
         terms = lifecycle.state(trade, events, day)["terms"]  # nocional y precio vigentes al pago
-        factor = valuation._accrued_factor(
+        factor = valuation.accrued_factor(
             curve, start + timedelta(days=first), day, fixings, mkt, warnings
         )
         tau = (k - first) / _ACT_360
@@ -210,29 +210,8 @@ def _projected_irs(
     trade: Dict[str, Any], terms: Dict[str, Any], mkt: MarketContext, fixings: Fixings, warnings: Warnings
 ) -> Flows:
     """Cupones futuros del swap envejecido a `mkt.as_of` (el mismo instrumento que `value_trade`)."""
-    curve = terms["curve"]
-    if terms["fixed_rate"] is None:
-        raise ValueError("Falta el parámetro 'fixed_rate'")
-    start, on = trade["start_date"], mkt.as_of
-    pay = qfpy.ois_payment_days((trade["maturity_date"] - start).days, CURVES[curve]["period_days"])
-    elapsed = (on - start).days
-    first = next(i for i, k in enumerate(pay) if k > elapsed)
-    period_start = pay[first - 1] if first else 0
-    factor = 1.0
-    if period_start < elapsed:
-        factor = valuation._accrued_factor(
-            curve, start + timedelta(days=period_start), on, fixings, mkt, warnings
-        )
-    side = qfpy.SwapType.Payer if terms["side"] == "payer" else qfpy.SwapType.Receiver
-    swap = qfpy.OisSwap(
-        terms["notional"],
-        terms["fixed_rate"],
-        period_start - elapsed,
-        [k - elapsed for k in pay[first:]],
-        factor,
-        side,
-        curve,
-    )
+    curve, on = terms["curve"], mkt.as_of
+    swap = valuation.aged_swap(trade, terms, mkt, fixings, warnings)
     currency = CURVES[curve]["currency"]
     return [
         {
@@ -250,7 +229,7 @@ def _projected_irs(
 
 def _projected_bond(trade: Dict[str, Any], terms: Dict[str, Any], mkt: MarketContext) -> Flows:
     """Flujos del bono acortado a lo que falta (el mismo que `value_trade`), según su pricer."""
-    shortened = valuation._shortened("bond", terms, (trade["maturity_date"] - mkt.as_of).days)
+    shortened = valuation.shortened("bond", terms, (trade["maturity_date"] - mkt.as_of).days)
     priced = PRODUCTS["bond"].price(shortened, mkt)
     return [
         {

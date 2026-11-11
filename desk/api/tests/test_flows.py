@@ -1,10 +1,13 @@
 """Calendario de flujos de la ficha (T9): liquidados y proyectados (R4, R8)."""
 import json
+from datetime import date, timedelta
 
 import pytest
 
 from desk.api.tests.conftest import insert_raw_trade
-from desk.api.tests.test_valuation_aged import AS_OF, FWD, IRS, _book, _csv, _event, _iso, _roll, _rows
+from desk.api.tests.test_valuation_aged import (
+    AS_OF, FWD, IRS, _book, _business, _csv, _csv_business, _event, _iso, _roll, _rows,
+)
 
 FLOWS = "/api/trades/%d/flows?snapshot=%s"
 
@@ -63,13 +66,29 @@ def test_irs_valued_at_d1_lists_the_day_28_coupon_as_settled_and_the_rest_as_pro
     assert sum(f["pv"] for f in projected) == pytest.approx(pv, abs=1e-6)
 
 
+def test_settled_coupon_with_business_day_fixings_only_has_no_warning_and_weekends_accrue_with_friday(client):
+    _roll(client, "D1", 28)
+    rate = lambda d: 0.0700 + 0.0001 * (date.fromisoformat(d) - AS_OF).days  # noqa: E731
+    _csv_business(client, "TIIE-F", rate, 28)
+    body = _flows(client, 1, "D1")
+    settled, _ = _split(body)
+    assert body["warnings"] == [] and len(settled) == 1
+    factor = 1.0
+    for i in range(28):  # el viernes devenga también sábado y domingo (3 días)
+        day = AS_OF + timedelta(days=i)
+        if day.weekday() < 5:
+            factor *= 1.0 + rate(day.isoformat()) * (3 if day.weekday() == 4 else 1) / 360.0
+    expected = 500e6 * (factor - 1.0) - 500e6 * 0.0680 * 28 / 360.0
+    assert settled[0]["amount"] == pytest.approx(expected, rel=1e-12)
+
+
 def test_missing_fixings_in_the_settled_period_warn_once_per_index(client):
     _roll(client, "D1", 28)
     body = _flows(client, 1, "D1")
     settled, _ = _split(body)
     assert len(settled) == 1
     assert [(w["code"], w["index"]) for w in body["warnings"]] == [("missing_fixing", "TIIE-F")]
-    assert body["warnings"][0]["dates"] == [_iso(i) for i in range(28)]
+    assert body["warnings"][0]["dates"] == _business(28)  # los fines de semana no se esperan
 
 
 def test_receiver_coupon_has_the_opposite_sign_of_the_payer(client):

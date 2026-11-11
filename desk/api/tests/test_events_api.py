@@ -458,3 +458,17 @@ def test_seed_trades_report_origin_state_at_their_dates(client):
         live = get_state(client, t["id"], t["trade_date"])
         assert live["status"] == "viva" and live["terms"] == t["params"]
         assert get_state(client, t["id"], t["maturity_date"])["status"] == "vencida"
+
+
+def test_trade_without_events_answers_409_not_500(app, client):
+    import json
+
+    from desk.api.tests.conftest import insert_raw_trade
+
+    tid = insert_raw_trade(app, "fx_forward", json.dumps(FWD))  # BD externa: sin su `execution`
+    assert client.get("/api/trades/%d" % tid).get_json()["events"] == []
+    for kind, data in (("quantity_change", {"notional": 5e5}), ("termination", {"amount": 1.0})):
+        r = post(client, tid, kind, "2026-11-12", data)
+        assert r.status_code == 409, r.get_json()
+        assert r.get_json()["field"] == "id" and "eventos" in r.get_json()["error"]
+    assert event_rows(app, tid) == []

@@ -7,7 +7,9 @@ from desk.api import market
 from desk.api.db import connect
 from desk.api.qf import qfpy
 from desk.api.tests.conftest import insert_raw_trade
-from desk.api.tests.test_valuation_aged import AS_OF, FWD, IRS, _book, _csv, _event, _iso, _price, _roll, _rows
+from desk.api.tests.test_valuation_aged import (
+    AS_OF, FWD, IRS, _book, _business, _csv, _event, _iso, _price, _roll, _rows,
+)
 
 PNL = "/api/pnl?from=%s&to=%s"
 
@@ -227,9 +229,9 @@ def test_warnings_from_both_valuations_and_flows_are_merged_without_repeated_dat
     _roll(client, "D35", 35)
     row = _pnl(client, "MX-DEMO", "D35")[1][1]
     assert [(w["code"], w["index"]) for w in row["warnings"]] == [("missing_fixing", "TIIE-F")]
-    # 28 días del primer cupón + 7 del periodo en curso, cada fecha una sola vez
-    assert row["warnings"][0]["dates"] == [_iso(i) for i in range(35)]
-    assert "35" in row["warnings"][0]["message"]
+    # 28 días del primer cupón + 7 del periodo en curso, cada día hábil una sola vez
+    assert row["warnings"][0]["dates"] == _business(35)
+    assert "%d" % len(_business(35)) in row["warnings"][0]["message"]
 
 
 # --------------------------------------------------------------------- errores

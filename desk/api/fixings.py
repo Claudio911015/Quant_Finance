@@ -54,10 +54,13 @@ def add_fixing(conn: sqlite3.Connection, body: Dict[str, Any]) -> Tuple[Dict[str
 def import_csv(conn: sqlite3.Connection, text: str) -> Dict[str, int]:
     """Alta atómica desde CSV; devuelve `{"inserted", "unchanged"}`.
 
-    Encabezado exacto `index,date,value`; las líneas vacías al final se ignoran. Primero se valida
-    todo el archivo (400 `field: "csv"` con "Fila <n>: <motivo>", encabezado = fila 1) y después se
-    buscan conflictos (409), y solo si no hay ninguno se inserta: un archivo malo no guarda nada.
+    Encabezado exacto `index,date,value`; se tolera un BOM UTF-8 al inicio y el fin de línea CRLF, y
+    las líneas vacías al final se ignoran. Primero se valida todo el archivo (400 `field: "csv"` con
+    "Fila <n>: <motivo>", encabezado = fila 1) y después se buscan conflictos (409), y solo si no hay
+    ninguno se inserta: un archivo malo no guarda nada.
     """
+    if text.startswith("\ufeff"):  # Excel guarda el CSV UTF-8 con BOM: no es parte del encabezado
+        text = text[1:]
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     while lines and not lines[-1].strip():
         lines.pop()
