@@ -3,6 +3,7 @@
 La descomposición de una diferencia (fecha, curva, tipo de cambio) es una ayuda de diagnóstico y
 no hay fórmulas nuevas: todo PV sale de `valuation.value_trade`.
 """
+import copy
 import csv
 import io
 import json
@@ -43,10 +44,14 @@ DISCLAIMER = "La descomposición es una ayuda de diagnóstico, no una prueba: in
 
 
 def context_at(mkt: MarketContext, on: date) -> MarketContext:
-    """Mismo mercado (curvas, spot, superficie) con otra fecha de valuación."""
-    return MarketContext(
-        mkt.snapshot_id, on, mkt.curves, mkt.pillars, mkt.spot, mkt.surface, mkt.hw, mkt.factors
-    )
+    """Mismo mercado (curvas, spot, superficie, cotizaciones y colateral) con otra fecha de valuación.
+
+    Copia superficial: reconstruirlo con `MarketContext(...)` perdería las cotizaciones de la curva
+    `MXN-USD` y el colateral del original (corte 3).
+    """
+    out = copy.copy(mkt)
+    out.as_of = on
+    return out
 
 
 def business_day(d: date, step: int) -> date:

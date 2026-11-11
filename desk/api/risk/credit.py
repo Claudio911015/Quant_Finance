@@ -15,7 +15,13 @@ signo contrario, y un escalón en el primer mes. Por eso cada swap se entrega al
 diarios (`_MODEL_FREQUENCY`): aproxima la acumulación continua y reduce el error del último periodo
 incompleto a un día de cupón, y (b) con una tasa fija efectiva calibrada para que el valor del modelo en
 `t = 0` sea exactamente el PV del desk (`_effective_fixed_rate`; absorbe la base de días y el calendario).
-El PV es lineal en la tasa fija, así que bastan dos valuaciones. El perfil nace entonces del PV del desk.
+El PV es lineal en la tasa fija, así que bastan dos valuaciones. Con esto el modelo vale el PV del desk en
+`t = 0` exactamente (y EE(0), PFE(0) salen de ese PV), pero NO empieza ahí un instante después: en cuanto
+`t > 0` el swap del modelo ya no incluye el cupón diario en curso, y el valor cae de golpe hasta un cupón
+diario (`nocional × tasa / 365`) respecto del PV. En MX-DEMO es −86 mil MXN en Alfa (500 M de nocional,
+0.017 % del nocional pero 9 % de su PV de −0.94 M), −36 mil en Beta y −1.6 mil en Gamma. Cada punto mensual
+del perfil carga ese mismo orden de error. No se corrige: el calendario del swap vive en C++ y calibrar a
+`t = 0+` solo movería el error de lugar.
 
 EE(0) y PFE(0) son max(PV de la contraparte, 0): el valor de hoy sí compensa entre monedas. Los puntos
 mensuales siguientes no (cada conjunto se simula por separado), así que en una contraparte con swaps en
@@ -40,6 +46,7 @@ from desk.api import fixings as fixing_store
 from desk.api import valuation
 from desk.api.db import now_iso
 from desk.api.errors import ApiError
+from desk.api.pricing import PRODUCT_LABEL
 from desk.api.settlement import merge_warnings
 from desk.api.validation import number, text
 
@@ -54,16 +61,7 @@ _MODEL_FREQUENCY = 365.0  # pagos por año que ve `qfxva` (diarios): ver el docs
 _MODEL_MATURITY_EPS_DAYS = 1e-6  # evita que `int(plazo · frecuencia)` pierda un día por redondeo binario
 _NOT_COVERED = "La exposición simulada solo cubre swaps de tasas (IRS): %s se excluye"
 _NOT_VALUED = "No se pudo valuar: %s"
-# Rótulos de la interfaz (`screens/pricers/products/*`): los avisos no deben mostrar el código interno.
-_PRODUCT_LABEL = {
-    "irs": "Swap de tasas (IRS)",
-    "fx_forward": "Forward FX",
-    "fx_option": "Opción FX",
-    "cap_floor": "Cap / Floor",
-    "equity_option": "Opción sobre acción",
-    "swaption": "Swaption",
-    "bond": "Bono",
-}
+
 
 
 # ------------------------------------------------------------------ parámetros
@@ -271,7 +269,7 @@ def exposure(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
         covered.setdefault(name, [])
         excluded.setdefault(name, [])
         if trade["product"] not in COVERED_PRODUCTS:
-            label = _PRODUCT_LABEL.get(trade["product"], trade["product"])
+            label = PRODUCT_LABEL.get(trade["product"], trade["product"])
             excluded[name].append({"id": trade["id"], "product": trade["product"], "reason": _NOT_COVERED % label})
             continue
         try:

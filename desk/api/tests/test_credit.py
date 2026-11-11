@@ -371,6 +371,13 @@ def test_simulated_swap_starts_at_the_desk_pv_without_a_step_in_the_first_month(
         assert near * v["pv"] > 0.0  # mismo signo (Alfa y Gamma negativos, Beta positivo)
         # un mes después solo cambia el acarreo (<= 0.12 % del nocional aquí); el escalón de antes era de 0.5 a 3 %
         assert abs(month - v["pv"]) < 2e-3 * v["notional"], (trade["id"], month, v["pv"])
+        # Lo que el sigma despreciable no oculta: un instante después de t = 0 el modelo ya perdió el cupón diario
+        # en curso, así que queda por debajo del PV (documentado en el módulo y en Metodología), pero a lo más un
+        # cupón diario del swap del modelo.
+        just_after = qfxva.SimParams(n_paths=2, monitor_dates=[1e-8], seed=1)
+        p0 = qfxva.simulate_exposure(hw, ns, just_after, pfe_quantile=0.95)[0]
+        step = (p0.epe - p0.ene) - v["pv"]
+        assert 0.0 < abs(step) <= v["notional"] * rate / 365.0, (trade["id"], step)
 
 
 def test_same_response_on_two_calls(client):

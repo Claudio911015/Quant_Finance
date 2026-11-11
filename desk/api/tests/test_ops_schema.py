@@ -290,7 +290,7 @@ def test_context_at_keeps_the_market_and_changes_only_the_date(app):
     assert own_pv(app, 4, mkt_fn=lambda m: context_at(m, AS_OF)) == pytest.approx(own_pv(app, 4), abs=1e-9)
 
 
-def test_confirmations_maps_only_settlement_confirmations_by_date(app):
+def test_confirmations_maps_only_settlement_confirmations_by_date_and_currency(app):
     from desk.api import portfolio
     from desk.api.ops_cashflows import confirmations
     from desk.api.ops_settlements import is_confirmation
@@ -302,7 +302,8 @@ def test_confirmations_maps_only_settlement_confirmations_by_date(app):
     finally:
         conn.close()
     found = confirmations(trade)
-    assert list(found) == [date(2026, 12, 8)] and found[date(2026, 12, 8)]["amount"] == 10.0
+    key = (date(2026, 12, 8), "MXN")
+    assert list(found) == [key] and found[key]["amount"] == 10.0
     assert [is_confirmation(e) for e in trade["events"]] == [False, True]
     assert confirmations({"events": [e for e in trade["events"] if e["type"] == "execution"]}) == {}
 

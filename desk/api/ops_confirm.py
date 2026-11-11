@@ -13,6 +13,7 @@ from desk.api import ops_settings, ops_settlements, portfolio
 from desk.api.db import now_iso
 from desk.api.errors import ApiError
 from desk.api.market import CURVES
+from desk.api.pricing import PRODUCT_LABEL
 from desk.api.qf import qfpy
 
 NOTICES = ("Documento informativo; no sustituye la confirmación ISDA ni el contrato marco firmado por las partes.",
@@ -260,12 +261,13 @@ def _events_note(events: List[Dict[str, Any]]) -> Optional[str]:
 def confirmation(conn: sqlite3.Connection, trade_id: int) -> Dict[str, Any]:
     """Cuerpo de `GET /api/trades/<id>/confirmation`: términos pactados de la operación.
 
-    @raise ApiError 404 `id` si no existe; 400 `product` si el producto no tiene confirmación.
+    @raise ApiError 404 `id` si no existe; 400 `product` si el producto no tiene plantilla de confirmación (por ahora el `xccy_swap`).
     """
     trade = portfolio.get_trade(conn, trade_id)
     builder = _BUILDERS.get(trade["product"])
     if builder is None:
-        raise ApiError(400, "El producto no tiene confirmación: %s" % trade["product"], "product")
+        label = PRODUCT_LABEL.get(trade["product"], trade["product"])
+        raise ApiError(400, "No hay plantilla de confirmación para %s" % label, "product")
     label, roles, terms, conventions, schedule = builder(trade)
     return {
         "trade_id": trade["id"],

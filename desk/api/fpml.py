@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Tuple
 from desk.api import ops_settings, ops_settlements, portfolio
 from desk.api.errors import ApiError
 from desk.api.market import CURVES
+from desk.api.pricing import PRODUCT_LABEL
 from desk.api.validation import finite_number, iso_date
 
 FPML_NS = "http://www.fpml.org/FpML-5/confirmation"
@@ -195,7 +196,12 @@ def export_trade(conn: sqlite3.Connection, trade_id: int) -> str:
     """
     trade = portfolio.get_trade(conn, trade_id)
     if trade["product"] not in FPML_PRODUCTS:
-        raise ApiError(400, "FpML solo soporta: %s" % ", ".join(FPML_PRODUCTS), "product")
+        raise ApiError(
+            400,
+            "FpML solo exporta %s; %s no se exporta"
+            % (", ".join(PRODUCT_LABEL[p] for p in FPML_PRODUCTS), PRODUCT_LABEL.get(trade["product"], trade["product"])),
+            "product",
+        )
     if any(e["type"] != "execution" and not ops_settlements.is_confirmation(e) for e in trade["events"]):
         raise ApiError(409, "FpML exporta solo operaciones sin eventos posteriores al pacto", "id")
     if trade["product"] != "irs" and trade["start_date"] != trade["trade_date"]:

@@ -252,12 +252,37 @@ def _projected_irs(
     ]
 
 
+def _with_collateral(trade: Dict[str, Any], mkt: MarketContext) -> MarketContext:
+    """`mkt` con el colateral vigente de la contraparte, como lo hace `valuation.value_trade`."""
+    return mkt.with_collateral(collateral.currency_on(trade, mkt.as_of))
+
+
+def projected_flows(
+    trade: Dict[str, Any], terms: Dict[str, Any], mkt: MarketContext, fixings: Fixings, warnings: Warnings
+) -> Flows:
+    """Flujos futuros de una operación viva a `mkt.as_of`, con `df` y `pv` (solo `irs`, `xccy_swap` y `bond`).
+
+    Es el despacho que comparten la ficha (`trade_flows`) y el calendario del portafolio, para que sus
+    `df`/`pv` sumen el PV del portafolio. Descuenta con el colateral de la contraparte (el `xccy_swap`
+    ya descuenta siempre con `MXN-USD`); los demás productos devuelven `[]`.
+    """
+    vm = _with_collateral(trade, mkt)
+    product = trade["product"]
+    if product == "irs":
+        return _projected_irs(trade, terms, vm, fixings, warnings)
+    if product == "xccy_swap":
+        return xccy.projected(trade, terms, mkt, fixings, warnings)
+    if product == "bond":
+        return aging.projected_bond(trade, terms, vm)
+    return []
+
+
 def trade_flows(conn: sqlite3.Connection, trade_id: int, snapshot_id: str) -> Dict[str, Any]:
     """Cuerpo de `GET /api/trades/<id>/flows`: liquidados y proyectados, con avisos.
 
     Liquidados: `settled_flows` desde el día anterior al pacto hasta el `as_of` del snapshot (sin
-    `df` ni `pv`). Proyectados: los flujos que el pricer valúa a esa fecha (solo `irs` y `bond`,
-    y solo si la operación está `viva`), con su `df` y `pv`. Orden por fecha.
+    `df` ni `pv`). Proyectados: los flujos que el pricer valúa a esa fecha (`projected_flows`, y solo si
+    la operación está `viva`), con su `df` y `pv`. Orden por fecha.
     """
     trade = portfolio.get_trade(conn, trade_id)
     mkt = market.load_context(conn, snapshot_id)
@@ -282,16 +307,9 @@ def trade_flows(conn: sqlite3.Connection, trade_id: int, snapshot_id: str) -> Di
     projection_warnings = []  # type: Warnings
     bond = None
     if st["status"] == "viva":
-        # Con el colateral vigente de la contraparte, igual que `valuation.value_trade`, para que los
-        # `df`/`pv` de la ficha sumen el PV del portafolio (el xccy ya descuenta siempre con USD).
-        vm = mkt.with_collateral(collateral.currency_on(trade, mkt.as_of))
-        if trade["product"] == "irs":
-            flows += _projected_irs(trade, st["terms"], vm, fixings, projection_warnings)
-        elif trade["product"] == "xccy_swap":
-            flows += xccy.projected(trade, st["terms"], mkt, fixings, projection_warnings)
-        elif trade["product"] == "bond":
-            flows += aging.projected_bond(trade, st["terms"], vm)
-            bond = aging.bond_quote(trade, st["terms"], vm)
+        flows += projected_flows(trade, st["terms"], mkt, fixings, projection_warnings)
+        if trade["product"] == "bond":
+            bond = aging.bond_quote(trade, st["terms"], _with_collateral(trade, mkt))
     for f in flows:
         f.setdefault("leg", None)  # solo el cross currency swap distingue la pata
     flows.sort(key=lambda f: f["date"])

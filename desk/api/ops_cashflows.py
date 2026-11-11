@@ -3,7 +3,7 @@ import csv
 import io
 import sqlite3
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from desk.api import fixings as fixing_store
 from desk.api import lifecycle, market, ops_settlements, portfolio, settlement
@@ -18,13 +18,16 @@ _DAY = timedelta(days=1)
 _CONFIRMABLE_KINDS = ("coupon", "settlement")  # un transfer (terminación, ejercicio) no se confirma
 
 
-def confirmations(trade: Dict[str, Any]) -> Dict[date, Dict[str, Any]]:
-    """Fecha → `data` de la confirmación de liquidación de la operación en esa fecha.
+def confirmations(trade: Dict[str, Any]) -> Dict[Tuple[date, str], Dict[str, Any]]:
+    """`(fecha, moneda)` → `data` de la confirmación de liquidación de la operación en esa fecha y moneda.
 
-    Si hubiera dos en la misma fecha (la ruta de T3 lo impide) vale la última insertada.
+    La moneda distingue las dos patas de un `xccy_swap`, que liquidan el mismo día. Si hubiera dos
+    con la misma clave (la ruta de T3 lo impide) vale la última insertada.
     """
     return {
-        e["event_date"]: e["data"] for e in trade["events"] if ops_settlements.is_confirmation(e)
+        (e["event_date"], e["data"].get("currency")): e["data"]
+        for e in trade["events"]
+        if ops_settlements.is_confirmation(e)
     }
 
 
@@ -61,7 +64,7 @@ def _trade_rows(trade: Dict[str, Any], mkt: Any, fixings: Any) -> Dict[str, Any]
         row = _row(trade, flow, "settled")
         data = None
         if flow["kind"] in _CONFIRMABLE_KINDS:
-            data = confirmed.get(date.fromisoformat(flow["date"]))
+            data = confirmed.get((date.fromisoformat(flow["date"]), flow["currency"]))
         if data is not None:
             row["status"] = "confirmed"
             row["confirmed_amount"] = float(data["amount"])
@@ -71,10 +74,7 @@ def _trade_rows(trade: Dict[str, Any], mkt: Any, fixings: Any) -> Dict[str, Any]
     projection_warnings = []  # type: List[Dict[str, Any]]
     projected = []  # type: List[Dict[str, Any]]
     if state["status"] == "viva":
-        if trade["product"] == "irs":
-            projected = settlement._projected_irs(trade, state["terms"], mkt, fixings, projection_warnings)
-        elif trade["product"] == "bond":
-            projected = settlement._projected_bond(trade, state["terms"], mkt)
+        projected = settlement.projected_flows(trade, state["terms"], mkt, fixings, projection_warnings)
     for flow in projected:
         in_mxn = flow["amount"] * mkt.spot if flow["currency"] == "USD" else flow["amount"]
         rows.append(_row(trade, {**flow, "amount_mxn": in_mxn}, "projected"))

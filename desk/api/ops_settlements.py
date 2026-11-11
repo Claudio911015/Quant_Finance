@@ -41,7 +41,8 @@ def confirm_settlement(conn: sqlite3.Connection, trade_id: int, body: Dict[str, 
 
     @param body `{"date", "amount", "currency", "snapshot"?}`; sin `snapshot`, el de mayor `as_of`.
     @raise ApiError 404 (`id`, `snapshot`), 400 (`date`, `amount`, `currency`) o 409 (`date`: el flujo
-        aún no ocurre, no existe o ya está confirmado; `currency`: no es la del flujo).
+        aún no ocurre, no existe, no es confirmable o ya está confirmado; `currency`: no es la del flujo).
+        La confirmación es por fecha y moneda: las dos patas de un `xccy_swap` se confirman por separado.
     """
     trade = portfolio.get_trade(conn, trade_id)
     day = iso_date(body, "date")
@@ -55,17 +56,26 @@ def confirm_settlement(conn: sqlite3.Connection, trade_id: int, body: Dict[str, 
     flows, _ = settlement.settled_flows(
         trade, fixings.load_all(conn), trade["trade_date"] - timedelta(days=1), mkt.as_of, mkt.spot, mkt
     )
-    flow = next((f for f in flows if f["date"] == day.isoformat() and f["kind"] in _CONFIRMABLE), None)
-    if flow is None:
+    on_day = [f for f in flows if f["date"] == day.isoformat()]
+    if not on_day:
         raise ApiError(409, "No hay flujo derivado el %s" % day.isoformat(), "date")
-    if currency != flow["currency"]:
+    confirmable = [f for f in on_day if f["kind"] in _CONFIRMABLE]
+    if not confirmable:
+        raise ApiError(409, "El flujo del %s no se confirma: solo cupones y liquidaciones" % day.isoformat(), "date")
+    # Un cross currency swap liquida un cupón por pata el mismo día: cada una se confirma por su moneda.
+    flow = next((f for f in confirmable if f["currency"] == currency), None)
+    if flow is None:
         raise ApiError(
             409,
-            "El flujo del %s es en %s, no en %s" % (day.isoformat(), flow["currency"], currency),
+            "El flujo del %s es en %s, no en %s"
+            % (day.isoformat(), " y ".join(sorted({f["currency"] for f in confirmable})), currency),
             "currency",
         )
     # Se recorren los eventos (no `ops_cashflows.confirmations`): ese módulo importa a este.
-    if any(is_confirmation(e) and e["event_date"] == day for e in trade["events"]):
+    if any(
+        is_confirmation(e) and e["event_date"] == day and e["data"].get("currency") == currency
+        for e in trade["events"]
+    ):
         raise ApiError(409, "Ese flujo ya está confirmado", "date")
     event = events.insert_event(
         conn,

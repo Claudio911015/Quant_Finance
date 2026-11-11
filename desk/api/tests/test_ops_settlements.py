@@ -81,7 +81,7 @@ def test_the_confirmation_is_listed_in_the_trade_and_seen_by_the_calendar_helper
         found = confirmations(portfolio.get_trade(conn, 1))
     finally:
         conn.close()
-    assert list(found) == [COUPON] and found[COUPON]["amount"] == BANK
+    assert list(found) == [(COUPON, "MXN")] and found[(COUPON, "MXN")]["amount"] == BANK
 
 
 def test_zero_and_negative_amounts_are_accepted(rolled):
