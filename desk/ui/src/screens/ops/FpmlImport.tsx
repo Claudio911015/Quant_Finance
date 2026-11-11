@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import { importFpml } from '../../api/opsClient';
 import type { FpmlImportResponse } from '../../api/opsTypes';
+import { FilePicker } from './FilePicker';
 import './TradeOps.css';
 
 function readFile(file: File): Promise<string> {
@@ -22,8 +23,7 @@ export function FpmlImport() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<FpmlImportResponse | null>(null);
 
-  async function onFile(file: File | undefined) {
-    if (!file) return;
+  async function onFile(file: File) {
     try {
       setXml(await readFile(file));
       setError(null);
@@ -57,12 +57,7 @@ export function FpmlImport() {
       </button>
       {open && (
         <div className="ops-fpml" data-testid="fpml-import">
-          <input
-            type="file"
-            accept=".xml,.fpml,application/xml"
-            aria-label="Archivo FpML"
-            onChange={(e) => void onFile(e.target.files?.[0])}
-          />
+          <FilePicker label="Archivo FpML" accept=".xml,.fpml,application/xml" onFile={(f) => void onFile(f)} />
           <textarea
             aria-label="XML FpML"
             value={xml}

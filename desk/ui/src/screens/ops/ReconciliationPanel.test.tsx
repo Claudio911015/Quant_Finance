@@ -348,6 +348,8 @@ describe('ReconciliationPanel', () => {
     const file = new File([text], 'banco.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByLabelText('Archivo CSV'), { target: { files: [file] } });
     await waitFor(() => expect((screen.getByLabelText('CSV del banco') as HTMLTextAreaElement).value).toBe(text));
+    expect(screen.getByText('banco.csv')).toBeTruthy();
+    expect(screen.getByText('Elegir archivo')).toBeTruthy();
   });
 
   it('un ApiError 400 del CSV muestra su mensaje tal cual y no deja resultado', async () => {

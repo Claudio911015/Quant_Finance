@@ -33,6 +33,18 @@ describe('FpmlImport', () => {
     expect(screen.queryByRole('textbox', { name: 'XML FpML' })).toBeNull();
   });
 
+  it('elegir un archivo llena el área de texto y muestra el selector en español', async () => {
+    renderImport();
+    openPanel();
+    expect(screen.getByText('Elegir archivo')).toBeTruthy();
+    expect(screen.getByText('Ningún archivo seleccionado')).toBeTruthy();
+    const xml = '<dataDocument/>';
+    const file = new File([xml], 'swap.fpml.xml', { type: 'application/xml' });
+    fireEvent.change(screen.getByLabelText('Archivo FpML'), { target: { files: [file] } });
+    await waitFor(() => expect((screen.getByRole('textbox', { name: 'XML FpML' }) as HTMLTextAreaElement).value).toBe(xml));
+    expect(screen.getByText('swap.fpml.xml')).toBeTruthy();
+  });
+
   it('pegar y enviar llama importFpml con el texto', async () => {
     vi.mocked(importFpml).mockResolvedValue({
       trade: { id: 9 } as never,

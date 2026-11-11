@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, listTrades } from '../../api/client';
 import {
@@ -10,6 +10,7 @@ import {
 import type { ReconRow, Reconciliation, ReconciliationSummary } from '../../api/opsTypes';
 import { fmtDate, fmtDateTime, fmtMoney, fmtNumber, parseNumber } from '../../lib/format';
 import { useSnapshot } from '../../state/SnapshotContext';
+import { FilePicker } from './FilePicker';
 import { CSV_TEMPLATE, PRODUCT_LABEL, RECON_STATUS_LABEL } from './opsLabels';
 import './ReconciliationPanel.css';
 
@@ -109,17 +110,13 @@ export function ReconciliationPanel() {
     setError(null);
   }
 
-  async function onFile(e: ChangeEvent<HTMLInputElement>) {
-    const input = e.target;
-    const file = input.files?.[0];
-    if (!file) return;
+  async function onFile(file: File) {
     try {
       setCsv(await file.text());
       setError(null);
     } catch {
       setError('No se pudo leer el archivo');
     }
-    input.value = '';
   }
 
   async function onSubmit(e: FormEvent) {
@@ -191,10 +188,10 @@ export function ReconciliationPanel() {
               onChange={(e) => setTolerancePct(e.target.value)}
             />
           </label>
-          <label className="ops-recon__field">
+          <div className="ops-recon__field">
             Archivo CSV
-            <input type="file" accept=".csv,text/csv" onChange={(e) => void onFile(e)} />
-          </label>
+            <FilePicker label="Archivo CSV" accept=".csv,text/csv" onFile={(f) => void onFile(f)} />
+          </div>
         </div>
         <label className="ops-recon__field ops-recon__field--col">
           CSV del banco

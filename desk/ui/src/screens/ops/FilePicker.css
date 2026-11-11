@@ -1,0 +1,49 @@
+/* Selector de archivo propio (ver FilePicker.tsx): el input nativo queda oculto pero enfocable. */
+.ops-file {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.ops-file__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ops-file__btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.ops-file:hover .ops-file__btn {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.ops-file:focus-within .ops-file__btn {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ops-file__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 14rem;
+}
