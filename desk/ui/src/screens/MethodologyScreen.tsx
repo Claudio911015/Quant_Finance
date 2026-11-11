@@ -434,6 +434,50 @@ const LIMITS: { label: string; text: string }[] = [
   { label: 'Moneda', text: 'Reporte en MXN al spot del snapshot.' },
 ];
 
+// corte 7
+const VALIDATION_SECTIONS: Section[] = [
+  {
+    id: 'validacion',
+    title: 'Validación contra QuantLib',
+    items: [
+      {
+        label: 'Referencia',
+        text: 'QuantLib, ejecutado fuera del backend en un entorno de Python aparte; la versión y el entorno quedan en cada reporte. El escritorio no depende de QuantLib.',
+      },
+      {
+        label: 'Qué se compara',
+        text: 'El PV de los siete productos (swaps OIS de TIIE de Fondeo y SOFR, forwards y opciones USDMXN, opciones sobre acción, bonos, caps/floors y swaptions) en el snapshot MX-DEMO: el portafolio de ejemplo y una batería de casos por producto (lados, plazos, dentro y fuera del dinero), con las mismas curvas, spot, volatilidades y parámetros de Hull-White.',
+      },
+      {
+        label: 'Curvas idénticas',
+        text: 'QuantLib reconstruye cada curva desde los factores de descuento del escritorio en sus pilares, con la misma interpolación (lineal en tasa cero continua, t = días/365, plana fuera de los pilares). Se comprueba en los pilares (1e-12) y en 10 fechas intermedias (1e-8).',
+      },
+      {
+        label: 'Tolerancias',
+        text: 'Relativas al nocional: swaps OIS 1e-6; forwards 1e-8; opciones FX y sobre acción 1e-6; bonos 1e-6; caps/floors y swaptions con Hull-White 5e-4, porque las implementaciones y convenciones del modelo difieren.',
+      },
+      {
+        label: 'Diferencias conocidas',
+        text: 'Toda diferencia mayor a su tolerancia queda explicada caso por caso (qué convención difiere y cuánto explica) o se trata como defecto. Una prueba de la suite del backend falla si algún caso excede su tolerancia sin explicación.',
+      },
+      {
+        label: 'Qué no se compara',
+        text: 'Riesgo (DV01, escenarios, VaR), XVA, contabilidad de coberturas, valuación de operaciones envejecidas con fijaciones y datos de mercado reales de un proveedor. ORE no se usa como segunda referencia.',
+      },
+      {
+        label: 'Reporte',
+        text: (
+          <>
+            El último reporte, con su fecha, la versión de QuantLib, el commit con que se generó y
+            cómo regenerarlo, está en la <a href="/validacion">pantalla Validación</a>.
+          </>
+        ),
+      },
+    ],
+  },
+];
+// fin corte 7
+
 function SectionBlock({ section }: { section: Section }) {
   return (
     <section className="meth-section" aria-labelledby={`meth-${section.id}`}>
@@ -484,6 +528,12 @@ export function MethodologyScreen() {
         <SectionBlock key={s.id} section={s} />
       ))}
       {/* --- fin corte 6 --- */}
+      {/* corte 7 */}
+      <h2 className="meth-group">Validación independiente</h2>
+      {VALIDATION_SECTIONS.map((s) => (
+        <SectionBlock key={s.id} section={s} />
+      ))}
+      {/* fin corte 7 */}
 
       <section className="meth-section" aria-labelledby="meth-limites">
         <h2 id="meth-limites">Límites de este corte</h2>

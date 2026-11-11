@@ -13,6 +13,9 @@ import { PricersScreen } from './screens/pricers/PricersScreen';
 import ConfirmationScreen from './screens/ops/ConfirmationScreen';
 import OpsScreen from './screens/ops/OpsScreen';
 // --- fin corte 5 ---
+// corte 7
+import ValidationScreen from './screens/ValidationScreen';
+// fin corte 7
 
 export default function App() {
   return (
@@ -32,6 +35,9 @@ export default function App() {
         {/* corte 5 */}
         <Route path="/operaciones" element={<OpsScreen />} />
         <Route path="/portafolio/:id/confirmacion" element={<ConfirmationScreen />} />
+        {/* corte 7 */}
+        <Route path="/validacion" element={<ValidationScreen />} />
+        {/* fin corte 7 */}
       </Routes>
     </Shell>
   );

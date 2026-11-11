@@ -214,4 +214,27 @@ describe('MethodologyScreen', () => {
     });
   });
   // --- fin corte 6 ---
+  // corte 7
+  describe('validación contra QuantLib', () => {
+    it('da las tolerancias y la regla de curvas idénticas', () => {
+      render(<MethodologyScreen />);
+      expect(row('Tolerancias')).toContain('5e-4');
+      expect(row('Tolerancias')).toContain('1e-8');
+      expect(row('Curvas idénticas')).toContain('lineal en tasa cero');
+    });
+
+    it('declara qué no se compara', () => {
+      render(<MethodologyScreen />);
+      expect(row('Qué no se compara')).toContain('VaR');
+      expect(row('Qué no se compara')).toContain('contabilidad de coberturas');
+    });
+
+    it('enlaza la pantalla Validación', () => {
+      render(<MethodologyScreen />);
+      expect(screen.getByRole('link', { name: 'pantalla Validación' }).getAttribute('href')).toBe(
+        '/validacion',
+      );
+    });
+  });
+  // fin corte 7
 });

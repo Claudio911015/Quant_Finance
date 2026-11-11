@@ -12,6 +12,8 @@ export const FLOW_KIND_LABEL = {
   coupon: 'Cupón',
   settlement: 'Liquidación',
   transfer: 'Transferencia',
+  exchange: 'Intercambio de nocional',
+  redemption: 'Amortización',
 } as const;
 
 export const RECON_STATUS_LABEL: Record<ReconStatus, string> = {
@@ -28,6 +30,7 @@ export const PRODUCT_LABEL: Record<ProductId, string> = {
   swaption: 'Swaption',
   bond: 'Bono',
   equity_option: 'Opción de renta variable',
+  xccy_swap: 'Cross currency swap',
 };
 
 /** Productos que exportan a FpML (espejo de `FPML_PRODUCTS` del backend). */

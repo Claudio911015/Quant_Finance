@@ -98,6 +98,17 @@ const NAV_ITEMS = [
       </Icon>
     ),
   },
+  // corte 7
+  {
+    to: '/validacion',
+    label: 'Validación',
+    icon: (
+      <Icon>
+        <path d="M3 8.5l3 3 7-7" />
+      </Icon>
+    ),
+  },
+  // fin corte 7
 ];
 
 export function Shell({ children }: { children: ReactNode }) {

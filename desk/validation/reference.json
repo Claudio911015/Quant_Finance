@@ -1,0 +1,506 @@
+{
+  "generated_at": "2026-11-11T18:00:55+00:00",
+  "reference": {
+    "library": "QuantLib",
+    "version": "1.44",
+    "python": "3.12.16",
+    "env": "quantsuite-oracle"
+  },
+  "curves": {
+    "TIIE-F": {
+      "interpolation": "ZeroCurve lineal en tasa cero continua, Actual365Fixed, plana fuera de los pilares (nodos en el día 0 y en el día 36500)",
+      "pillars": [
+        {
+          "days": 1,
+          "df_ref": 0.9998055933568474
+        },
+        {
+          "days": 28,
+          "df_ref": 0.9946004248048925
+        },
+        {
+          "days": 84,
+          "df_ref": 0.9840260886710908
+        },
+        {
+          "days": 168,
+          "df_ref": 0.9686244367661775
+        },
+        {
+          "days": 364,
+          "df_ref": 0.9342149959340265
+        },
+        {
+          "days": 728,
+          "df_ref": 0.8736516037475107
+        },
+        {
+          "days": 1092,
+          "df_ref": 0.816040490667218
+        },
+        {
+          "days": 1820,
+          "df_ref": 0.7093899908329974
+        },
+        {
+          "days": 2548,
+          "df_ref": 0.6132259489371545
+        },
+        {
+          "days": 3640,
+          "df_ref": 0.4878293658422388
+        }
+      ],
+      "checks": [
+        {
+          "days": 183,
+          "df_ref": 0.9659093257566932
+        },
+        {
+          "days": 547,
+          "df_ref": 0.9031440253471575
+        },
+        {
+          "days": 911,
+          "df_ref": 0.8442445066172541
+        },
+        {
+          "days": 1275,
+          "df_ref": 0.7880787472166388
+        },
+        {
+          "days": 1639,
+          "df_ref": 0.7347764163120863
+        },
+        {
+          "days": 2002,
+          "df_ref": 0.6843255805446496
+        },
+        {
+          "days": 2366,
+          "df_ref": 0.6362539744645013
+        },
+        {
+          "days": 2730,
+          "df_ref": 0.590757114156831
+        },
+        {
+          "days": 3094,
+          "df_ref": 0.5477333598953377
+        },
+        {
+          "days": 3458,
+          "df_ref": 0.5071937629597425
+        }
+      ]
+    },
+    "SOFR": {
+      "interpolation": "ZeroCurve lineal en tasa cero continua, Actual365Fixed, plana fuera de los pilares (nodos en el día 0 y en el día 36500)",
+      "pillars": [
+        {
+          "days": 1,
+          "df_ref": 0.9998916784015065
+        },
+        {
+          "days": 30,
+          "df_ref": 0.9968019271503925
+        },
+        {
+          "days": 91,
+          "df_ref": 0.9904858333012343
+        },
+        {
+          "days": 182,
+          "df_ref": 0.9813943978736455
+        },
+        {
+          "days": 365,
+          "df_ref": 0.9638425188417826
+        },
+        {
+          "days": 730,
+          "df_ref": 0.9317710746187102
+        },
+        {
+          "days": 1095,
+          "df_ref": 0.9007673163263153
+        },
+        {
+          "days": 1825,
+          "df_ref": 0.8379126014066794
+        },
+        {
+          "days": 2555,
+          "df_ref": 0.7748377054388886
+        },
+        {
+          "days": 3650,
+          "df_ref": 0.683129410477428
+        }
+      ],
+      "checks": [
+        {
+          "days": 183,
+          "df_ref": 0.981295383239526
+        },
+        {
+          "days": 548,
+          "df_ref": 0.9472735004095137
+        },
+        {
+          "days": 913,
+          "df_ref": 0.9159815474235278
+        },
+        {
+          "days": 1278,
+          "df_ref": 0.8847579227699862
+        },
+        {
+          "days": 1643,
+          "df_ref": 0.8533303549115923
+        },
+        {
+          "days": 2008,
+          "df_ref": 0.821965918406982
+        },
+        {
+          "days": 2373,
+          "df_ref": 0.7904222981254707
+        },
+        {
+          "days": 2738,
+          "df_ref": 0.7592233829385814
+        },
+        {
+          "days": 3103,
+          "df_ref": 0.728406617583502
+        },
+        {
+          "days": 3468,
+          "df_ref": 0.6980658833758611
+        }
+      ]
+    }
+  },
+  "methods": {
+    "irs": "OvernightIndexedSwap (valor telescópico) + DiscountingSwapEngine sobre la curva del desk; calendario explícito de fechas enteras con NullCalendar y Unadjusted, fija y flotante ACT/360, sin rezago de pago ni fijaciones",
+    "bond": "FixedRateBond ACT/365 + DiscountingBondEngine sobre la curva del desk; fechas de pago en hoy + round(i·365/frecuencia) días (calendario explícito, NullCalendar, Unadjusted), principal al vencimiento",
+    "cap_floor": "ql.Cap / ql.Floor sobre una pierna ql.IborLeg (NullCalendar, ACT/360, sin rezago de fijación, fechas today + i·period_days) con ql.AnalyticCapFloorEngine y ql.HullWhite(a, sigma) ajustado a la curva del desk. El primer caplet fija hoy y vale su intrínseco, como en el desk.",
+    "swaption": "ql.Swaption europea (ejercicio en today + round(expiry_years·365) días) sobre un ql.VanillaSwap (fija y flotante con fechas expiración + i·period_days, NullCalendar, ACT/360, spread 0) con ql.JamshidianSwaptionEngine y ql.HullWhite(a, sigma) ajustado a la curva del desk.",
+    "fx_forward": "FxForward (USD origen, MXN destino, strike como tasa pactada, pago en hoy + días sin rezago, NullCalendar) + DiscountingFxForwardEngine con la curva SOFR para USD, la TIIE-F para MXN y el spot del snapshot; PV en MXN (npvTargetCurrency); el forward justo de QuantLib se comprueba contra el del desk",
+    "fx_option": "VanillaOption europea (PlainVanillaPayoff, vencimiento hoy + días) + GarmanKohlagenProcess (SOFR foránea, TIIE-F doméstica) + AnalyticEuropeanEngine; volatilidad plana (BlackConstantVol, Actual365Fixed) igual a la σ que el desk leyó de su superficie en (K, T), por lo que se valida la fórmula y no la interpolación de la superficie; PV = ±nocional USD × NPV",
+    "equity_option": "VanillaOption europea + BlackScholesMertonProcess con FlatForward continuo (Actual365Fixed) para tasa y dividendo, BlackConstantVol y spot propios del caso, vencimiento hoy + días + AnalyticEuropeanEngine; PV = cantidad × NPV (no depende de las curvas del snapshot)"
+  },
+  "cases": [
+    {
+      "id": "irs-01",
+      "pv_ref": -942898.4794961214,
+      "error": null
+    },
+    {
+      "id": "irs-02",
+      "pv_ref": 1602628.7270252556,
+      "error": null
+    },
+    {
+      "id": "irs-03",
+      "pv_ref": -45658.42213896057,
+      "error": null
+    },
+    {
+      "id": "irs-04",
+      "pv_ref": 3.3527612686157227e-08,
+      "error": null
+    },
+    {
+      "id": "irs-05",
+      "pv_ref": 730944.4896219531,
+      "error": null
+    },
+    {
+      "id": "irs-06",
+      "pv_ref": 18565.87459635813,
+      "error": null
+    },
+    {
+      "id": "irs-07",
+      "pv_ref": -3941989.4857030585,
+      "error": null
+    },
+    {
+      "id": "irs-08",
+      "pv_ref": -5044878.926907569,
+      "error": null
+    },
+    {
+      "id": "irs-09",
+      "pv_ref": 9772.292204923462,
+      "error": null
+    },
+    {
+      "id": "irs-10",
+      "pv_ref": -2.3283064365386963e-09,
+      "error": null
+    },
+    {
+      "id": "irs-11",
+      "pv_ref": -601460.9238276174,
+      "error": null
+    },
+    {
+      "id": "irs-12",
+      "pv_ref": -1334191.955884546,
+      "error": null
+    },
+    {
+      "id": "fx_forward-01",
+      "pv_ref": -1500768.4377871994,
+      "error": null
+    },
+    {
+      "id": "fx_forward-02",
+      "pv_ref": 303764.6224301264,
+      "error": null
+    },
+    {
+      "id": "fx_forward-03",
+      "pv_ref": -256769.23199139835,
+      "error": null
+    },
+    {
+      "id": "fx_forward-04",
+      "pv_ref": -737448.3985645149,
+      "error": null
+    },
+    {
+      "id": "fx_forward-05",
+      "pv_ref": -385875.5121272752,
+      "error": null
+    },
+    {
+      "id": "fx_forward-06",
+      "pv_ref": 6026902.116101868,
+      "error": null
+    },
+    {
+      "id": "fx_forward-07",
+      "pv_ref": 39101.36628845846,
+      "error": null
+    },
+    {
+      "id": "fx_forward-08",
+      "pv_ref": 26290.670836719222,
+      "error": null
+    },
+    {
+      "id": "fx_option-01",
+      "pv_ref": 1665578.5527745865,
+      "error": null
+    },
+    {
+      "id": "fx_option-02",
+      "pv_ref": 536879.272445707,
+      "error": null
+    },
+    {
+      "id": "fx_option-03",
+      "pv_ref": 440743.43913108384,
+      "error": null
+    },
+    {
+      "id": "fx_option-04",
+      "pv_ref": -1242247.3658011954,
+      "error": null
+    },
+    {
+      "id": "fx_option-05",
+      "pv_ref": -856859.7944084966,
+      "error": null
+    },
+    {
+      "id": "fx_option-06",
+      "pv_ref": 1893857.5233299467,
+      "error": null
+    },
+    {
+      "id": "fx_option-07",
+      "pv_ref": 1741373.6078223838,
+      "error": null
+    },
+    {
+      "id": "fx_option-08",
+      "pv_ref": 74472.56023375482,
+      "error": null
+    },
+    {
+      "id": "fx_option-09",
+      "pv_ref": -992103.1874131218,
+      "error": null
+    },
+    {
+      "id": "fx_option-10",
+      "pv_ref": -1653731.3500802454,
+      "error": null
+    },
+    {
+      "id": "equity_option-01",
+      "pv_ref": 10243.648152737675,
+      "error": null
+    },
+    {
+      "id": "equity_option-02",
+      "pv_ref": 5463.162812656957,
+      "error": null
+    },
+    {
+      "id": "equity_option-03",
+      "pv_ref": 11619.3367756979,
+      "error": null
+    },
+    {
+      "id": "equity_option-04",
+      "pv_ref": 11101.176331767334,
+      "error": null
+    },
+    {
+      "id": "equity_option-05",
+      "pv_ref": 0.6583985390345874,
+      "error": null
+    },
+    {
+      "id": "equity_option-06",
+      "pv_ref": 3357.7825650726686,
+      "error": null
+    },
+    {
+      "id": "equity_option-07",
+      "pv_ref": 952.0958295004091,
+      "error": null
+    },
+    {
+      "id": "equity_option-08",
+      "pv_ref": 597.0617543164669,
+      "error": null
+    },
+    {
+      "id": "bond-01",
+      "pv_ref": 102896393.90912083,
+      "error": null
+    },
+    {
+      "id": "bond-02",
+      "pv_ref": 98189002.45458831,
+      "error": null
+    },
+    {
+      "id": "bond-03",
+      "pv_ref": 46702084.03742472,
+      "error": null
+    },
+    {
+      "id": "bond-04",
+      "pv_ref": 10303392.027884172,
+      "error": null
+    },
+    {
+      "id": "bond-05",
+      "pv_ref": 20360889.17224907,
+      "error": null
+    },
+    {
+      "id": "bond-06",
+      "pv_ref": 19787998.474511392,
+      "error": null
+    },
+    {
+      "id": "bond-07",
+      "pv_ref": 29906438.87748072,
+      "error": null
+    },
+    {
+      "id": "bond-08",
+      "pv_ref": 101567615.11258216,
+      "error": null
+    },
+    {
+      "id": "cap_floor-01",
+      "pv_ref": 1257727.3902223143,
+      "error": null
+    },
+    {
+      "id": "cap_floor-02",
+      "pv_ref": 133184.95501357966,
+      "error": null
+    },
+    {
+      "id": "cap_floor-03",
+      "pv_ref": 155043.99259166408,
+      "error": null
+    },
+    {
+      "id": "cap_floor-04",
+      "pv_ref": 196995.638738752,
+      "error": null
+    },
+    {
+      "id": "cap_floor-05",
+      "pv_ref": 3149903.7437113672,
+      "error": null
+    },
+    {
+      "id": "cap_floor-06",
+      "pv_ref": 196648.07148137002,
+      "error": null
+    },
+    {
+      "id": "cap_floor-07",
+      "pv_ref": 160654.94431247393,
+      "error": null
+    },
+    {
+      "id": "cap_floor-08",
+      "pv_ref": 884927.6454483259,
+      "error": null
+    },
+    {
+      "id": "swaption-01",
+      "pv_ref": 419948.5001329944,
+      "error": null
+    },
+    {
+      "id": "swaption-02",
+      "pv_ref": 942340.5154467019,
+      "error": null
+    },
+    {
+      "id": "swaption-03",
+      "pv_ref": 4322877.686651961,
+      "error": null
+    },
+    {
+      "id": "swaption-04",
+      "pv_ref": 92158.6331759701,
+      "error": null
+    },
+    {
+      "id": "swaption-05",
+      "pv_ref": 825695.6430399076,
+      "error": null
+    },
+    {
+      "id": "swaption-06",
+      "pv_ref": 253388.50780963528,
+      "error": null
+    },
+    {
+      "id": "swaption-07",
+      "pv_ref": 213314.79598886293,
+      "error": null
+    },
+    {
+      "id": "swaption-08",
+      "pv_ref": 258443.5428750828,
+      "error": null
+    }
+  ]
+}

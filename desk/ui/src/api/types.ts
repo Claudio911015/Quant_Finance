@@ -665,3 +665,83 @@ export interface HolidaysResponse {
   holidays: { MX: Holiday[]; US: Holiday[] };
 }
 // --- fin corte 3 ---
+// corte 7
+export type ValidationProduct = 'irs' | 'fx_forward' | 'fx_option' | 'equity_option' | 'bond' | 'cap_floor' | 'swaption';
+export type ValidationVerdict = 'ok' | 'explained' | 'fail';
+export type KnownDifferenceKind = 'convention' | 'interpolation' | 'defect';
+
+export interface ValidationCase {
+  id: string;
+  product: ValidationProduct;
+  label: string;
+  source: 'portfolio' | 'battery';
+  trade_id: number | null;
+  currency: string;
+  notional: number;
+  pv_desk: number;
+  pv_ref: number | null;
+  abs_diff: number | null;
+  rel_diff: number | null;
+  tolerance: number;
+  verdict: ValidationVerdict;
+  error: string | null;
+}
+
+export interface ValidationProductSummary {
+  product: ValidationProduct;
+  label: string;
+  method: string;
+  tolerance: number;
+  cases: number;
+  within: number;
+  explained: number;
+  failed: number;
+  worst_abs_diff: number | null;
+  worst_rel_diff: number | null;
+  worst_case: string | null;
+}
+
+export interface ValidationCurveCheck {
+  curve: string;
+  currency: string;
+  interpolation: string;
+  pillars: number;
+  pillar_max_abs_diff: number;
+  pillar_tolerance: number;
+  checks: number;
+  check_max_abs_diff: number;
+  check_tolerance: number;
+  ok: boolean;
+}
+
+export interface KnownDifference {
+  case_id: string;
+  product: ValidationProduct;
+  label: string;
+  kind: KnownDifferenceKind;
+  convention: string;
+  cause: string;
+  expected_rel_diff: number;
+  max_rel_diff: number;
+  observed_rel_diff: number | null;
+  tolerance: number;
+  verdict: ValidationVerdict;
+}
+
+export interface ValidationReport {
+  generated_at: string;
+  snapshot: { id: string; as_of: string; spot: number };
+  desk_commit: string | null;
+  desk_dirty: boolean | null;
+  reference: { library: string; version: string; python: string; env: string };
+  reproduce: { command: string; backend_python: string; quantlib_python: string; steps: string[] };
+  tolerances: Record<ValidationProduct, number>;
+  totals: { cases: number; within: number; explained: number; failed: number };
+  summary: ValidationProductSummary[];
+  curves: ValidationCurveCheck[];
+  cases: ValidationCase[];
+  known_differences: KnownDifference[];
+  current_commit: string | null;
+  commit_matches: boolean | null;
+}
+// fin corte 7

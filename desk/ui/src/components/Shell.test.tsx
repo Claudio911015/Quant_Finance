@@ -266,7 +266,7 @@ describe('Snapshot inicial', () => {
 });
 
 describe('Shell: barra lateral', () => {
-  it('enlaza las siete pantallas, con Operaciones justo antes de Metodología, y marca la activa', async () => {
+  it('enlaza las ocho pantallas, con Operaciones justo antes de Metodología, y marca la activa', async () => {
     mockApi([DEMO]);
     renderShell('/riesgo');
     const nav = screen.getByRole('navigation', { name: 'Navegación principal' });
@@ -279,6 +279,7 @@ describe('Shell: barra lateral', () => {
       'Coberturas',
       'Operaciones',
       'Metodología',
+      'Validación',
     ]);
     expect(within(nav).getByRole('link', { name: 'Riesgo' }).getAttribute('aria-current')).toBe('page');
     expect(within(nav).getByRole('link', { name: 'Mercado' }).getAttribute('aria-current')).toBeNull();
@@ -290,7 +291,7 @@ describe('Paleta de comandos', () => {
   it.each([
     ['Ctrl+K', { ctrlKey: true }],
     ['Cmd+K', { metaKey: true }],
-  ])('%s abre la paleta con las siete pantallas y los ocho pricers', async (_name, keys) => {
+  ])('%s abre la paleta con las ocho pantallas y los ocho pricers', async (_name, keys) => {
     mockApi([DEMO]);
     renderShell();
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -311,6 +312,7 @@ describe('Paleta de comandos', () => {
       'Coberturas',
       'Operaciones',
       'Metodología',
+      'Validación',
       ...specs.map((spec) => spec.title),
     ]);
     await screen.findByText('Datos sintéticos');

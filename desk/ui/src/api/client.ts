@@ -32,6 +32,9 @@ import type {
 // --- corte 3 ---
 import type { CollateralCurrency, Counterparty, HolidaysResponse } from './types';
 // --- fin corte 3 ---
+// corte 7
+import type { ValidationReport } from './types';
+// fin corte 7
 
 export class ApiError extends Error {
   status: number;
@@ -275,3 +278,8 @@ export function holidays(from: string, to: string): Promise<HolidaysResponse> {
 // --- corte 6: acceso de las pestañas de riesgo a la capa HTTP común ---
 export { request as apiRequest };
 // --- fin corte 6 ---
+// corte 7
+export function getValidationReport(): Promise<ValidationReport> {
+  return request('GET', '/validation/report');
+}
+// fin corte 7

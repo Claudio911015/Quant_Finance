@@ -1,0 +1,2106 @@
+{
+  "generated_at": "2026-11-11T18:00:55+00:00",
+  "snapshot": {
+    "id": "MX-DEMO",
+    "as_of": "2026-11-10",
+    "spot": 18.6
+  },
+  "desk_commit": "78e098d2f272bb472765a7bf487627b5422cfbab",
+  "desk_dirty": false,
+  "hw": {
+    "TIIE-F": {
+      "a": 0.05,
+      "sigma": 0.01
+    },
+    "SOFR": {
+      "a": 0.03,
+      "sigma": 0.008
+    }
+  },
+  "curves": {
+    "TIIE-F": {
+      "currency": "MXN",
+      "period_days": 28,
+      "pillars": [
+        {
+          "label": "1D",
+          "days": 1,
+          "df": 0.9998055933568474
+        },
+        {
+          "label": "1x28",
+          "days": 28,
+          "df": 0.9946004248048925
+        },
+        {
+          "label": "3x28",
+          "days": 84,
+          "df": 0.9840260886710908
+        },
+        {
+          "label": "6x28",
+          "days": 168,
+          "df": 0.9686244367661775
+        },
+        {
+          "label": "13x28",
+          "days": 364,
+          "df": 0.9342149959340265
+        },
+        {
+          "label": "26x28",
+          "days": 728,
+          "df": 0.8736516037475107
+        },
+        {
+          "label": "39x28",
+          "days": 1092,
+          "df": 0.816040490667218
+        },
+        {
+          "label": "65x28",
+          "days": 1820,
+          "df": 0.7093899908329974
+        },
+        {
+          "label": "91x28",
+          "days": 2548,
+          "df": 0.6132259489371545
+        },
+        {
+          "label": "130x28",
+          "days": 3640,
+          "df": 0.4878293658422388
+        }
+      ],
+      "checks": [
+        {
+          "days": 183,
+          "df": 0.9659093257566932
+        },
+        {
+          "days": 547,
+          "df": 0.9031440253471575
+        },
+        {
+          "days": 911,
+          "df": 0.8442445066172541
+        },
+        {
+          "days": 1275,
+          "df": 0.7880787472166388
+        },
+        {
+          "days": 1639,
+          "df": 0.7347764163120863
+        },
+        {
+          "days": 2002,
+          "df": 0.6843255805446496
+        },
+        {
+          "days": 2366,
+          "df": 0.6362539744645013
+        },
+        {
+          "days": 2730,
+          "df": 0.5907571141568311
+        },
+        {
+          "days": 3094,
+          "df": 0.5477333598953377
+        },
+        {
+          "days": 3458,
+          "df": 0.5071937629597425
+        }
+      ]
+    },
+    "SOFR": {
+      "currency": "USD",
+      "period_days": 365,
+      "pillars": [
+        {
+          "label": "1D",
+          "days": 1,
+          "df": 0.9998916784015065
+        },
+        {
+          "label": "1M",
+          "days": 30,
+          "df": 0.9968019271503925
+        },
+        {
+          "label": "3M",
+          "days": 91,
+          "df": 0.9904858333012343
+        },
+        {
+          "label": "6M",
+          "days": 182,
+          "df": 0.9813943978736455
+        },
+        {
+          "label": "1Y",
+          "days": 365,
+          "df": 0.9638425188417826
+        },
+        {
+          "label": "2Y",
+          "days": 730,
+          "df": 0.9317710746187102
+        },
+        {
+          "label": "3Y",
+          "days": 1095,
+          "df": 0.9007673163263153
+        },
+        {
+          "label": "5Y",
+          "days": 1825,
+          "df": 0.8379126014066794
+        },
+        {
+          "label": "7Y",
+          "days": 2555,
+          "df": 0.7748377054388886
+        },
+        {
+          "label": "10Y",
+          "days": 3650,
+          "df": 0.683129410477428
+        }
+      ],
+      "checks": [
+        {
+          "days": 183,
+          "df": 0.981295383239526
+        },
+        {
+          "days": 548,
+          "df": 0.9472735004095137
+        },
+        {
+          "days": 913,
+          "df": 0.9159815474235278
+        },
+        {
+          "days": 1278,
+          "df": 0.8847579227699862
+        },
+        {
+          "days": 1643,
+          "df": 0.8533303549115923
+        },
+        {
+          "days": 2008,
+          "df": 0.8219659184069821
+        },
+        {
+          "days": 2373,
+          "df": 0.7904222981254707
+        },
+        {
+          "days": 2738,
+          "df": 0.7592233829385814
+        },
+        {
+          "days": 3103,
+          "df": 0.728406617583502
+        },
+        {
+          "days": 3468,
+          "df": 0.698065883375861
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "irs-01",
+      "product": "irs",
+      "source": "portfolio",
+      "trade_id": 1,
+      "label": "Paga fija TIIE-F · 26 periodos de 28 días · fija 6.8000 % · portafolio #1",
+      "params": {
+        "curve": "TIIE-F",
+        "side": "payer",
+        "notional": 500000000.0,
+        "periods": 26,
+        "fixed_rate": 0.068
+      },
+      "inputs": {
+        "period_days": 28,
+        "payment_days": [
+          28,
+          56,
+          84,
+          112,
+          140,
+          168,
+          196,
+          224,
+          252,
+          280,
+          308,
+          336,
+          364,
+          392,
+          420,
+          448,
+          476,
+          504,
+          532,
+          560,
+          588,
+          616,
+          644,
+          672,
+          700,
+          728
+        ]
+      },
+      "currency": "MXN",
+      "notional": 500000000.0,
+      "pv_desk": -942898.4794959975
+    },
+    {
+      "id": "irs-02",
+      "product": "irs",
+      "source": "portfolio",
+      "trade_id": 2,
+      "label": "Recibe fija TIIE-F · 65 periodos de 28 días · fija 6.9500 % · portafolio #2",
+      "params": {
+        "curve": "TIIE-F",
+        "side": "receiver",
+        "notional": 250000000.0,
+        "periods": 65,
+        "fixed_rate": 0.0695
+      },
+      "inputs": {
+        "period_days": 28,
+        "payment_days": [
+          28,
+          56,
+          84,
+          112,
+          140,
+          168,
+          196,
+          224,
+          252,
+          280,
+          308,
+          336,
+          364,
+          392,
+          420,
+          448,
+          476,
+          504,
+          532,
+          560,
+          588,
+          616,
+          644,
+          672,
+          700,
+          728,
+          756,
+          784,
+          812,
+          840,
+          868,
+          896,
+          924,
+          952,
+          980,
+          1008,
+          1036,
+          1064,
+          1092,
+          1120,
+          1148,
+          1176,
+          1204,
+          1232,
+          1260,
+          1288,
+          1316,
+          1344,
+          1372,
+          1400,
+          1428,
+          1456,
+          1484,
+          1512,
+          1540,
+          1568,
+          1596,
+          1624,
+          1652,
+          1680,
+          1708,
+          1736,
+          1764,
+          1792,
+          1820
+        ]
+      },
+      "currency": "MXN",
+      "notional": 250000000.0,
+      "pv_desk": 1602628.727023759
+    },
+    {
+      "id": "irs-03",
+      "product": "irs",
+      "source": "portfolio",
+      "trade_id": 3,
+      "label": "Paga fija SOFR · 5 periodos de 365 días · fija 3.6000 % · portafolio #3",
+      "params": {
+        "curve": "SOFR",
+        "side": "payer",
+        "notional": 20000000.0,
+        "periods": 5,
+        "fixed_rate": 0.036
+      },
+      "inputs": {
+        "period_days": 365,
+        "payment_days": [
+          365,
+          730,
+          1095,
+          1460,
+          1825
+        ]
+      },
+      "currency": "USD",
+      "notional": 20000000.0,
+      "pv_desk": -45658.422138962495
+    },
+    {
+      "id": "irs-04",
+      "product": "irs",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Paga fija TIIE-F · 13 periodos de 28 días · fija 6.7500 % (a la par)",
+      "params": {
+        "curve": "TIIE-F",
+        "side": "payer",
+        "notional": 100000000.0,
+        "periods": 13,
+        "fixed_rate": 0.06750000000000005
+      },
+      "inputs": {
+        "period_days": 28,
+        "payment_days": [
+          28,
+          56,
+          84,
+          112,
+          140,
+          168,
+          196,
+          224,
+          252,
+          280,
+          308,
+          336,
+          364
+        ]
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 5.329638952389359e-10
+    },
+    {
+      "id": "irs-05",
+      "product": "irs",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Recibe fija TIIE-F · 13 periodos de 28 días · fija 7.5000 %",
+      "params": {
+        "curve": "TIIE-F",
+        "side": "receiver",
+        "notional": 100000000.0,
+        "periods": 13,
+        "fixed_rate": 0.075
+      },
+      "inputs": {
+        "period_days": 28,
+        "payment_days": [
+          28,
+          56,
+          84,
+          112,
+          140,
+          168,
+          196,
+          224,
+          252,
+          280,
+          308,
+          336,
+          364
+        ]
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 730944.4896219238
+    },
+    {
+      "id": "irs-06",
+      "product": "irs",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Paga fija TIIE-F · 1 periodo de 28 días · fija 6.5000 %",
+      "params": {
+        "curve": "TIIE-F",
+        "side": "payer",
+        "notional": 50000000.0,
+        "periods": 1,
+        "fixed_rate": 0.065
+      },
+      "inputs": {
+        "period_days": 28,
+        "payment_days": [
+          28
+        ]
+      },
+      "currency": "MXN",
+      "notional": 50000000.0,
+      "pv_desk": 18565.874596359896
+    },
+    {
+      "id": "irs-07",
+      "product": "irs",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Recibe fija TIIE-F · 39 periodos de 28 días · fija 6.0000 %",
+      "params": {
+        "curve": "TIIE-F",
+        "side": "receiver",
+        "notional": 200000000.0,
+        "periods": 39,
+        "fixed_rate": 0.06
+      },
+      "inputs": {
+        "period_days": 28,
+        "payment_days": [
+          28,
+          56,
+          84,
+          112,
+          140,
+          168,
+          196,
+          224,
+          252,
+          280,
+          308,
+          336,
+          364,
+          392,
+          420,
+          448,
+          476,
+          504,
+          532,
+          560,
+          588,
+          616,
+          644,
+          672,
+          700,
+          728,
+          756,
+          784,
+          812,
+          840,
+          868,
+          896,
+          924,
+          952,
+          980,
+          1008,
+          1036,
+          1064,
+          1092
+        ]
+      },
+      "currency": "MXN",
+      "notional": 200000000.0,
+      "pv_desk": -3941989.485702577
+    },
+    {
+      "id": "irs-08",
+      "product": "irs",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Paga fija TIIE-F · 91 periodos de 28 días · fija 7.2000 %",
+      "params": {
+        "curve": "TIIE-F",
+        "side": "payer",
+        "notional": 300000000.0,
+        "periods": 91,
+        "fixed_rate": 0.072
+      },
+      "inputs": {
+        "period_days": 28,
+        "payment_days": [
+          28,
+          56,
+          84,
+          112,
+          140,
+          168,
+          196,
+          224,
+          252,
+          280,
+          308,
+          336,
+          364,
+          392,
+          420,
+          448,
+          476,
+          504,
+          532,
+          560,
+          588,
+          616,
+          644,
+          672,
+          700,
+          728,
+          756,
+          784,
+          812,
+          840,
+          868,
+          896,
+          924,
+          952,
+          980,
+          1008,
+          1036,
+          1064,
+          1092,
+          1120,
+          1148,
+          1176,
+          1204,
+          1232,
+          1260,
+          1288,
+          1316,
+          1344,
+          1372,
+          1400,
+          1428,
+          1456,
+          1484,
+          1512,
+          1540,
+          1568,
+          1596,
+          1624,
+          1652,
+          1680,
+          1708,
+          1736,
+          1764,
+          1792,
+          1820,
+          1848,
+          1876,
+          1904,
+          1932,
+          1960,
+          1988,
+          2016,
+          2044,
+          2072,
+          2100,
+          2128,
+          2156,
+          2184,
+          2212,
+          2240,
+          2268,
+          2296,
+          2324,
+          2352,
+          2380,
+          2408,
+          2436,
+          2464,
+          2492,
+          2520,
+          2548
+        ]
+      },
+      "currency": "MXN",
+      "notional": 300000000.0,
+      "pv_desk": -5044878.926906537
+    },
+    {
+      "id": "irs-09",
+      "product": "irs",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Recibe fija SOFR · 1 periodo de 365 días · fija 3.8000 %",
+      "params": {
+        "curve": "SOFR",
+        "side": "receiver",
+        "notional": 10000000.0,
+        "periods": 1,
+        "fixed_rate": 0.038
+      },
+      "inputs": {
+        "period_days": 365,
+        "payment_days": [
+          365
+        ]
+      },
+      "currency": "USD",
+      "notional": 10000000.0,
+      "pv_desk": 9772.29220492401
+    },
+    {
+      "id": "irs-10",
+      "product": "irs",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Paga fija SOFR · 3 periodos de 365 días · fija 3.5000 % (a la par)",
+      "params": {
+        "curve": "SOFR",
+        "side": "payer",
+        "notional": 25000000.0,
+        "periods": 3,
+        "fixed_rate": 0.03499999999999996
+      },
+      "inputs": {
+        "period_days": 365,
+        "payment_days": [
+          365,
+          730,
+          1095
+        ]
+      },
+      "currency": "USD",
+      "notional": 25000000.0,
+      "pv_desk": -7.275957614183426e-12
+    },
+    {
+      "id": "irs-11",
+      "product": "irs",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Recibe fija SOFR · 7 periodos de 365 días · fija 3.0000 %",
+      "params": {
+        "curve": "SOFR",
+        "side": "receiver",
+        "notional": 15000000.0,
+        "periods": 7,
+        "fixed_rate": 0.03
+      },
+      "inputs": {
+        "period_days": 365,
+        "payment_days": [
+          365,
+          730,
+          1095,
+          1460,
+          1825,
+          2190,
+          2555
+        ]
+      },
+      "currency": "USD",
+      "notional": 15000000.0,
+      "pv_desk": -601460.923827626
+    },
+    {
+      "id": "irs-12",
+      "product": "irs",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Paga fija SOFR · 10 periodos de 365 días · fija 4.2000 %",
+      "params": {
+        "curve": "SOFR",
+        "side": "payer",
+        "notional": 40000000.0,
+        "periods": 10,
+        "fixed_rate": 0.042
+      },
+      "inputs": {
+        "period_days": 365,
+        "payment_days": [
+          365,
+          730,
+          1095,
+          1460,
+          1825,
+          2190,
+          2555,
+          2920,
+          3285,
+          3650
+        ]
+      },
+      "currency": "USD",
+      "notional": 40000000.0,
+      "pv_desk": -1334191.9558845172
+    },
+    {
+      "id": "fx_forward-01",
+      "product": "fx_forward",
+      "source": "portfolio",
+      "trade_id": 4,
+      "label": "Compra USD 10,000,000 a 182 días · strike 19.0500 · portafolio #4",
+      "params": {
+        "side": "buy",
+        "notional_usd": 10000000.0,
+        "strike": 19.05,
+        "days": 182
+      },
+      "inputs": {
+        "spot": 18.6,
+        "forward": 18.894655405902405
+      },
+      "currency": "MXN",
+      "notional": 186000000.0,
+      "pv_desk": -1500768.4377872366
+    },
+    {
+      "id": "fx_forward-02",
+      "product": "fx_forward",
+      "source": "portfolio",
+      "trade_id": 5,
+      "label": "Venta USD 3,000,000 a 91 días · strike 18.8500 · portafolio #5",
+      "params": {
+        "side": "sell",
+        "notional_usd": 3000000.0,
+        "strike": 18.85,
+        "days": 91
+      },
+      "inputs": {
+        "spot": 18.6,
+        "forward": 18.7469647832074
+      },
+      "currency": "MXN",
+      "notional": 55800000.00000001,
+      "pv_desk": 303764.6224301369
+    },
+    {
+      "id": "fx_forward-03",
+      "product": "fx_forward",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Compra USD 5,000,000 a 30 días · strike 18.7000",
+      "params": {
+        "side": "buy",
+        "notional_usd": 5000000.0,
+        "strike": 18.7,
+        "days": 30
+      },
+      "inputs": {
+        "spot": 18.6,
+        "forward": 18.648347479646315
+      },
+      "currency": "MXN",
+      "notional": 93000000.0,
+      "pv_desk": -256769.23199140944
+    },
+    {
+      "id": "fx_forward-04",
+      "product": "fx_forward",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Venta USD 5,000,000 a 30 días · strike 18.5000",
+      "params": {
+        "side": "sell",
+        "notional_usd": 5000000.0,
+        "strike": 18.5,
+        "days": 30
+      },
+      "inputs": {
+        "spot": 18.6,
+        "forward": 18.648347479646315
+      },
+      "currency": "MXN",
+      "notional": 93000000.0,
+      "pv_desk": -737448.3985645064
+    },
+    {
+      "id": "fx_forward-05",
+      "product": "fx_forward",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Compra USD 2,000,000 a 365 días · strike 19.4000",
+      "params": {
+        "side": "buy",
+        "notional_usd": 2000000.0,
+        "strike": 19.4,
+        "days": 365
+      },
+      "inputs": {
+        "spot": 18.6,
+        "forward": 19.193437744759933
+      },
+      "currency": "MXN",
+      "notional": 37200000.0,
+      "pv_desk": -385875.5121272637
+    },
+    {
+      "id": "fx_forward-06",
+      "product": "fx_forward",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Venta USD 8,000,000 a 365 días · strike 20.0000",
+      "params": {
+        "side": "sell",
+        "notional_usd": 8000000.0,
+        "strike": 20.0,
+        "days": 365
+      },
+      "inputs": {
+        "spot": 18.6,
+        "forward": 19.193437744759933
+      },
+      "currency": "MXN",
+      "notional": 148800000.0,
+      "pv_desk": 6026902.116101837
+    },
+    {
+      "id": "fx_forward-07",
+      "product": "fx_forward",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Compra USD 1,000,000 a 730 días · strike 19.8000",
+      "params": {
+        "side": "buy",
+        "notional_usd": 1000000.0,
+        "strike": 19.8,
+        "days": 730
+      },
+      "inputs": {
+        "spot": 18.6,
+        "forward": 19.844772969486172
+      },
+      "currency": "MXN",
+      "notional": 18600000.0,
+      "pv_desk": 39101.36628845961
+    },
+    {
+      "id": "fx_forward-08",
+      "product": "fx_forward",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Venta USD 3,000,000 a 7 días · strike 18.6200",
+      "params": {
+        "side": "sell",
+        "notional_usd": 3000000.0,
+        "strike": 18.62,
+        "days": 7
+      },
+      "inputs": {
+        "spot": 18.6,
+        "forward": 18.611224522403568
+      },
+      "currency": "MXN",
+      "notional": 55800000.00000001,
+      "pv_desk": 26290.67083672254
+    },
+    {
+      "id": "fx_option-01",
+      "product": "fx_option",
+      "source": "portfolio",
+      "trade_id": 6,
+      "label": "Compra call USD 5,000,000 a 91 días · strike 19.0000 · portafolio #6",
+      "params": {
+        "side": "buy",
+        "option_type": "call",
+        "notional_usd": 5000000.0,
+        "strike": 19.0,
+        "days": 91
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.1208646857957608,
+        "forward": 18.7469647832074
+      },
+      "currency": "MXN",
+      "notional": 93000000.0,
+      "pv_desk": 1665578.5527745958
+    },
+    {
+      "id": "fx_option-02",
+      "product": "fx_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Compra call USD 2,000,000 a 30 días · strike 18.6000",
+      "params": {
+        "side": "buy",
+        "option_type": "call",
+        "notional_usd": 2000000.0,
+        "strike": 18.6,
+        "days": 30
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.11505518129151678,
+        "forward": 18.648347479646315
+      },
+      "currency": "MXN",
+      "notional": 37200000.0,
+      "pv_desk": 536879.2724457058
+    },
+    {
+      "id": "fx_option-03",
+      "product": "fx_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Compra put USD 2,000,000 a 30 días · strike 18.6000",
+      "params": {
+        "side": "buy",
+        "option_type": "put",
+        "notional_usd": 2000000.0,
+        "strike": 18.6,
+        "days": 30
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.11505518129151678,
+        "forward": 18.648347479646315
+      },
+      "currency": "MXN",
+      "notional": 37200000.0,
+      "pv_desk": 440743.4391310865
+    },
+    {
+      "id": "fx_option-04",
+      "product": "fx_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Venta call USD 3,000,000 a 182 días · strike 19.5000",
+      "params": {
+        "side": "sell",
+        "option_type": "call",
+        "notional_usd": 3000000.0,
+        "strike": 19.5,
+        "days": 182
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.1275340041088658,
+        "forward": 18.894655405902405
+      },
+      "currency": "MXN",
+      "notional": 55800000.00000001,
+      "pv_desk": -1242247.365801191
+    },
+    {
+      "id": "fx_option-05",
+      "product": "fx_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Venta put USD 3,000,000 a 182 días · strike 18.0000",
+      "params": {
+        "side": "sell",
+        "option_type": "put",
+        "notional_usd": 3000000.0,
+        "strike": 18.0,
+        "days": 182
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.12455389155569185,
+        "forward": 18.894655405902405
+      },
+      "currency": "MXN",
+      "notional": 55800000.00000001,
+      "pv_desk": -856859.7944085008
+    },
+    {
+      "id": "fx_option-06",
+      "product": "fx_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Compra call USD 1,000,000 a 365 días · strike 17.5000",
+      "params": {
+        "side": "buy",
+        "option_type": "call",
+        "notional_usd": 1000000.0,
+        "strike": 17.5,
+        "days": 365
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.1300292824657336,
+        "forward": 19.193437744759933
+      },
+      "currency": "MXN",
+      "notional": 18600000.0,
+      "pv_desk": 1893857.5233299488
+    },
+    {
+      "id": "fx_option-07",
+      "product": "fx_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Compra put USD 1,000,000 a 365 días · strike 20.5000",
+      "params": {
+        "side": "buy",
+        "option_type": "put",
+        "notional_usd": 1000000.0,
+        "strike": 20.5,
+        "days": 365
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.13764797445387475,
+        "forward": 19.193437744759933
+      },
+      "currency": "MXN",
+      "notional": 18600000.0,
+      "pv_desk": 1741373.6078223821
+    },
+    {
+      "id": "fx_option-08",
+      "product": "fx_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Compra call USD 4,000,000 a 91 días · strike 21.0000",
+      "params": {
+        "side": "buy",
+        "option_type": "call",
+        "notional_usd": 4000000.0,
+        "strike": 21.0,
+        "days": 91
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.12764797445387474,
+        "forward": 18.7469647832074
+      },
+      "currency": "MXN",
+      "notional": 74400000.0,
+      "pv_desk": 74472.56023375726
+    },
+    {
+      "id": "fx_option-09",
+      "product": "fx_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Venta put USD 2,000,000 a 91 días · strike 18.8500",
+      "params": {
+        "side": "sell",
+        "option_type": "put",
+        "notional_usd": 2000000.0,
+        "strike": 18.85,
+        "days": 91
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.12056112160666929,
+        "forward": 18.7469647832074
+      },
+      "currency": "MXN",
+      "notional": 37200000.0,
+      "pv_desk": -992103.1874131217
+    },
+    {
+      "id": "fx_option-10",
+      "product": "fx_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Venta call USD 1,000,000 a 730 días · strike 19.0000",
+      "params": {
+        "side": "sell",
+        "option_type": "call",
+        "notional_usd": 1000000.0,
+        "strike": 19.0,
+        "days": 730
+      },
+      "inputs": {
+        "spot": 18.6,
+        "vol": 0.1308646857957608,
+        "forward": 19.844772969486172
+      },
+      "currency": "MXN",
+      "notional": 18600000.0,
+      "pv_desk": -1653731.350080246
+    },
+    {
+      "id": "equity_option-01",
+      "product": "equity_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Call · S 100 · K 100 · 365 días · σ 20 % · r 7 % · q 2 % · 1000 títulos",
+      "params": {
+        "option_type": "call",
+        "spot": 100.0,
+        "strike": 100.0,
+        "volatility": 0.2,
+        "rate": 0.07,
+        "dividend_yield": 0.02,
+        "maturity_years": 1.0,
+        "quantity": 1000.0
+      },
+      "inputs": {
+        "days": 365
+      },
+      "currency": "MXN",
+      "notional": 100000.0,
+      "pv_desk": 10243.648152737664
+    },
+    {
+      "id": "equity_option-02",
+      "product": "equity_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Put · S 100 · K 100 · 365 días · σ 20 % · r 7 % · q 2 % · 1000 títulos",
+      "params": {
+        "option_type": "put",
+        "spot": 100.0,
+        "strike": 100.0,
+        "volatility": 0.2,
+        "rate": 0.07,
+        "dividend_yield": 0.02,
+        "maturity_years": 1.0,
+        "quantity": 1000.0
+      },
+      "inputs": {
+        "days": 365
+      },
+      "currency": "MXN",
+      "notional": 100000.0,
+      "pv_desk": 5463.162812656961
+    },
+    {
+      "id": "equity_option-03",
+      "product": "equity_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Call · S 100 · K 80 · 182 días · σ 25 % · r 7 % · q 0 % · 500 títulos",
+      "params": {
+        "option_type": "call",
+        "spot": 100.0,
+        "strike": 80.0,
+        "volatility": 0.25,
+        "rate": 0.07,
+        "dividend_yield": 0.0,
+        "maturity_years": 0.4986301369863014,
+        "quantity": 500.0
+      },
+      "inputs": {
+        "days": 182
+      },
+      "currency": "MXN",
+      "notional": 50000.0,
+      "pv_desk": 11619.336775697902
+    },
+    {
+      "id": "equity_option-04",
+      "product": "equity_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Put · S 100 · K 120 · 730 días · σ 35 % · r 7 % · q 0 % · 500 títulos",
+      "params": {
+        "option_type": "put",
+        "spot": 100.0,
+        "strike": 120.0,
+        "volatility": 0.35,
+        "rate": 0.07,
+        "dividend_yield": 0.0,
+        "maturity_years": 2.0,
+        "quantity": 500.0
+      },
+      "inputs": {
+        "days": 730
+      },
+      "currency": "MXN",
+      "notional": 50000.0,
+      "pv_desk": 11101.176331767334
+    },
+    {
+      "id": "equity_option-05",
+      "product": "equity_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Call · S 100 · K 130 · 30 días · σ 25 % · r 7 % · q 1 % · 2000 títulos",
+      "params": {
+        "option_type": "call",
+        "spot": 100.0,
+        "strike": 130.0,
+        "volatility": 0.25,
+        "rate": 0.07,
+        "dividend_yield": 0.01,
+        "maturity_years": 0.0821917808219178,
+        "quantity": 2000.0
+      },
+      "inputs": {
+        "days": 30
+      },
+      "currency": "MXN",
+      "notional": 200000.0,
+      "pv_desk": 0.6583985390389082
+    },
+    {
+      "id": "equity_option-06",
+      "product": "equity_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Put · S 100 · K 90 · 91 días · σ 30 % · r 7 % · q 1 % · 2000 títulos",
+      "params": {
+        "option_type": "put",
+        "spot": 100.0,
+        "strike": 90.0,
+        "volatility": 0.3,
+        "rate": 0.07,
+        "dividend_yield": 0.01,
+        "maturity_years": 0.2493150684931507,
+        "quantity": 2000.0
+      },
+      "inputs": {
+        "days": 91
+      },
+      "currency": "MXN",
+      "notional": 200000.0,
+      "pv_desk": 3357.782565072647
+    },
+    {
+      "id": "equity_option-07",
+      "product": "equity_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Call · S 50 · K 50 · 1825 días · σ 30 % · r 4 % · q 5 % · 100 títulos",
+      "params": {
+        "option_type": "call",
+        "spot": 50.0,
+        "strike": 50.0,
+        "volatility": 0.3,
+        "rate": 0.04,
+        "dividend_yield": 0.05,
+        "maturity_years": 5.0,
+        "quantity": 100.0
+      },
+      "inputs": {
+        "days": 1825
+      },
+      "currency": "MXN",
+      "notional": 5000.0,
+      "pv_desk": 952.0958295004091
+    },
+    {
+      "id": "equity_option-08",
+      "product": "equity_option",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Put · S 250 · K 262.5 · 365 días · σ 18 % · r 10 % · q 0 % · 50 títulos",
+      "params": {
+        "option_type": "put",
+        "spot": 250.0,
+        "strike": 262.5,
+        "volatility": 0.18,
+        "rate": 0.1,
+        "dividend_yield": 0.0,
+        "maturity_years": 1.0,
+        "quantity": 50.0
+      },
+      "inputs": {
+        "days": 365
+      },
+      "currency": "MXN",
+      "notional": 12500.0,
+      "pv_desk": 597.0617543164672
+    },
+    {
+      "id": "bond-01",
+      "product": "bond",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Bono TIIE-F · cupón 8.00 % · 6 cupones cada 182 días",
+      "params": {
+        "curve": "TIIE-F",
+        "face": 100000000.0,
+        "coupon_rate": 0.08,
+        "periods": 6,
+        "frequency": 2.0054945054945055
+      },
+      "inputs": {
+        "schedule": [
+          {
+            "t": 0.4986301369863014,
+            "amount": 3989041.095890411
+          },
+          {
+            "t": 0.9972602739726028,
+            "amount": 3989041.095890411
+          },
+          {
+            "t": 1.4958904109589042,
+            "amount": 3989041.095890411
+          },
+          {
+            "t": 1.9945205479452055,
+            "amount": 3989041.095890411
+          },
+          {
+            "t": 2.493150684931507,
+            "amount": 3989041.095890411
+          },
+          {
+            "t": 2.9917808219178084,
+            "amount": 103989041.09589042
+          }
+        ]
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 102896393.90912089
+    },
+    {
+      "id": "bond-02",
+      "product": "bond",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Bono TIIE-F · cupón 7.00 % · 20 cupones cada 182 días",
+      "params": {
+        "curve": "TIIE-F",
+        "face": 100000000.0,
+        "coupon_rate": 0.07,
+        "periods": 20,
+        "frequency": 2.0054945054945055
+      },
+      "inputs": {
+        "schedule": [
+          {
+            "t": 0.4986301369863014,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 0.9972602739726028,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 1.4958904109589042,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 1.9945205479452055,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 2.493150684931507,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 2.9917808219178084,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 3.4904109589041097,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 3.989041095890411,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 4.487671232876712,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 4.986301369863014,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 5.484931506849315,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 5.983561643835617,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 6.482191780821918,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 6.980821917808219,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 7.47945205479452,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 7.978082191780822,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 8.476712328767123,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 8.975342465753425,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 9.473972602739726,
+            "amount": 3490410.95890411
+          },
+          {
+            "t": 9.972602739726028,
+            "amount": 103490410.95890412
+          }
+        ]
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 98189002.45458846
+    },
+    {
+      "id": "bond-03",
+      "product": "bond",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Bono TIIE-F · cupón 0.00 % · 1 cupón cada 365 días",
+      "params": {
+        "curve": "TIIE-F",
+        "face": 50000000.0,
+        "coupon_rate": 0.0,
+        "periods": 1,
+        "frequency": 1.0
+      },
+      "inputs": {
+        "schedule": [
+          {
+            "t": 1.0,
+            "amount": 50000000.0
+          }
+        ]
+      },
+      "currency": "MXN",
+      "notional": 50000000.0,
+      "pv_desk": 46702084.03742472
+    },
+    {
+      "id": "bond-04",
+      "product": "bond",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Bono TIIE-F · cupón 10.00 % · 13 cupones cada 28 días",
+      "params": {
+        "curve": "TIIE-F",
+        "face": 10000000.0,
+        "coupon_rate": 0.1,
+        "periods": 13,
+        "frequency": 13.035714285714286
+      },
+      "inputs": {
+        "schedule": [
+          {
+            "t": 0.07671232876712328,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.15342465753424656,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.23013698630136986,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.3068493150684931,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.3835616438356164,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.4602739726027397,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.536986301369863,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.6136986301369862,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.6904109589041095,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.7671232876712328,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.8438356164383561,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.9205479452054794,
+            "amount": 76712.32876712328
+          },
+          {
+            "t": 0.9972602739726026,
+            "amount": 10076712.328767123
+          }
+        ]
+      },
+      "currency": "MXN",
+      "notional": 10000000.0,
+      "pv_desk": 10303392.02788417
+    },
+    {
+      "id": "bond-05",
+      "product": "bond",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Bono SOFR · cupón 4.00 % · 5 cupones cada 365 días",
+      "params": {
+        "curve": "SOFR",
+        "face": 20000000.0,
+        "coupon_rate": 0.04,
+        "periods": 5,
+        "frequency": 1.0
+      },
+      "inputs": {
+        "schedule": [
+          {
+            "t": 1.0,
+            "amount": 800000.0
+          },
+          {
+            "t": 2.0,
+            "amount": 800000.0
+          },
+          {
+            "t": 3.0,
+            "amount": 800000.0
+          },
+          {
+            "t": 4.0,
+            "amount": 800000.0
+          },
+          {
+            "t": 5.0,
+            "amount": 20800000.0
+          }
+        ]
+      },
+      "currency": "USD",
+      "notional": 20000000.0,
+      "pv_desk": 20360889.172249064
+    },
+    {
+      "id": "bond-06",
+      "product": "bond",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Bono SOFR · cupón 3.00 % · 8 cupones cada 91 días",
+      "params": {
+        "curve": "SOFR",
+        "face": 20000000.0,
+        "coupon_rate": 0.03,
+        "periods": 8,
+        "frequency": 4.010989010989011
+      },
+      "inputs": {
+        "schedule": [
+          {
+            "t": 0.2493150684931507,
+            "amount": 149589.04109589042
+          },
+          {
+            "t": 0.4986301369863014,
+            "amount": 149589.04109589042
+          },
+          {
+            "t": 0.7479452054794521,
+            "amount": 149589.04109589042
+          },
+          {
+            "t": 0.9972602739726028,
+            "amount": 149589.04109589042
+          },
+          {
+            "t": 1.2465753424657535,
+            "amount": 149589.04109589042
+          },
+          {
+            "t": 1.4958904109589042,
+            "amount": 149589.04109589042
+          },
+          {
+            "t": 1.7452054794520548,
+            "amount": 149589.04109589042
+          },
+          {
+            "t": 1.9945205479452055,
+            "amount": 20149589.04109589
+          }
+        ]
+      },
+      "currency": "USD",
+      "notional": 20000000.0,
+      "pv_desk": 19787998.474511396
+    },
+    {
+      "id": "bond-07",
+      "product": "bond",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Bono TIIE-F · cupón 6.50 % · 3 cupones cada 91 días",
+      "params": {
+        "curve": "TIIE-F",
+        "face": 30000000.0,
+        "coupon_rate": 0.065,
+        "periods": 3,
+        "frequency": 4.010989010989011
+      },
+      "inputs": {
+        "schedule": [
+          {
+            "t": 0.2493150684931507,
+            "amount": 486164.38356164383
+          },
+          {
+            "t": 0.4986301369863014,
+            "amount": 486164.38356164383
+          },
+          {
+            "t": 0.7479452054794521,
+            "amount": 30486164.383561645
+          }
+        ]
+      },
+      "currency": "MXN",
+      "notional": 30000000.0,
+      "pv_desk": 29906438.877480727
+    },
+    {
+      "id": "bond-08",
+      "product": "bond",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Bono TIIE-F · cupón 7.50 % · 6 cupones cada 182.5 días",
+      "params": {
+        "curve": "TIIE-F",
+        "face": 100000000.0,
+        "coupon_rate": 0.075,
+        "periods": 6,
+        "frequency": 2.0
+      },
+      "inputs": {
+        "schedule": [
+          {
+            "t": 0.5,
+            "amount": 3750000.0
+          },
+          {
+            "t": 1.0,
+            "amount": 3750000.0
+          },
+          {
+            "t": 1.5,
+            "amount": 3750000.0
+          },
+          {
+            "t": 2.0,
+            "amount": 3750000.0
+          },
+          {
+            "t": 2.5,
+            "amount": 3750000.0
+          },
+          {
+            "t": 3.0,
+            "amount": 103750000.0
+          }
+        ]
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 101567609.17262208
+    },
+    {
+      "id": "cap_floor-01",
+      "product": "cap_floor",
+      "source": "portfolio",
+      "trade_id": 7,
+      "label": "Cap TIIE-F · 39 periodos · strike 7.50 % · portafolio #7",
+      "params": {
+        "curve": "TIIE-F",
+        "cap_type": "cap",
+        "notional": 300000000.0,
+        "strike": 0.075,
+        "periods": 39
+      },
+      "inputs": {
+        "period_days": 28,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 300000000.0,
+      "pv_desk": 1257727.3902222966
+    },
+    {
+      "id": "cap_floor-02",
+      "product": "cap_floor",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Cap TIIE-F · 13 periodos · strike 7.00 %",
+      "params": {
+        "curve": "TIIE-F",
+        "cap_type": "cap",
+        "notional": 100000000.0,
+        "strike": 0.07,
+        "periods": 13
+      },
+      "inputs": {
+        "period_days": 28,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 133184.95501360757
+    },
+    {
+      "id": "cap_floor-03",
+      "product": "cap_floor",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Floor TIIE-F · 13 periodos · strike 6.50 %",
+      "params": {
+        "curve": "TIIE-F",
+        "cap_type": "floor",
+        "notional": 100000000.0,
+        "strike": 0.065,
+        "periods": 13
+      },
+      "inputs": {
+        "period_days": 28,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 155043.9925916822
+    },
+    {
+      "id": "cap_floor-04",
+      "product": "cap_floor",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Cap TIIE-F · 6 periodos · strike 6.00 %",
+      "params": {
+        "curve": "TIIE-F",
+        "cap_type": "cap",
+        "notional": 50000000.0,
+        "strike": 0.06,
+        "periods": 6
+      },
+      "inputs": {
+        "period_days": 28,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 50000000.0,
+      "pv_desk": 196995.63873876174
+    },
+    {
+      "id": "cap_floor-05",
+      "product": "cap_floor",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Floor TIIE-F · 39 periodos · strike 7.00 %",
+      "params": {
+        "curve": "TIIE-F",
+        "cap_type": "floor",
+        "notional": 200000000.0,
+        "strike": 0.07,
+        "periods": 39
+      },
+      "inputs": {
+        "period_days": 28,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 200000000.0,
+      "pv_desk": 3149903.7437113626
+    },
+    {
+      "id": "cap_floor-06",
+      "product": "cap_floor",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Cap SOFR · 5 periodos · strike 4.00 %",
+      "params": {
+        "curve": "SOFR",
+        "cap_type": "cap",
+        "notional": 20000000.0,
+        "strike": 0.04,
+        "periods": 5
+      },
+      "inputs": {
+        "period_days": 365,
+        "hw_a": 0.03,
+        "hw_sigma": 0.008
+      },
+      "currency": "USD",
+      "notional": 20000000.0,
+      "pv_desk": 196648.07148137002
+    },
+    {
+      "id": "cap_floor-07",
+      "product": "cap_floor",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Floor SOFR · 3 periodos · strike 3.50 %",
+      "params": {
+        "curve": "SOFR",
+        "cap_type": "floor",
+        "notional": 20000000.0,
+        "strike": 0.035,
+        "periods": 3
+      },
+      "inputs": {
+        "period_days": 365,
+        "hw_a": 0.03,
+        "hw_sigma": 0.008
+      },
+      "currency": "USD",
+      "notional": 20000000.0,
+      "pv_desk": 160654.94431247393
+    },
+    {
+      "id": "cap_floor-08",
+      "product": "cap_floor",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Cap SOFR · 10 periodos · strike 3.00 %",
+      "params": {
+        "curve": "SOFR",
+        "cap_type": "cap",
+        "notional": 10000000.0,
+        "strike": 0.03,
+        "periods": 10
+      },
+      "inputs": {
+        "period_days": 365,
+        "hw_a": 0.03,
+        "hw_sigma": 0.008
+      },
+      "currency": "USD",
+      "notional": 10000000.0,
+      "pv_desk": 884927.645448326
+    },
+    {
+      "id": "swaption-01",
+      "product": "swaption",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Pagadora TIIE-F · expira en 365 días · swap de 2 años · strike 7.00 %",
+      "params": {
+        "curve": "TIIE-F",
+        "swaption_type": "payer",
+        "notional": 100000000.0,
+        "strike": 0.07,
+        "expiry_years": 1.0,
+        "swap_tenor_years": 2.0
+      },
+      "inputs": {
+        "period_days": 28,
+        "payments": 26,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 419948.79856297723
+    },
+    {
+      "id": "swaption-02",
+      "product": "swaption",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Receptora TIIE-F · expira en 365 días · swap de 2 años · strike 7.00 %",
+      "params": {
+        "curve": "TIIE-F",
+        "swaption_type": "receiver",
+        "notional": 100000000.0,
+        "strike": 0.07,
+        "expiry_years": 1.0,
+        "swap_tenor_years": 2.0
+      },
+      "inputs": {
+        "period_days": 28,
+        "payments": 26,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 942340.8075836931
+    },
+    {
+      "id": "swaption-03",
+      "product": "swaption",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Pagadora TIIE-F · expira en 730 días · swap de 5 años · strike 6.80 %",
+      "params": {
+        "curve": "TIIE-F",
+        "swaption_type": "payer",
+        "notional": 200000000.0,
+        "strike": 0.068,
+        "expiry_years": 2.0,
+        "swap_tenor_years": 5.0
+      },
+      "inputs": {
+        "period_days": 28,
+        "payments": 65,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 200000000.0,
+      "pv_desk": 4322916.1619172115
+    },
+    {
+      "id": "swaption-04",
+      "product": "swaption",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Receptora TIIE-F · expira en 182 días · swap de 1 año · strike 6.50 %",
+      "params": {
+        "curve": "TIIE-F",
+        "swaption_type": "receiver",
+        "notional": 50000000.0,
+        "strike": 0.065,
+        "expiry_years": 0.4986301369863014,
+        "swap_tenor_years": 1.0
+      },
+      "inputs": {
+        "period_days": 28,
+        "payments": 13,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 50000000.0,
+      "pv_desk": 0.0
+    },
+    {
+      "id": "swaption-05",
+      "product": "swaption",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Receptora TIIE-F · expira en 1095 días · swap de 3 años · strike 6.50 %",
+      "params": {
+        "curve": "TIIE-F",
+        "swaption_type": "receiver",
+        "notional": 100000000.0,
+        "strike": 0.065,
+        "expiry_years": 3.0,
+        "swap_tenor_years": 3.0
+      },
+      "inputs": {
+        "period_days": 28,
+        "payments": 39,
+        "hw_a": 0.05,
+        "hw_sigma": 0.01
+      },
+      "currency": "MXN",
+      "notional": 100000000.0,
+      "pv_desk": 825700.420610354
+    },
+    {
+      "id": "swaption-06",
+      "product": "swaption",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Pagadora SOFR · expira en 365 días · swap de 5 años · strike 3.60 %",
+      "params": {
+        "curve": "SOFR",
+        "swaption_type": "payer",
+        "notional": 20000000.0,
+        "strike": 0.036,
+        "expiry_years": 1.0,
+        "swap_tenor_years": 5.0
+      },
+      "inputs": {
+        "period_days": 365,
+        "payments": 5,
+        "hw_a": 0.03,
+        "hw_sigma": 0.008
+      },
+      "currency": "USD",
+      "notional": 20000000.0,
+      "pv_desk": 253389.1010521421
+    },
+    {
+      "id": "swaption-07",
+      "product": "swaption",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Receptora SOFR · expira en 730 días · swap de 3 años · strike 3.50 %",
+      "params": {
+        "curve": "SOFR",
+        "swaption_type": "receiver",
+        "notional": 20000000.0,
+        "strike": 0.035,
+        "expiry_years": 2.0,
+        "swap_tenor_years": 3.0
+      },
+      "inputs": {
+        "period_days": 365,
+        "payments": 3,
+        "hw_a": 0.03,
+        "hw_sigma": 0.008
+      },
+      "currency": "USD",
+      "notional": 20000000.0,
+      "pv_desk": 213315.00503834707
+    },
+    {
+      "id": "swaption-08",
+      "product": "swaption",
+      "source": "battery",
+      "trade_id": null,
+      "label": "Pagadora SOFR · expira en 1825 días · swap de 5 años · strike 4.00 %",
+      "params": {
+        "curve": "SOFR",
+        "swaption_type": "payer",
+        "notional": 10000000.0,
+        "strike": 0.04,
+        "expiry_years": 5.0,
+        "swap_tenor_years": 5.0
+      },
+      "inputs": {
+        "period_days": 365,
+        "payments": 5,
+        "hw_a": 0.03,
+        "hw_sigma": 0.008
+      },
+      "currency": "USD",
+      "notional": 10000000.0,
+      "pv_desk": 258446.1806637691
+    }
+  ]
+}
