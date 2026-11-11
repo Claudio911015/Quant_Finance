@@ -52,13 +52,17 @@ def test_dv01_shape_on_seed_portfolio(client):
     d = _dv01(client)
     assert set(d) == {"snapshot", "total_mxn", "parallel_mxn", "curves", "errors"}
     assert d["snapshot"] == "MX-DEMO" and d["errors"] == []
-    assert set(d["curves"]) == {"TIIE-F", "SOFR"}
+    assert set(d["curves"]) == {"TIIE-F", "SOFR", "MXN-USD"}  # corte 3: MX-DEMO trae la curva MXN-USD
     snap = client.get("/api/market/snapshots/MX-DEMO").get_json()
     for name, c in d["curves"].items():
         assert set(c) == {"parallel_mxn", "points"}
-        assert [(p["label"], p["days"]) for p in c["points"]] == [
-            (q["label"], q["days"]) for q in snap["quotes"] if q["curve"] == name
-        ]
+        # MXN-USD no tiene cotizaciones OIS: sus pilares son los puntos forward y la base (test_market_csa.py)
+        expected = (
+            [(q["label"], q["days"]) for q in snap["fx_forwards"] + snap["xccy_basis"]]
+            if name == "MXN-USD"
+            else [(q["label"], q["days"]) for q in snap["quotes"] if q["curve"] == name]
+        )
+        assert [(p["label"], p["days"]) for p in c["points"]] == expected
         assert all(set(p) == {"label", "days", "dv01_mxn"} for p in c["points"])
     points = [p["dv01_mxn"] for c in d["curves"].values() for p in c["points"]]
     assert d["total_mxn"] == pytest.approx(sum(points))

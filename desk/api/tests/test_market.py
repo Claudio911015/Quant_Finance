@@ -172,7 +172,8 @@ def test_load_context_unknown_snapshot_is_404(app, tmp_path):
 
 def test_context_attributes(ctx):
     assert ctx.snapshot_id == "MX-DEMO" and str(ctx.as_of) == "2026-11-10"
-    assert set(ctx.curves) == {"TIIE-F", "SOFR"} == set(market.CURVES)
+    assert set(market.CURVES) == {"TIIE-F", "SOFR"}
+    assert set(ctx.curves) == set(market.CURVES) | {"MXN-USD"}  # corte 3: MX-DEMO trae cotizaciones de colateral USD
     assert ctx.spot == 18.6
     assert ctx.pillars["TIIE-F"][4] == {"label": "13x28", "days": 364}
     assert len(ctx.pillars["TIIE-F"]) == len(ctx.curves["TIIE-F"].maturities()) == 10

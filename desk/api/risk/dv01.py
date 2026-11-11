@@ -10,6 +10,9 @@ cap/floor es convexo y un choque en un solo pilar mueve las tasas forward varios
 tasa cero se amplifica por T/Δpilar), así que la diferencia unilateral de cada pilar arrastra un
 término de segundo orden que no suma al del paralelo (la escalera de un cap quedaba 4.0 % lejos
 del paralelo). La central lo cancela y las rampas suman exactamente un desplazamiento paralelo.
+
+Corte 3: las curvas son las de `mkt.curve_names()`; si el snapshot trae la curva dependiente `MXN-USD`
+también se choca (sus pilares) y los choques a TIIE-F y SOFR la recalibran vía `MarketContext.shifted`.
 """
 import sqlite3
 from typing import Any, Dict, List
@@ -21,7 +24,7 @@ from desk.api.market import MarketContext
 def _shocked_contexts(mkt: MarketContext) -> Dict[str, Dict[str, Any]]:
     """Por curva: el contexto con +1 pb paralelo y, por pilar, el par (−1 pb, +1 pb) solo en ese pilar."""
     shocked = {}
-    for curve in market.CURVES:
+    for curve in mkt.curve_names():
         n = len(mkt.pillars[curve])
 
         def at_pillar(i: int, bp: float) -> MarketContext:
@@ -50,7 +53,7 @@ def compute_dv01(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
                 {"label": p["label"], "days": p["days"], "dv01_mxn": 0.0} for p in mkt.pillars[c]
             ],
         }
-        for c in market.CURVES
+        for c in mkt.curve_names()
     }
     errors: List[Dict[str, Any]] = []
 

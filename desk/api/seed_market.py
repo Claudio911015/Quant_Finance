@@ -89,15 +89,47 @@ def demo_data() -> Dict[str, Any]:
 
 def seed_market(conn: sqlite3.Connection) -> None:
     """Inserta el snapshot `MX-DEMO` (sin commit: lo hace quien llama)."""
+    data = demo_data()
+    # `live_market` parte de `demo_data()` y MKT-LIVE no trae cotizaciones de colateral (no hay fuente
+    # libre): por eso las listas se añaden aquí y no dentro de `demo_data()`.
+    data.update(csa_quotes_data())  # corte 3
     conn.execute(
         "INSERT INTO snapshots (id, label, synthetic, as_of, data) VALUES (?, ?, 1, ?, ?)",
-        (SNAPSHOT_ID, LABEL, AS_OF, json.dumps(demo_data())),
+        (SNAPSHOT_ID, LABEL, AS_OF, json.dumps(data)),
     )
 
 
 # --- corte 3 ---
+# Cotizaciones de colateral USD del demo: puntos forward en pesos por dólar (≈ paridad TIIE-F/SOFR menos
+# 9 pb) y base de cross currency swaps en decimal (negativa: el descuento MXN con colateral USD es mayor).
+_FX_FORWARDS = [("1M", 28, 0.0438), ("3M", 84, 0.1317), ("6M", 168, 0.2637), ("1Y", 364, 0.5745)]
+_XCCY_BASIS = [
+    ("2Y", 728, -0.0010),
+    ("3Y", 1092, -0.0012),
+    ("5Y", 1820, -0.0015),
+    ("7Y", 2548, -0.0017),
+    ("10Y", 3640, -0.0020),
+]
+
+
+def csa_quotes_data() -> Dict[str, Any]:
+    """Listas `fx_forwards` y `xccy_basis` (sintéticas) que se guardan en el `data` de `MX-DEMO`."""
+    return {
+        "fx_forwards": [{"days": d, "points": p, "label": label} for label, d, p in _FX_FORWARDS],
+        "xccy_basis": [{"days": d, "spread": sp, "label": label} for label, d, sp in _XCCY_BASIS],
+    }
+
+
 def ensure_csa_quotes(conn: sqlite3.Connection) -> None:
     """Añade al snapshot `MX-DEMO` las cotizaciones de colateral USD (puntos forward y base) en bases
-    ya sembradas (sin commit; idempotente). T6 lo implementa; hoy no hace nada."""
-    return None
+    ya sembradas. Solo si no trae ninguna de las dos listas; no toca otros snapshots. Idempotente y
+    sin commit: lo hace quien llama."""
+    row = conn.execute("SELECT data FROM snapshots WHERE id = ?", (SNAPSHOT_ID,)).fetchone()
+    if row is None:
+        return
+    data = json.loads(row[0])
+    if "fx_forwards" in data or "xccy_basis" in data:
+        return
+    data.update(csa_quotes_data())
+    conn.execute("UPDATE snapshots SET data = ? WHERE id = ?", (json.dumps(data), SNAPSHOT_ID))
 # --- fin corte 3 ---
