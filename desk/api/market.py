@@ -19,6 +19,24 @@ CURVES = {
 }
 
 PAIR = "USDMXN"
+LIVE_ID = "MKT-LIVE"
+
+# Procedencia de cada componente del snapshot (en el orden del contrato HTTP).
+SOURCE_KEYS = (
+    "curve:TIIE-F",
+    "curve:SOFR",
+    "spot",
+    "surface",
+    "hw",
+    "factor_vols",
+    "factor_corr",
+)
+SOURCE_KINDS = ("live", "proxy", "synthetic", "mixed")
+_SYNTHETIC_LABEL = "Sintético (inventado para demostración)"
+DEFAULT_SOURCES = {
+    key: {"kind": "synthetic", "label": _SYNTHETIC_LABEL, "as_of": None}
+    for key in SOURCE_KEYS
+}
 _RATE_MIN = -0.05  # exclusivo
 _RATE_MAX = 1.0  # exclusivo
 
@@ -167,20 +185,40 @@ def load_context(conn: sqlite3.Connection, snapshot_id: str) -> MarketContext:
     return _build_context(row["id"], row["as_of"], json.loads(row["data"]))
 
 
+def sources_of(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Procedencia guardada en `data["sources"]`; sin ella, todo sintético."""
+    return data.get("sources") or DEFAULT_SOURCES
+
+
+def data_quality(sources: Dict[str, Any]) -> str:
+    """"synthetic" si todo es sintético, "live" si nada es sintético ni mixto, si no "mixed"."""
+    kinds = [s["kind"] for s in sources.values()]
+    if all(k == "synthetic" for k in kinds):
+        return "synthetic"
+    if not any(k in ("synthetic", "mixed") for k in kinds):
+        return "live"
+    return "mixed"
+
+
 def list_snapshots(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
-    """Resumen `{"id","label","synthetic","as_of"}` de cada snapshot."""
+    """Resumen `{"id","label","synthetic","as_of","data_quality","sources"}` de cada snapshot."""
     rows = conn.execute(
-        "SELECT id, label, synthetic, as_of FROM snapshots ORDER BY id"
+        "SELECT id, label, synthetic, as_of, data FROM snapshots ORDER BY id"
     ).fetchall()
-    return [
-        {
-            "id": r["id"],
-            "label": r["label"],
-            "synthetic": bool(r["synthetic"]),
-            "as_of": r["as_of"],
-        }
-        for r in rows
-    ]
+    out = []
+    for r in rows:
+        sources = sources_of(json.loads(r["data"]))
+        out.append(
+            {
+                "id": r["id"],
+                "label": r["label"],
+                "synthetic": bool(r["synthetic"]),
+                "as_of": r["as_of"],
+                "data_quality": data_quality(sources),
+                "sources": sources,
+            }
+        )
+    return out
 
 
 def _curve_points(ctx: MarketContext, name: str) -> List[Dict[str, Any]]:
@@ -204,11 +242,15 @@ def _curve_points(ctx: MarketContext, name: str) -> List[Dict[str, Any]]:
 
 
 def _payload(row: sqlite3.Row, data: Dict[str, Any], ctx: MarketContext) -> Dict[str, Any]:
+    sources = sources_of(data)
     return {
         "id": row["id"],
         "label": row["label"],
         "synthetic": bool(row["synthetic"]),
         "as_of": row["as_of"],
+        "data_quality": data_quality(sources),
+        "sources": sources,
+        "read_only": row["id"] == LIVE_ID,
         "quotes": data["quotes"],
         "curves": {
             name: {
@@ -256,6 +298,10 @@ def update_snapshot(
 ) -> Dict[str, Any]:
     """Valida y persiste `quotes`/`spot` del cuerpo; devuelve el payload recalculado."""
     row = _fetch(conn, snapshot_id)
+    if snapshot_id == LIVE_ID:
+        raise ApiError(
+            409, "Mercado vivo se reconstruye en cada actualización; no se edita", None
+        )
     data = json.loads(row["data"])
 
     new_quotes = body.get("quotes")

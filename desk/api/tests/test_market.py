@@ -32,16 +32,15 @@ def ctx(app, tmp_path):
 
 def test_list_contains_demo(client):
     body = client.get("/api/market/snapshots").get_json()
-    assert body == {
-        "snapshots": [
-            {
-                "id": "MX-DEMO",
-                "label": "México demo (sintético)",
-                "synthetic": True,
-                "as_of": "2026-11-10",
-            }
-        ]
+    (item,) = body["snapshots"]
+    # la procedencia (`data_quality`, `sources`) se prueba en test_market_sources.py
+    assert {k: item[k] for k in ("id", "label", "synthetic", "as_of")} == {
+        "id": "MX-DEMO",
+        "label": "México demo (sintético)",
+        "synthetic": True,
+        "as_of": "2026-11-10",
     }
+    assert set(item) == {"id", "label", "synthetic", "as_of", "data_quality", "sources"}
 
 
 def test_get_snapshot_shape(client):
