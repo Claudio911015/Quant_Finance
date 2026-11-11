@@ -219,10 +219,7 @@ def test_delete_is_always_409_and_missing_is_404(client):
 
 # Cada tarea posterior borra de aquí las rutas que implementa (T4: state y events; T5: fixings;
 # T6: roll; T9: flows y pnl).
-STUB_ROUTES = [
-    ("T9", "get", "/api/trades/1/flows?snapshot=MX-DEMO", None),
-    ("T9", "get", "/api/pnl?from=MX-DEMO&to=MX-DEMO", None),
-]
+STUB_ROUTES = []
 
 
 @pytest.mark.parametrize("task, method, url, body", STUB_ROUTES, ids=[r[2] for r in STUB_ROUTES])
