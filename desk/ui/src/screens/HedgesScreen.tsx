@@ -19,6 +19,7 @@ import {
   ITEM_KIND_LABEL,
   SIDE_LABEL,
   VALID_ITEM_KINDS,
+  localizeMessage,
 } from '../lib/hedgeLabels';
 import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
@@ -37,7 +38,7 @@ const SIDES: Record<ItemKind, string[]> = {
 const DOC_KEYS = Object.keys(DOC_FIELD_LABEL) as (keyof HedgeDocumentation)[];
 
 function describe(e: unknown): string {
-  return e instanceof ApiError ? e.message : 'No se pudo conectar con el backend';
+  return e instanceof ApiError ? localizeMessage(e.message) : 'No se pudo conectar con el backend';
 }
 
 function isLoan(kind: ItemKind): boolean {
@@ -199,6 +200,7 @@ function NewHedgeForm({ snapshotId }: { snapshotId: string }) {
 
     const pct = parseNumber(v.fraction);
     if (pct == null) local.fraction = 'Indica un número';
+    else if (pct <= 0 || pct > 100) local.fraction = 'La fracción debe ser mayor que 0 % y no pasar de 100 %';
     const ratio = parseNumber(v.hedgeRatio);
     if (ratio == null) local.hedge_ratio = 'Indica un número';
 
@@ -228,7 +230,7 @@ function NewHedgeForm({ snapshotId }: { snapshotId: string }) {
       navigate(`/coberturas/${created.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.field != null && visibleFields(v.itemKind).includes(err.field)) {
-        setErrors({ [err.field]: err.message });
+        setErrors({ [err.field]: localizeMessage(err.message) });
       } else {
         setBanner(describe(err));
       }

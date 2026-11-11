@@ -352,6 +352,17 @@ describe('HedgeScreen', () => {
     expect(within(form).getByLabelText('Fecha').getAttribute('aria-invalid')).toBe('true');
   });
 
+  it('Desdesignar con el mensaje real del backend muestra el nombre del campo, no la clave', async () => {
+    setup();
+    mocks.dedesignateHedge.mockRejectedValue(new ApiError(400, "'date' debe ser una fecha válida AAAA-MM-DD", 'date'));
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Desdesignar' });
+    fireEvent.change(within(form).getByLabelText('Motivo'), { target: { value: 'Prepago' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Desdesignar' }));
+    const alert = await within(form).findByRole('alert');
+    expect(alert.textContent).toBe('Fecha debe ser una fecha válida AAAA-MM-DD');
+  });
+
   it('una relación desdesignada no muestra acciones y sí la reserva congelada con fecha y motivo', async () => {
     setup(DEDESIGNATED);
     renderScreen();

@@ -306,6 +306,37 @@ describe('HedgesScreen', () => {
     expect(screen.queryByText('detalle de cobertura')).toBeNull();
   });
 
+  it('muestra los errores reales del backend con los nombres de la pantalla, no con claves en inglés', async () => {
+    setup();
+    mocks.createHedge.mockRejectedValue(
+      new ApiError(400, "'maturity_date' debe ser posterior a 'start_date'", 'maturity_date'),
+    );
+    renderScreen();
+    const form = await openForm();
+    fillFloatingLoan(form);
+    fireEvent.click(within(form).getByRole('button', { name: 'Crear relación' }));
+
+    const maturity = within(form).getByLabelText('Vencimiento') as HTMLInputElement;
+    await waitFor(() => expect(maturity.getAttribute('aria-invalid')).toBe('true'));
+    const field = maturity.closest('.hedges__field') as HTMLElement;
+    expect(within(field).getByRole('alert').textContent).toBe('Vencimiento debe ser posterior a inicio');
+  });
+
+  it('una fracción fuera de 0–100 % se rechaza en la pantalla, en %, sin llamar al backend', async () => {
+    setup();
+    renderScreen();
+    const form = await openForm();
+    fillFloatingLoan(form);
+    fireEvent.change(within(form).getByLabelText('Fracción'), { target: { value: '150' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Crear relación' }));
+
+    const input = within(form).getByLabelText('Fracción') as HTMLInputElement;
+    await waitFor(() => expect(input.getAttribute('aria-invalid')).toBe('true'));
+    const field = input.closest('.hedges__field') as HTMLElement;
+    expect(within(field).getByRole('alert').textContent).toBe('La fracción debe ser mayor que 0 % y no pasar de 100 %');
+    expect(mocks.createHedge).not.toHaveBeenCalled();
+  });
+
   it('un error de una clave de item_terms o de documentation va bajo su campo', async () => {
     setup();
     mocks.createHedge

@@ -116,6 +116,7 @@ def test_date_before_the_last_close_is_409_on_date_and_writes_nothing(client):
     r = _dedesignate(client, hid, (date.fromisoformat(period["as_of"]) - timedelta(days=1)).isoformat())
 
     assert r.status_code == 409 and r.get_json()["field"] == "date"
+    assert r.get_json()["error"].endswith(", el último cierre de la cobertura")
     assert _events(client, hid) == before
     assert client.get("/api/hedges/%d" % hid).get_json()["status"] == "activa"
 
@@ -126,6 +127,7 @@ def test_date_before_the_designation_is_409_on_date(client):
     r = _dedesignate(client, hid, (D0 - timedelta(days=1)).isoformat())
 
     assert r.status_code == 409 and r.get_json()["field"] == "date"
+    assert r.get_json()["error"].endswith(", la designación de la cobertura")
     assert len(_events(client, hid)) == 1
 
 

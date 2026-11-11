@@ -178,8 +178,8 @@ def close_period(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) 
     if mkt.as_of <= since:
         raise ApiError(
             409,
-            "El snapshot (%s) debe ser posterior a %s, la %s de la cobertura"
-            % (mkt.as_of.isoformat(), since.isoformat(), "último cierre" if last is not None else "designación"),
+            "El snapshot (%s) debe ser posterior a %s, %s de la cobertura"
+            % (mkt.as_of.isoformat(), since.isoformat(), "el último cierre" if last is not None else "la designación"),
             "snapshot",
         )
     if rel["periods"] and rel["periods"][-1]["result"]["trade_status"] == "vencida":

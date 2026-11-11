@@ -331,12 +331,14 @@ def test_a_snapshot_not_after_the_last_close_or_the_designation_is_409(app, clie
     for snapshot in (same_day, "BEFORE"):  # la designación es de MX-DEMO (as_of = D0)
         r = _close(client, hid, snapshot)
         assert r.status_code == 409 and r.get_json()["field"] == "snapshot", snapshot
+        assert r.get_json()["error"].endswith(", la designación de la cobertura")
     assert _counts(app) == start
     _closed(client, hid, d1)
     after_close = _counts(app)
     for snapshot in (d1, between):  # igual y anterior al último cierre
         r = _close(client, hid, snapshot)
         assert r.status_code == 409 and r.get_json()["field"] == "snapshot", snapshot
+        assert r.get_json()["error"].endswith(", el último cierre de la cobertura")
     assert _counts(app) == after_close
 
 

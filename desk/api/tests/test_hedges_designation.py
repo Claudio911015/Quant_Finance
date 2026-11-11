@@ -281,6 +281,8 @@ def test_active_fractions_of_one_trade_cannot_exceed_one(app, client, loan_trade
     assert first.status_code == 201, first.get_json()
     over = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=0.5)
     assert over.status_code == 409 and over.get_json()["field"] == "fraction"
+    # La interfaz captura la fracción en %: el mensaje habla en % y no en decimales.
+    assert "60 %" in over.get_json()["error"] and "100 %" in over.get_json()["error"]
     assert _counts(app) == [1, 1, 0]  # el rechazo no insertó nada
     rest = designate(client, loan_trade["id"], "floating_loan", _loan(), fraction=0.4)
     assert rest.status_code == 201, rest.get_json()

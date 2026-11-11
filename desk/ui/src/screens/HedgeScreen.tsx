@@ -23,6 +23,7 @@ import {
   ITEM_KIND_LABEL,
   SIDE_LABEL,
   TERM_RESULT_LABEL,
+  localizeMessage,
 } from '../lib/hedgeLabels';
 import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
@@ -32,7 +33,7 @@ import './HedgeScreen.css';
 const MXN = 'MXN';
 
 function describe(e: unknown): string {
-  return e instanceof ApiError ? e.message : 'No se pudo conectar con el backend';
+  return e instanceof ApiError ? localizeMessage(e.message) : 'No se pudo conectar con el backend';
 }
 
 function money(v: number): string {
@@ -84,7 +85,7 @@ function CloseForm(p: CloseFormProps) {
       await closeHedgePeriod(p.hedgeId, value);
       await p.onDone();
     } catch (err) {
-      if (err instanceof ApiError && err.field === 'snapshot') setError(err.message);
+      if (err instanceof ApiError && err.field === 'snapshot') setError(localizeMessage(err.message));
       else p.onBanner(describe(err));
     } finally {
       setBusy(false);
@@ -153,7 +154,7 @@ function DedesignateForm(p: DedesignateFormProps) {
       await p.onDone();
     } catch (err) {
       if (err instanceof ApiError && (err.field === 'date' || err.field === 'reason')) {
-        setErrors({ [err.field]: err.message });
+        setErrors({ [err.field]: localizeMessage(err.message) });
       } else {
         p.onBanner(describe(err));
       }

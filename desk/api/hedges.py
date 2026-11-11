@@ -442,7 +442,9 @@ def create_hedge(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
     committed = sum(r["fraction"] for r in load_relationships(conn, trade_id) if status(r) == STATUS_ACTIVE)
     if committed + fraction > 1 + 1e-12:
         raise ApiError(
-            409, "La operación ya tiene designado %s de su nocional: la nueva fracción excede 1" % committed, "fraction"
+            409,
+            "La operación ya tiene designado %g %% de su nocional: la nueva fracción excede 100 %%" % round(committed * 100, 2),
+            "fraction",
         )
 
     fixings = fixing_store.load_all(conn)
@@ -499,8 +501,8 @@ def dedesignate(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) -
     if when < since:
         raise ApiError(
             409,
-            "La fecha (%s) no puede ser anterior a %s, la %s de la cobertura"
-            % (when.isoformat(), since.isoformat(), "último cierre" if last is not None else "designación"),
+            "La fecha (%s) no puede ser anterior a %s, %s de la cobertura"
+            % (when.isoformat(), since.isoformat(), "el último cierre" if last is not None else "la designación"),
             "date",
         )
     insert_event(conn, hedge_id, "dedesignation", when, {"reason": reason, "frozen_oci": oci_balance(rel)})
