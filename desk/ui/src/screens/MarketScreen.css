@@ -1,0 +1,120 @@
+.market {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.market__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.market__panel {
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.market__panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.market__meta {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.market__split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.market__table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.market__grid {
+  min-width: 0;
+}
+
+.market__error {
+  margin: 0;
+  color: var(--neg);
+  font-size: var(--fs-sm);
+}
+
+.market__spot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.market__field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.market__input {
+  width: 110px;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.market__input:hover {
+  border-color: var(--text-dim);
+}
+
+.market__hw {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.market__hw th,
+.market__hw td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.market__hw thead th {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.market__hw th.num,
+.market__hw td.num {
+  text-align: right;
+}
+
+.market__hw tbody th {
+  font-weight: 500;
+}
+
+/* a y σ son símbolos: en mayúsculas dirían otra cosa (A, Σ) */
+.market__hw thead th.num {
+  text-transform: none;
+}
