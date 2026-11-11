@@ -1,0 +1,225 @@
+.hedge {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  min-height: 320px;
+}
+
+.hedge__back {
+  align-self: flex-start;
+  font-size: var(--fs-sm);
+}
+
+.hedge__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+.hedge__links {
+  display: flex;
+  gap: var(--space-4);
+  margin-left: auto;
+  font-size: var(--fs-sm);
+}
+
+.hedge__meta {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.hedge__status {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.hedge__status--activa {
+  border-color: var(--pos);
+  color: var(--pos);
+}
+
+.hedge__status--desdesignada {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.hedge__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.hedge__facts dt,
+.hedge__doc dt {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.hedge__facts dd,
+.hedge__doc dd {
+  margin: 0;
+}
+
+.hedge__facts dd.num {
+  text-align: left;
+}
+
+.hedge__doc {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.hedge__block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.hedge__banner {
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.hedge__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.hedge__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 300px;
+  max-width: 100%;
+  padding: var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.hedge__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.hedge__field label {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.hedge__input {
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.hedge__input:hover {
+  border-color: var(--text-dim);
+}
+
+.hedge__input[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.hedge__error {
+  color: var(--neg);
+  font-size: var(--fs-xs);
+}
+
+.hedge__btn {
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.hedge__btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.hedge__btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.hedge__journal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* El desborde horizontal queda dentro de la tabla, no en la página. */
+.hedge__table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.hedge__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.hedge__table th,
+.hedge__table td {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.hedge__table th {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.hedge__table th.num,
+.hedge__table td.num {
+  text-align: right;
+}
+
+.hedge__table tfoot th,
+.hedge__table tfoot td {
+  border-top: 1px solid var(--border-strong);
+  font-weight: 600;
+}
+
+.hedge__result--match {
+  color: var(--pos);
+}
+
+.hedge__result--mismatch {
+  color: var(--warn);
+  font-weight: 600;
+}
