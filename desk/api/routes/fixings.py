@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 
-from desk.api import fixings
+from desk.api import fixings, fixings_fetch  # corte 8: fixings_fetch
 from desk.api.db import get_conn
 from desk.api.errors import ApiError
 from desk.api.validation import body_object, ensure_finite, iso_date
@@ -34,3 +34,19 @@ def import_csv():
     result = fixings.import_csv(conn, body["csv"])
     conn.commit()
     return jsonify(result)
+
+
+# corte 8
+@bp.post("/api/fixings/fetch")
+def fetch_from_source():
+    body = body_object()
+    conn = get_conn()
+    result = fixings_fetch.fetch_fixings(conn, body)
+    conn.commit()
+    return jsonify(ensure_finite(result))
+
+
+@bp.get("/api/fixings/sources")
+def fixing_sources():
+    return jsonify(fixings_fetch.list_sources(get_conn()))
+# fin corte 8

@@ -1,4 +1,4 @@
-"""Marco de errores: toda respuesta de error es JSON `{"error": str, "field": str|null}`."""
+"""Marco de errores: toda respuesta de error es JSON `{"error": str, "field": str|null}` (más `"code"` si el error lo trae)."""
 from typing import Optional
 
 from flask import Flask, jsonify
@@ -14,15 +14,21 @@ _HTTP_MESSAGES = {
 class ApiError(Exception):
     """Error de la API con status HTTP, mensaje en español y parámetro culpable."""
 
-    def __init__(self, status: int, error: str, field: Optional[str] = None):
+    def __init__(
+        self, status: int, error: str, field: Optional[str] = None, code: Optional[str] = None
+    ):
         super().__init__(error)
         self.status = status
         self.error = error
         self.field = field
+        self.code = code  # corte 8: causa estable para la UI; el JSON la incluye solo si se dio
 
 
-def _response(status: int, error: str, field: Optional[str] = None):
-    resp = jsonify({"error": error, "field": field})
+def _response(status: int, error: str, field: Optional[str] = None, code: Optional[str] = None):
+    body = {"error": error, "field": field}
+    if code is not None:
+        body["code"] = code
+    resp = jsonify(body)
     resp.status_code = status
     return resp
 
@@ -32,7 +38,7 @@ def register_error_handlers(app: Flask) -> None:
 
     @app.errorhandler(ApiError)
     def _api_error(e: ApiError):
-        return _response(e.status, e.error, e.field)
+        return _response(e.status, e.error, e.field, e.code)
 
     @app.errorhandler(HTTPException)
     def _http_error(e: HTTPException):
