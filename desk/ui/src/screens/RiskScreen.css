@@ -1,0 +1,194 @@
+.risk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.risk__top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.risk-card {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: opacity 120ms;
+}
+
+.risk-card.is-loading {
+  opacity: 0.6;
+}
+
+.risk-card > h2 {
+  margin-bottom: var(--space-3);
+}
+
+.risk-caption {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.risk-foot {
+  margin: var(--space-2) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.risk-note {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+
+.risk-note--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.risk-note--error {
+  color: var(--neg);
+}
+
+.risk-pos {
+  color: var(--pos);
+}
+
+.risk-neg {
+  color: var(--neg);
+}
+
+/* Escalera DV01 */
+.risk-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.risk-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 150px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.risk-tile__value {
+  font-size: var(--fs-lg);
+  text-align: left;
+}
+
+.risk-chart {
+  width: 100%;
+  height: 260px;
+}
+
+/* Escenarios */
+.risk-grid {
+  width: 100%;
+  margin-top: var(--space-2);
+}
+
+.risk-grid .risk-total {
+  font-weight: 600;
+}
+
+/* VaR */
+.risk-var__inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.risk-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.risk-field label {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.risk-field input {
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.risk-field input:hover {
+  border-color: var(--text-dim);
+}
+
+.risk-field input[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.risk-field__error {
+  color: var(--neg);
+  font-size: var(--fs-xs);
+}
+
+.risk-var__total {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.risk-var__value {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  text-align: left;
+}
+
+.risk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.risk-table th {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  font-weight: 500;
+  text-align: left;
+}
+
+.risk-table th.num {
+  font-family: inherit;
+}
+
+.risk-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.risk-table tbody tr:hover {
+  background: var(--bg-hover);
+}
