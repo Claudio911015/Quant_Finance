@@ -1,0 +1,256 @@
+.trade {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 320px;
+}
+
+.trade__back {
+  align-self: flex-start;
+  font-size: var(--fs-sm);
+}
+
+.trade__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+.trade__meta {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.trade__status {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.trade__status--viva {
+  border-color: var(--pos);
+  color: var(--pos);
+}
+
+.trade__status--no_pactada,
+.trade__status--vencida {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.trade__status--terminada,
+.trade__status--ejercida {
+  color: var(--text-dim);
+}
+
+.trade__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.trade__facts dt {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.trade__facts dd {
+  margin: 0;
+}
+
+.trade__facts dd.num {
+  text-align: left;
+}
+
+.trade__cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.trade__block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.trade__banner {
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.trade__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trade__warning {
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border-left: 3px solid var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.trade__warning-dates {
+  color: var(--text-dim);
+}
+
+/* Línea de tiempo vertical: una raya a la izquierda y un punto por evento. */
+.trade__timeline {
+  position: relative;
+  margin: 0;
+  padding: 0 0 0 var(--space-4);
+  list-style: none;
+  border-left: 2px solid var(--border-strong);
+}
+
+.trade__event {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.trade__event::before {
+  position: absolute;
+  top: 14px;
+  left: calc(-1 * var(--space-4) - 6px);
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  border-radius: 50%;
+  content: '';
+}
+
+.trade__event-date {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.trade__event-type {
+  font-weight: 600;
+}
+
+.trade__event-data {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+
+.trade__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.trade__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.trade__field label {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.trade__input {
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: var(--fs-md);
+}
+
+.trade__input:hover {
+  border-color: var(--text-dim);
+}
+
+.trade__input[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.trade__error {
+  color: var(--neg);
+  font-size: var(--fs-xs);
+}
+
+.trade__btn {
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.trade__btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.trade__btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.trade__flows {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.trade__flows th,
+.trade__flows td {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.trade__flows th {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.trade__flows th.num,
+.trade__flows td.num {
+  text-align: right;
+}
+
+/* Liquidado = ya ocurrió (atenuado); Proyectado = por venir (destacado con el acento). */
+.trade__flow--settled {
+  color: var(--text-dim);
+}
+
+.trade__flow--projected td:nth-child(3) {
+  color: var(--accent);
+  font-weight: 600;
+}
