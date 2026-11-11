@@ -8,6 +8,7 @@ import pytest
 from desk.api import hedge_report, hedges
 from desk.api.app import create_app
 from desk.api.tests.hedge_fixture import DOC
+from desk.api.tests.hedge_fixture import frozen_clock  # noqa: F401  (autouse: reloj fijo)
 
 TABLES = ("hedge_relationships", "hedge_events", "hedge_periods")
 ITEM = {

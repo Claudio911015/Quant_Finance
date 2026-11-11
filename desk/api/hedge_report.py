@@ -74,7 +74,9 @@ def build_report(
     detail = hedges.public_relationship(rel)
     designation = rel["designation"]
     periods = rel["periods"]
-    frozen = hedges.status(rel) == hedges.STATUS_DEDESIGNATED
+    state = hedges.status(rel)
+    frozen = state != hedges.STATUS_ACTIVE  # desdesignada o concluida: la reserva ya no se mueve con cierres
+    note = hedges.CONCLUDED_NOTE if state == hedges.STATUS_CONCLUDED else hedges.FROZEN_NOTE
     releases = _releases(rel)
     balance = hedges.oci_balance(rel)
 
@@ -142,7 +144,7 @@ def build_report(
         "reserve": {
             "balance": balance,
             "frozen": frozen,
-            "note": hedges.FROZEN_NOTE if frozen and abs(balance) >= 0.005 else None,
+            "note": note if frozen and abs(balance) >= 0.005 else None,
             "released": sum((r["amount"] for r in releases), 0.0),
         },
     }

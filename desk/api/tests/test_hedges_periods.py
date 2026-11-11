@@ -7,6 +7,7 @@ import pytest
 
 from desk.api import hedge_measure, hedges
 from desk.api.tests.hedge_fixture import designate, load_fixings, market_forward, par_irs, roll
+from desk.api.tests.hedge_fixture import frozen_clock  # noqa: F401  (autouse: reloj fijo)
 
 D0 = date(2026, 11, 10)
 LOAN_END = D0 + timedelta(days=364)  # 13 periodos de 28 días: el swap tiene exactamente las fechas del crédito
@@ -286,19 +287,124 @@ def test_the_final_close_leaves_the_reserve_and_the_booked_balances_at_exactly_z
     assert client.get("/api/hedges/%d" % hid).get_json()["oci_balance"] == 0
 
 
-def test_the_final_close_zeroes_the_reserve_even_when_the_hypothetical_outlives_the_instrument(client):
-    """El forward vence antes que la partida: la reserva no puede quedar para un cierre que ya no habrá."""
+def test_an_instrument_that_matures_before_the_hedged_item_keeps_the_reserve_and_concludes_the_relationship(client):
+    """F2 (6.5.12(a)): el forward vence antes que el flujo cubierto; la reserva espera en ORI hasta que ese flujo ocurra."""
     trade = market_forward(client, "buy", 10e6, FWD_END)
-    r = designate(client, trade["id"], "forecast_fx", _fx(date=(FWD_END + timedelta(days=30)).isoformat()))
+    item_date = FWD_END + timedelta(days=30)
+    r = designate(client, trade["id"], "forecast_fx", _fx(date=item_date.isoformat()))
     assert r.status_code == 201, r.get_json()
     hid = r.get_json()["id"]
-    roll(client, "MX-DEMO", "F1", 10)
-    roll(client, "MX-DEMO", "F2", 25)
+    spot = client.get("/api/market/snapshots/MX-DEMO").get_json()["fx"]["spot"]
+    for sid, days in (("F1", 10), ("F2", 25), ("F3", 55)):  # F2 ya con el forward vencido; F3 después del flujo cubierto
+        roll(client, "MX-DEMO", sid, days)
+        assert client.put("/api/market/snapshots/%s" % sid, json={"spot": spot + 0.4}).status_code == 200
     load_fixings(client, "USDMXN", FWD_END, FWD_END + timedelta(days=1), trade["params"]["strike"] + 0.25)
-    first, final = _closed(client, hid, "F1"), _closed(client, hid, "F2")
-    assert first["oci"] != 0 and final["trade_status"] == "vencida"
-    assert final["oci"] == 0 and final["d_oci"] == pytest.approx(-first["oci"], abs=1e-9)
+    first = _closed(client, hid, "F1")
+    assert client.get("/api/hedges/%d" % hid).get_json()["status"] == "activa" and first["trade_status"] == "viva"
+    final = _closed(client, hid, "F2")
+
+    assert final["trade_status"] == "vencida" and final["pv_inst"] == 0
+    assert final["settled_period"] == pytest.approx(2.5e6, abs=1e-6)
+    assert final["oci"] != 0 and final["oci"] == pytest.approx(final["effective_cum"], abs=1e-6)  # nada reciclado aún
     assert abs(final["identity_residual"]) <= 1e-6 and _balanced(final["entries"])
+    detail = client.get("/api/hedges/%d" % hid).get_json()
+    assert detail["status"] == "concluida" and detail["oci_balance"] == final["oci"]
+    assert client.get("/api/hedges").get_json()["hedges"][0]["status"] == "concluida"
+    entries = [e for p in (first, final) for e in p["entries"]]
+    assert _net(entries, hedges.ACC_DERIVATIVE) == 0  # el forward ya no tiene valor
+    assert _net(entries, hedges.ACC_OCI) == -_cents(round(final["oci"], 2))  # y la reserva sigue asentada
+    # Ya no admite más cierres...
+    start = _counts_of(client, hid)
+    r = _close(client, hid, "F3")
+    assert r.status_code == 409 and r.get_json()["field"] == "snapshot"
+    assert _counts_of(client, hid) == start
+
+    # ...y la reserva sale con la liberación cuando el flujo cubierto ocurre.
+    released = client.post("/api/hedges/%d/release" % hid, json={"snapshot": "F3", "cause": "flow_occurred"})
+    assert released.status_code == 201, released.get_json()
+    after = released.get_json()
+    assert after["status"] == "concluida" and after["oci_balance"] == 0.0
+    ledger = [e for p in after["periods"] for e in p["entries"]]
+    ledger += [e for ev in after["events"] if ev["type"] == "reserve_release" for e in ev["data"]["entries"]]
+    assert _net(ledger, hedges.ACC_OCI) == 0  # ORI queda en 0.00 exacto sobre lo asentado
+    assert client.get("/api/hedges/%d/report" % hid).get_json()["reserve"]["note"] is None
+
+
+def test_the_concluded_report_explains_the_pending_reserve(client):
+    trade = market_forward(client, "buy", 10e6, FWD_END)
+    r = designate(client, trade["id"], "forecast_fx", _fx(date=(FWD_END + timedelta(days=30)).isoformat()))
+    hid = r.get_json()["id"]
+    spot = client.get("/api/market/snapshots/MX-DEMO").get_json()["fx"]["spot"]
+    roll(client, "MX-DEMO", "F2", 25)
+    assert client.put("/api/market/snapshots/F2", json={"spot": spot + 0.4}).status_code == 200
+    load_fixings(client, "USDMXN", FWD_END, FWD_END + timedelta(days=1), trade["params"]["strike"] + 0.25)
+    _closed(client, hid, "F2")
+
+    reserve = client.get("/api/hedges/%d/report" % hid).get_json()["reserve"]
+
+    assert reserve["frozen"] is True and abs(reserve["balance"]) > 1000
+    assert reserve["note"] == hedges.CONCLUDED_NOTE
+
+
+def _counts_of(client, hid):
+    d = client.get("/api/hedges/%d" % hid).get_json()
+    return len(d["periods"]), len(d["events"])
+
+
+# ------------------------------------------------------------------------- F1: la reserva no existe sin porción efectiva
+
+def _shape_curve(client, snapshot, short_bp, long_bp):
+    """Mueve la curva TIIE-F de `snapshot`: `short_bp` hasta 400 días y `long_bp` más allá."""
+    quotes = client.get("/api/market/snapshots/%s" % snapshot).get_json()["quotes"]
+    moved = [
+        {"id": q["id"], "rate": q["rate"] + ((short_bp if q["days"] <= 400 else long_bp) / 1e4 if q["curve"] == "TIIE-F" else 0)}
+        for q in quotes
+    ]
+    assert client.put("/api/market/snapshots/%s" % snapshot, json={"quotes": moved}).status_code == 200
+
+
+def _long_swap_on_short_loan(client):
+    """Swap de 728 días (paga fija) cubriendo un crédito de 364: el caso N-1 de la re-auditoría."""
+    trade = par_irs(client, "TIIE-F", 100e6, D0, D0 + timedelta(days=728))
+    loan = _loan(notional=100e6)
+    r = designate(client, trade["id"], "floating_loan", loan)
+    assert r.status_code == 201, r.get_json()
+    return trade, r.get_json()["id"]
+
+
+def test_a_period_without_effective_portion_leaves_oci_at_zero_even_if_both_legs_settled_a_coupon(client):
+    _, hid = _long_swap_on_short_loan(client)
+    roll(client, "MX-DEMO", "S1", 35)
+    _shape_curve(client, "S1", 50, -150)  # el tramo corto sube y el largo baja: swap pierde, hipotético gana
+    load_fixings(client, "TIIE-F", D0, D0 + timedelta(days=36), 0.0705)
+
+    p = _closed(client, hid, "S1")
+
+    assert p["inst_total"] < 0 < p["hypo_total"]
+    assert p["settled_period"] > 0 and p["hypo_settled_period"] > 0  # ambos cobraron el cupón del día 28
+    assert p["effective_cum"] == 0
+    assert p["oci"] == 0 and p["d_oci"] == 0 and p["recycled"] == 0
+    assert p["ineffectiveness"] == pytest.approx(p["inst_total"], abs=1e-6)  # todo es inefectividad
+    assert abs(p["identity_residual"]) <= 1e-6 and _balanced(p["entries"])
+    assert _net(p["entries"], hedges.ACC_OCI) == 0 and hedges.ACC_RECYCLING not in _accounts(p["entries"])
+    assert client.get("/api/hedges/%d" % hid).get_json()["oci_balance"] == 0
+
+
+def test_the_matched_coupons_are_recycled_when_the_effective_portion_comes_back(client):
+    """Tras un periodo sin respaldo la reserva se recalcula desde lo liquidado coincidente: Δoci + reciclaje = Δeffective_cum."""
+    _, hid = _long_swap_on_short_loan(client)
+    roll(client, "MX-DEMO", "S1", 35)
+    roll(client, "MX-DEMO", "S2", 70)
+    _shape_curve(client, "S1", 50, -150)
+    load_fixings(client, "TIIE-F", D0, D0 + timedelta(days=71), 0.0705)
+    first, second = _closed(client, hid, "S1"), _closed(client, hid, "S2")
+
+    assert first["effective_cum"] == 0 and second["effective_cum"] != 0
+    coupons = first["hypo_settled_period"] + second["hypo_settled_period"]
+    assert second["oci"] == pytest.approx(second["effective_cum"] - coupons, abs=1e-6)
+    assert second["recycled"] == pytest.approx(coupons, abs=1e-6)  # incluye el cupón del periodo sin respaldo
+    assert second["d_oci"] + second["recycled"] == pytest.approx(second["effective_cum"] - first["effective_cum"], abs=1e-9)
+    assert abs(second["identity_residual"]) <= 1e-6 and _balanced(second["entries"])
 
 
 # ------------------------------------------------------------------------- C4: el acumulado de asientos coincide con los saldos

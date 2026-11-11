@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import {
   DECL_DEDESIGNATION,
+  DECL_DESIGNATION_DATE,
+  DECL_FV_ACCRUAL,
   DECL_FV_COMPONENT,
   DECL_FV_PRESENTATION,
   DECL_OFF_MARKET,
@@ -273,15 +275,15 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Regla del menor',
-        text: 'La reserva ORI es el menor en valor absoluto entre el cambio acumulado del instrumento (por la fracción) y el del hipotético, ambos desde la designación e incluyendo lo ya liquidado, si tienen el mismo signo; si no, 0. El resto es inefectividad, también el exceso liquidado de una cobertura sobrecubierta.',
+        text: 'La parte efectiva acumulada es el menor en valor absoluto entre el cambio acumulado del instrumento (por la fracción) y el del hipotético, ambos desde la designación e incluyendo lo ya liquidado, si tienen el mismo signo; si no, 0. La reserva ORI es esa parte efectiva menos lo ya reciclado, y es 0 mientras no haya parte efectiva: un periodo sin respaldo no deja reserva ni recicla nada (IFRS 9 6.5.11(a)). El resto es inefectividad, también el exceso liquidado de una cobertura sobrecubierta.',
       },
       {
         label: 'Reciclaje',
-        text: `Las liquidaciones del derivado en el periodo se reconocen en resultados como el flujo cubierto ocurrido, pero solo la parte efectiva: el menor entre lo liquidado del instrumento y lo liquidado del hipotético; el exceso va a inefectividad. ${DECL_RECYCLING} En el cierre final (operación vencida) la reserva queda en 0.`,
+        text: `Las liquidaciones del derivado en el periodo se reconocen en resultados como el flujo cubierto ocurrido, pero solo la parte efectiva: el menor entre lo liquidado del instrumento y lo liquidado del hipotético; el exceso va a inefectividad. ${DECL_RECYCLING} En el cierre final la reserva queda en 0 si el instrumento y la partida vencen juntos. Si el instrumento vence antes que el flujo cubierto, la reserva se conserva en ORI (IFRS 9 6.5.12(a)) y la relación pasa a Concluida: no admite más cierres, y la reserva se libera a mano cuando el flujo ocurra.`,
       },
       {
         label: 'Valor razonable',
-        text: `Solo para crédito o deuda a tasa fija cubierto con un swap. El cambio del instrumento, el ajuste de la partida (cambio del hipotético con signo contrario) y lo liquidado van a la cuenta Resultados — cobertura de valor razonable; sin reserva. ${DECL_FV_COMPONENT} ${DECL_FV_PRESENTATION}`,
+        text: `Solo para crédito o deuda a tasa fija cubierto con un swap. El cambio del instrumento, el ajuste de la partida (cambio del hipotético con signo contrario) y lo liquidado van a la cuenta Resultados — cobertura de valor razonable; sin reserva. ${DECL_FV_COMPONENT} ${DECL_FV_ACCRUAL} ${DECL_FV_PRESENTATION}`,
       },
       {
         label: 'Combinaciones admitidas',
@@ -289,7 +291,7 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Fecha de designación',
-        text: 'La designación no es retroactiva: su fecha no puede ser anterior al último evento (designación, cierre, desdesignación o liberación) de ninguna relación de la misma operación, y las fracciones vigentes a esa fecha no suman más de 100 %.',
+        text: `La fecha de designación no puede ser anterior al último evento (designación, cierre, desdesignación o liberación) de ninguna relación de la misma operación, y las fracciones vigentes a esa fecha no suman más de 100 %. ${DECL_DESIGNATION_DATE}`,
       },
       {
         label: 'Cambios de nocional',
@@ -305,15 +307,15 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Desdesignación',
-        text: `${DECL_DEDESIGNATION} La fecha es la del snapshot elegido: si es posterior al último cierre, se mide primero hasta ella y la reserva congelada es la de ese cierre. No admite más cierres.`,
+        text: `${DECL_DEDESIGNATION} La fecha es la del snapshot elegido: si es posterior al último cierre, se mide primero hasta ella y la reserva congelada es la de ese cierre. La causa se contrasta con el estado de la operación en esa fecha: «el instrumento venció, se vendió o se terminó» exige que ya no esté viva y las otras dos, que lo esté. Si la operación se terminó o se ejerció, la medición final llega hasta esa fecha con el instrumento en 0 y lo liquidado incluye el pago de la terminación, el mismo importe que reconoce el P&L. No admite más cierres.`,
       },
       {
         label: 'Liberación de la reserva',
-        text: 'La reserva congelada se libera a mano, total o parcialmente y sin cambiar el signo del saldo: contra Resultados — partida cubierta (reciclaje) cuando el flujo cubierto ocurrió, o contra Resultados — inefectividad de cobertura cuando ya no se espera (IFRS 9 6.5.12). El saldo vigente es lo congelado menos lo liberado.',
+        text: 'La reserva de una relación desdesignada o concluida se libera a mano, total o parcialmente y sin cambiar el signo del saldo: contra Resultados — partida cubierta (reciclaje) cuando el flujo cubierto ocurrió, o contra Resultados — inefectividad de cobertura cuando ya no se espera (IFRS 9 6.5.12). «Ocurrió» no puede fecharse antes de la primera fecha de flujo de la partida (el inicio del crédito o la fecha del flujo pronosticado). El saldo vigente es lo congelado menos lo liberado.',
       },
       {
         label: 'Derivado fuera de mercado',
-        text: `${DECL_OFF_MARKET} Al designar, el alta avisa de esto, de que la prueba prospectiva no muestre relación económica y de un flujo pronosticado en fin de semana (se liquidará con el spot del snapshot).`,
+        text: `${DECL_OFF_MARKET} Al designar, el alta avisa de esto, de que la prueba prospectiva no muestre relación económica, de un flujo pronosticado en fin de semana (se liquidará con el spot del snapshot) y de una cobertura documentada más de un día después de su fecha de designación.`,
       },
       {
         label: 'Simplificaciones',

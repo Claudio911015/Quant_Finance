@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { localizeMessage } from './hedgeLabels';
+import { HEDGE_STATUS_LABEL, localizeMessage } from './hedgeLabels';
 
 // Mensajes tal como los emite el backend real (validation.py y hedges.py).
 describe('localizeMessage', () => {
@@ -32,5 +32,19 @@ describe('localizeMessage', () => {
     const ok = 'La operación ya tiene designado 80 % de su nocional: la nueva fracción excede 100 %';
     expect(localizeMessage(ok)).toBe(ok);
     expect(localizeMessage("'otra_clave' no es válida")).toBe("'otra_clave' no es válida");
+  });
+});
+
+describe('estados de la relación', () => {
+  it('rotula los tres estados', () => {
+    expect(HEDGE_STATUS_LABEL).toEqual({ activa: 'Activa', concluida: 'Concluida', desdesignada: 'Desdesignada' });
+  });
+
+  it('deja intactos los 409 de causa contrastada, que ya vienen en español', () => {
+    const ended = 'La operación sigue viva al 2026-12-15: la causa «El instrumento venció, se vendió o se terminó» solo aplica si ya no lo está';
+    const occurred =
+      'El flujo cubierto aún no ocurre al 2026-11-15 (su primera fecha es 2026-11-30): si ya no se espera, la causa es «El flujo cubierto ya no se espera»';
+    expect(localizeMessage(ended)).toBe(ended);
+    expect(localizeMessage(occurred)).toBe(occurred);
   });
 });

@@ -4,7 +4,8 @@ from datetime import date, timedelta
 
 import pytest
 
-from desk.api.tests.hedge_fixture import DOC, designate, load_fixings, market_forward, par_irs, roll
+from desk.api.tests.hedge_fixture import CLOCK, DOC, designate, load_fixings, market_forward, par_irs, roll
+from desk.api.tests.hedge_fixture import frozen_clock  # noqa: F401  (autouse: reloj fijo)
 
 D0 = date(2026, 11, 10)
 LOAN_END = D0 + timedelta(days=364)  # 13 periodos de 28 días: el swap tiene exactamente las fechas del crédito
@@ -323,7 +324,7 @@ def test_designating_again_with_an_old_snapshot_after_a_dedesignation_is_no_long
     sid, _ = _later_snapshot(client)
     assert client.post("/api/hedges/%d/periods" % half, json={"snapshot": sid}).status_code == 201
     r = client.post(
-        "/api/hedges/%d/dedesignate" % half, json={"snapshot": sid, "reason": "Prepago", "cause": "instrument_ended"}
+        "/api/hedges/%d/dedesignate" % half, json={"snapshot": sid, "reason": "Prepago", "cause": "criteria_not_met"}
     )
     assert r.status_code == 201, r.get_json()
     before = _counts(app)
@@ -365,6 +366,7 @@ def _codes(body):
 def test_a_clean_designation_has_no_warnings(client, loan_trade):
     r = designate(client, loan_trade["id"], "floating_loan", _loan())
     assert r.status_code == 201, r.get_json()
+    assert r.get_json()["created_at"] == CLOCK  # el reloj de las pruebas está fijado: el resultado no depende del día real
     assert r.get_json()["warnings"] == []
     assert r.get_json()["events"][0]["data"]["warnings"] == []
 
@@ -416,3 +418,47 @@ def test_several_warnings_come_in_a_stable_order(client):
 
     assert r.status_code == 201, r.get_json()
     assert _codes(r.get_json()) == ["no_economic_relationship", "forecast_date_weekend"]
+
+
+# ------------------------------------------------------------------------- F5: documentación atrasada
+
+def _clock(monkeypatch, iso):
+    monkeypatch.setattr("desk.api.hedges.now_iso", lambda: iso)
+
+
+def test_documenting_more_than_a_day_after_the_designation_date_warns_with_both_dates(monkeypatch, client, loan_trade):
+    _clock(monkeypatch, "2026-11-13T09:30:00+00:00")  # tres días después del as_of de MX-DEMO
+
+    r = designate(client, loan_trade["id"], "floating_loan", _loan())
+
+    assert r.status_code == 201, r.get_json()
+    d = r.get_json()
+    assert _codes(d) == ["designation_backdated"]
+    message = d["warnings"][0]["message"]
+    assert "2026-11-13" in message and "2026-11-10" in message and "3 días" in message and "6.4.1(b)" in message
+    assert d["created_at"] == "2026-11-13T09:30:00+00:00" and d["designation_date"] == "2026-11-10"
+    assert d["events"][0]["data"]["warnings"] == d["warnings"]  # queda guardado con la designación
+    assert client.get("/api/hedges/%d" % d["id"]).get_json()["warnings"] == d["warnings"]
+
+
+def test_documenting_within_a_day_of_the_designation_date_does_not_warn(monkeypatch, client, loan_trade):
+    _clock(monkeypatch, "2026-11-11T23:59:59+00:00")  # un día después: dentro de la holgura
+
+    r = designate(client, loan_trade["id"], "floating_loan", _loan())
+
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["warnings"] == []
+    other = par_irs(client, "TIIE-F", 500e6, D0, LOAN_END)
+    _clock(monkeypatch, "2026-11-12T00:00:00+00:00")  # dos días: ya avisa
+    assert _codes(designate(client, other["id"], "floating_loan", _loan()).get_json()) == ["designation_backdated"]
+
+
+def test_the_backdated_warning_goes_last_and_does_not_block(monkeypatch, client):
+    saturday = date(2027, 5, 15)
+    trade = market_forward(client, "sell", 10e6, saturday)
+    _clock(monkeypatch, "2026-12-01T00:00:00+00:00")
+
+    r = designate(client, trade["id"], "forecast_fx", _fx(date=saturday.isoformat(), side="buy_usd"))
+
+    assert r.status_code == 201, r.get_json()
+    assert _codes(r.get_json()) == ["no_economic_relationship", "forecast_date_weekend", "designation_backdated"]

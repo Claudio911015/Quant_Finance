@@ -229,7 +229,7 @@ function ReportBody({ report }: { report: HedgeReport }) {
           <dt>Tipo de cobertura</dt>
           <dd>{HEDGE_TYPE_LABEL[rel.hedge_type]}</dd>
           <dt>Fecha de designación</dt>
-          <dd>{fmtDate(rel.designation_date)}</dd>
+          <dd>{`Designación al ${fmtDate(rel.designation_date)} · documentada el ${fmtDate(rel.created_at.slice(0, 10))}`}</dd>
           <dt>{DOC_FIELD_LABEL.risk_management_objective}</dt>
           <dd>{doc.risk_management_objective}</dd>
           <dt>{DOC_FIELD_LABEL.hedged_risk}</dt>

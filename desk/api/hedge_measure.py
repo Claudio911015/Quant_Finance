@@ -8,6 +8,17 @@ Regla del menor (C3, IFRS 9 6.5.11(a)): se aplica sobre los acumulados *desde la
 incluyen lo liquidado (`inst_total`, `hypo_total`), no sobre el PV limpio. El reciclaje es la parte
 efectiva de lo liquidado en el periodo y la reserva es `effective_cum − Σ reciclaje`.
 
+Reserva con respaldo (F1): si no hay porción efectiva acumulada (`effective_cum = 0`) la reserva es 0
+y el reciclaje del periodo se ajusta (revierte lo reciclado antes) para que `Δoci + reciclaje =
+Δeffective_cum`; la inefectividad no cambia. Se parte de lo liquidado que coincide en instrumento e
+hipotético, acumulado desde la designación, así un periodo sin respaldo no pierde el reciclaje de los
+cupones cuando la porción efectiva vuelve. No se exige que la reserva tenga el signo ni el tamaño de
+`effective_cum`: en una cobertura perfecta con la curva invertida la reserva (valor del swap por
+liquidar) es de signo contrario al total acumulado que ya incluye los cupones cobrados.
+
+Cierre final (F2): la reserva solo se fuerza a 0 si el instrumento y el hipotético vencieron; si la
+partida sobrevive al instrumento la reserva se conserva y la relación queda `concluida`.
+
 Asientos (C4): los importes de las cuentas de balance son la diferencia entre el saldo redondeado a
 centavos de hoy y lo ya asentado en periodos anteriores, así el acumulado coincide al centavo con el
 saldo; el descuadre por redondeo se absorbe en la cuenta de resultados principal del tipo.
@@ -37,8 +48,9 @@ _MEMO_RELEASE_TO = {
     "flow_no_longer_expected": "Reserva a resultados: el flujo cubierto ya no se espera",
 }
 _RELEASE_TARGET = {"flow_occurred": hedges.ACC_RECYCLING, "flow_no_longer_expected": hedges.ACC_INEFFECTIVENESS}
-_HINT_CLOSE = "desdesigna la relación"
-_HINT_DEDESIGNATE = "usa el snapshot del último cierre (o de la designación) o uno dentro de su vigencia"
+_CAUSE_ENDED = "El instrumento venció, se vendió o se terminó"  # mismo texto que la interfaz
+_CAUSE_NOT_EXPECTED = "El flujo cubierto ya no se espera"
+_HINT_CLOSE = "desdesigna la relación con la causa «%s»" % _CAUSE_ENDED
 
 
 def _since(rel: Dict[str, Any]) -> Tuple[date, str]:
@@ -49,13 +61,20 @@ def _since(rel: Dict[str, Any]) -> Tuple[date, str]:
     return rel["designation_date"], "la designación"
 
 
+def _matched(settled: float, hypo_settled: float) -> float:
+    """Parte de lo liquidado en el periodo que coincide en instrumento e hipotético (la que se recicla)."""
+    if settled * hypo_settled > 0:
+        return math.copysign(min(abs(settled), abs(hypo_settled)), settled)
+    return 0.0
+
+
 def _previous(rel: Dict[str, Any]) -> Dict[str, Any]:
     """Punto de partida del periodo: el último cierre o, si no hay, la designación (acumulados en 0)."""
     d = rel["designation"]
     prev = {
         "snapshot": d["snapshot"], "as_of": date.fromisoformat(d["as_of"]),
         "inst_cum": 0.0, "hypo_cum": 0.0, "oci": 0.0, "inst_total": 0.0, "hypo_total": 0.0, "effective_cum": 0.0,
-        "settled_cum": 0.0, "hypo_settled_cum": 0.0,
+        "settled_cum": 0.0, "hypo_settled_cum": 0.0, "matched_cum": 0.0,
     }  # type: Dict[str, Any]
     if rel["periods"]:
         last = rel["periods"][-1]
@@ -65,6 +84,9 @@ def _previous(rel: Dict[str, Any]) -> Dict[str, Any]:
             oci=r["oci"], inst_total=r["inst_total"], hypo_total=r["hypo_total"], effective_cum=r["effective_cum"],
             settled_cum=sum(p["result"]["settled_period"] for p in rel["periods"]),
             hypo_settled_cum=sum(p["result"]["hypo_settled_period"] for p in rel["periods"]),
+            matched_cum=sum(
+                _matched(p["result"]["settled_period"], p["result"]["hypo_settled_period"]) for p in rel["periods"]
+            ),
         )
     return prev
 
@@ -107,14 +129,15 @@ def measure(
         else:
             effective_cum = 0.0
         ineffectiveness = (inst_total - prev["inst_total"]) - (effective_cum - prev["effective_cum"])
-        if settled_period * hypo_settled_period > 0:
-            recycled = math.copysign(min(abs(settled_period), abs(hypo_settled_period)), settled_period)
-        else:
-            recycled = 0.0
+        matched_cum = prev["matched_cum"] + _matched(settled_period, hypo_settled_period)
         recycled_before = prev["effective_cum"] - prev["oci"]  # Σ reciclaje de los periodos anteriores
-        if v_inst["status"] == "vencida":  # cierre final: la reserva queda exactamente en 0
-            recycled = effective_cum - recycled_before
-        oci = effective_cum - (recycled_before + recycled)
+        if v_inst["status"] == "vencida" and v_hypo["status"] == "vencida":
+            oci = 0.0  # cierre final con la partida también terminada: la reserva queda exactamente en 0 (F2)
+        elif effective_cum == 0:
+            oci = 0.0  # sin porción efectiva no hay reserva que la respalde (F1)
+        else:
+            oci = effective_cum - matched_cum
+        recycled = effective_cum - recycled_before - oci  # Δoci + reciclaje = Δeffective_cum
         d_oci = oci - prev["oci"]
         item_adjustment = 0.0
         fv_result = 0.0
@@ -233,11 +256,14 @@ def journal(
     return [_entry(account, cents, memo) for account, cents, memo in lines]
 
 
-def _close(conn: sqlite3.Connection, rel: Dict[str, Any], snapshot_id: str, mkt: MarketContext, hint: str) -> Dict[str, Any]:
+def _close(
+    conn: sqlite3.Connection, rel: Dict[str, Any], snapshot_id: str, mkt: MarketContext, instrument_ended: bool = False
+) -> Dict[str, Any]:
     """Cierra el periodo de `rel` al `as_of` de `mkt` (sin `commit`) y devuelve el periodo interno.
 
-    `hint` completa el mensaje cuando la operación ya no está viva. Quien llama comprueba antes que
-    la relación siga activa.
+    Con `instrument_ended` (desdesignación por fin del instrumento, F3) también se mide una operación
+    `terminada` o `ejercida`: su PV es 0 y lo liquidado incluye el `transfer` de la terminación o el
+    ejercicio. Quien llama comprueba antes que la relación no esté desdesignada.
     """
     since, label = _since(rel)
     if mkt.as_of <= since:
@@ -252,8 +278,8 @@ def _close(conn: sqlite3.Connection, rel: Dict[str, Any], snapshot_id: str, mkt:
         )
     trade = portfolio.get_trade(conn, rel["trade_id"])
     status = lifecycle.state(trade, trade["events"], mkt.as_of)["status"]
-    if status not in ("viva", "vencida"):
-        raise ApiError(409, "La operación ya no está viva al %s: %s" % (mkt.as_of.isoformat(), hint), "snapshot")
+    if status not in ("viva", "vencida") and not (instrument_ended and status in ("terminada", "ejercida")):
+        raise ApiError(409, "La operación ya no está viva al %s: %s" % (mkt.as_of.isoformat(), _HINT_CLOSE), "snapshot")
     result = measure(rel, trade, mkt, fixing_store.load_all(conn))
     row = conn.execute("SELECT data FROM snapshots WHERE id = ?", (snapshot_id,)).fetchone()
     result["data_quality"] = market.data_quality(market.sources_of(json.loads(row["data"])))
@@ -277,7 +303,7 @@ def close_period(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) 
     mkt = market.load_context(conn, snapshot_id)
     if hedges.status(rel) == hedges.STATUS_DEDESIGNATED:
         raise ApiError(409, "La cobertura está desdesignada: ya no admite cierres de periodo", "id")
-    return hedges.public_period(_close(conn, rel, snapshot_id, mkt, _HINT_CLOSE))
+    return hedges.public_period(_close(conn, rel, snapshot_id, mkt))
 
 
 def dedesignate(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -289,10 +315,13 @@ def dedesignate(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) -
     llama hace `commit`; si algo falla no se escribe nada. La relación deja de contar su fracción y
     ya no admite cierres.
 
-    Hueco de la especificación (resuelto de forma conservadora): si el snapshot es posterior al
-    último cierre pero la operación ya terminó o se ejerció, o el último cierre ya fue el final,
-    el cierre previo es imposible y se responde 409 `snapshot` en vez de congelar un saldo sin medir
-    hasta esa fecha; siempre se puede desdesignar con el snapshot del último cierre.
+    La causa se contrasta con el estado de la operación a esa fecha (F4, 409 `cause`):
+    `instrument_ended` exige que no esté viva; `criteria_not_met` y `risk_objective_changed`, que sí.
+    Con `instrument_ended` y la operación terminada o ejercida, la medición final llega hasta la fecha
+    del snapshot (F3): PV del instrumento 0 y lo liquidado incluye el pago de la terminación o del
+    ejercicio —el mismo importe que reconoce `/api/pnl`—, con sus asientos; la reserva resultante es la
+    que se congela. Si el último cierre ya fue el final (la operación venció), un snapshot posterior es
+    409 `snapshot`: se desdesigna con el snapshot de ese cierre.
     """
     rel = hedges.load_relationship(conn, hedge_id)
     snapshot_id = text(body, "snapshot")
@@ -308,8 +337,24 @@ def dedesignate(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) -
             "El snapshot (%s) no puede ser anterior a %s, %s de la cobertura" % (mkt.as_of.isoformat(), since.isoformat(), label),
             "snapshot",
         )
+    trade = portfolio.get_trade(conn, rel["trade_id"])
+    state = lifecycle.state(trade, trade["events"], mkt.as_of)["status"]
+    if cause == "instrument_ended" and state == "viva":
+        raise ApiError(
+            409,
+            "La operación sigue viva al %s: la causa «%s» solo aplica si ya no lo está"
+            % (mkt.as_of.isoformat(), _CAUSE_ENDED),
+            "cause",
+        )
+    if cause != "instrument_ended" and state != "viva":
+        raise ApiError(
+            409,
+            "La operación ya no está viva al %s (estado: %s): solo cabe la causa «%s»"
+            % (mkt.as_of.isoformat(), state, _CAUSE_ENDED),
+            "cause",
+        )
     if mkt.as_of > since:
-        _close(conn, rel, snapshot_id, mkt, _HINT_DEDESIGNATE)
+        _close(conn, rel, snapshot_id, mkt, instrument_ended=cause == "instrument_ended")
         rel = hedges.load_relationship(conn, hedge_id)
     hedges.insert_event(
         conn, hedge_id, "dedesignation", mkt.as_of,
@@ -321,20 +366,22 @@ def dedesignate(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) -
 def release_reserve(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Liberación de la reserva congelada (`POST /api/hedges/<id>/release {snapshot, amount?, cause}`, C5).
 
-    Solo en relaciones desdesignadas con reserva distinta de 0. `amount` va con el signo del saldo
+    Solo en relaciones desdesignadas o concluidas (F2) con reserva distinta de 0. `amount` va con el signo del saldo
     (`oci_balance`; por omisión, todo): no puede tener el signo contrario ni exceder el saldo (409
     `amount`, con media centésima de tolerancia para el monto tecleado a centavos). El asiento lleva
     `ORI` contra `Resultados — partida cubierta (reciclaje)` (`flow_occurred`) o contra
     `Resultados — inefectividad de cobertura` (`flow_no_longer_expected`). La fecha es el `as_of` del
-    snapshot y no puede ser anterior al último evento (409 `snapshot`). Quien llama hace `commit`.
+    snapshot y no puede ser anterior al último evento (409 `snapshot`). `flow_occurred` exige que la
+    fecha no sea anterior a la primera fecha de flujo de la partida (409 `cause`, F4). Quien llama
+    hace `commit`.
     """
     rel = hedges.load_relationship(conn, hedge_id)
     snapshot_id = text(body, "snapshot")
     cause = choice(body, "cause", hedges.RELEASE_CAUSES)
     amount = number(body, "amount", required=False)
     mkt = market.load_context(conn, snapshot_id)
-    if hedges.status(rel) != hedges.STATUS_DEDESIGNATED:
-        raise ApiError(409, "Solo se libera la reserva de una cobertura desdesignada", "id")
+    if hedges.status(rel) == hedges.STATUS_ACTIVE:
+        raise ApiError(409, "Solo se libera la reserva de una cobertura desdesignada o concluida", "id")
     balance = hedges.oci_balance(rel)
     if abs(balance) < _HALF_CENT:
         raise ApiError(409, "La cobertura no tiene reserva que liberar", "id")
@@ -345,6 +392,14 @@ def release_reserve(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any
             "El snapshot (%s) no puede ser anterior al último evento de la cobertura (%s)"
             % (mkt.as_of.isoformat(), latest.isoformat()),
             "snapshot",
+        )
+    first_flow = hedges.first_flow_date(rel)
+    if cause == "flow_occurred" and mkt.as_of < first_flow:
+        raise ApiError(
+            409,
+            "El flujo cubierto aún no ocurre al %s (su primera fecha es %s): si ya no se espera, la causa es «%s»"
+            % (mkt.as_of.isoformat(), first_flow.isoformat(), _CAUSE_NOT_EXPECTED),
+            "cause",
         )
     if amount is not None:
         if abs(amount) < _HALF_CENT:

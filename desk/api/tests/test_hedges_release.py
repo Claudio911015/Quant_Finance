@@ -6,6 +6,7 @@ import pytest
 
 from desk.api import hedges
 from desk.api.tests.hedge_fixture import designate, load_fixings, market_forward, par_irs, roll
+from desk.api.tests.hedge_fixture import frozen_clock  # noqa: F401  (autouse: reloj fijo)
 
 D0 = date(2026, 11, 10)
 LOAN_END = D0 + timedelta(days=364)
@@ -27,7 +28,7 @@ def _loan():
 
 def _dedesignate(client, hid, snapshot):
     r = client.post(
-        "/api/hedges/%d/dedesignate" % hid, json={"snapshot": snapshot, "reason": "Prepago", "cause": "instrument_ended"}
+        "/api/hedges/%d/dedesignate" % hid, json={"snapshot": snapshot, "reason": "Prepago", "cause": "criteria_not_met"}
     )
     assert r.status_code == 201, r.get_json()
     return r.get_json()
@@ -54,6 +55,7 @@ def _negative_reserve(client):
     assert r.status_code == 201, r.get_json()
     hid = r.get_json()["id"]
     roll(client, "MX-DEMO", "F1", 5)
+    roll(client, "MX-DEMO", "F2", 25)  # después del vencimiento del forward y del flujo cubierto: ya puede ocurrir
     detail = _dedesignate(client, hid, "F1")
     assert detail["oci_balance"] < -1000
     return hid, detail
@@ -174,13 +176,13 @@ def test_a_negative_reserve_is_released_with_a_negative_amount(client):
     balance = frozen["oci_balance"]
     part = round(balance / 2, 2)
 
-    first = _released(client, hid, "F1", amount=part)
+    first = _released(client, hid, "F2", amount=part)
     ori, target = first["events"][-1]["data"]["entries"]
     assert ori["account"] == hedges.ACC_OCI and ori["credit"] == -part and ori["debit"] == 0.0  # ORI tenía saldo deudor
     assert target["account"] == hedges.ACC_RECYCLING and target["debit"] == -part and target["credit"] == 0.0
     assert first["oci_balance"] == pytest.approx(balance - part, abs=1e-9)
 
-    last = _released(client, hid, "F1")
+    last = _released(client, hid, "F2")
     assert last["oci_balance"] == 0.0 and _ori_cents(last) == 0
 
 
@@ -188,7 +190,7 @@ def test_a_positive_amount_against_a_negative_reserve_changes_its_sign(app, clie
     hid, _ = _negative_reserve(client)
     before = _counts(app)
 
-    r = _release(client, hid, "F1", amount=1000.0)
+    r = _release(client, hid, "F2", amount=1000.0)
 
     assert r.status_code == 409 and r.get_json()["field"] == "amount"
     assert "signo" in r.get_json()["error"] and _counts(app) == before
@@ -295,3 +297,41 @@ def test_a_release_event_inserted_by_sql_sets_the_current_reserve(app, client):
     detail = client.get("/api/hedges/%d" % hid).get_json()
 
     assert detail["oci_balance"] == 0.25 and detail["dedesignation"]["frozen_oci"] == frozen["oci_balance"]
+
+
+# ------------------------------------------------------------------------- F4: causas contrastadas con la partida
+
+def test_flow_occurred_cannot_be_dated_before_the_first_date_of_the_hedged_item(app, client):
+    hid, _ = _negative_reserve(client)  # el flujo pronosticado es FWD_END (+20 días); la reserva se congeló en F1 (+5)
+    before = _counts(app)
+
+    r = _release(client, hid, "F1", cause="flow_occurred")
+
+    assert r.status_code == 409 and r.get_json()["field"] == "cause"
+    assert FWD_END.isoformat() in r.get_json()["error"] and "ya no se espera" in r.get_json()["error"]
+    assert _counts(app) == before and client.get("/api/hedges/%d" % hid).get_json()["oci_balance"] < 0
+    roll(client, "MX-DEMO", "ON", 20)  # el día del flujo ya cuenta como ocurrido
+    assert _release(client, hid, "ON", cause="flow_occurred", amount=-1000.0).status_code == 201
+
+
+def test_flow_no_longer_expected_has_no_date_restriction(client):
+    hid, _ = _negative_reserve(client)
+
+    detail = _released(client, hid, "F1", cause="flow_no_longer_expected")
+
+    assert detail["oci_balance"] == 0.0 and _ori_cents(detail) == 0
+    assert detail["events"][-1]["data"]["entries"][1]["account"] == hedges.ACC_INEFFECTIVENESS
+
+
+def test_a_loan_hedge_can_only_release_as_occurred_from_the_start_of_the_credit(client):
+    trade = par_irs(client, "TIIE-F", NOTIONAL, D0, LOAN_END)
+    later = D0 + timedelta(days=60)
+    terms = {**_loan(), "start_date": later.isoformat()}  # crédito que arranca dentro de dos meses
+    hid = designate(client, trade["id"], "floating_loan", terms).get_json()["id"]
+    as_of = date.fromisoformat(roll(client, "MX-DEMO", "D35", 35))
+    load_fixings(client, "TIIE-F", D0, as_of, TIIE)
+    assert client.post("/api/hedges/%d/periods" % hid, json={"snapshot": "D35"}).status_code == 201
+    assert _dedesignate(client, hid, "D35")["oci_balance"] != 0
+
+    r = _release(client, hid, "D35", cause="flow_occurred")
+    assert r.status_code == 409 and r.get_json()["field"] == "cause" and later.isoformat() in r.get_json()["error"]

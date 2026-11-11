@@ -7,6 +7,7 @@ import pytest
 
 from desk.api.risk import scenarios
 from desk.api.tests.hedge_fixture import designate, market_forward, par_irs, roll
+from desk.api.tests.hedge_fixture import frozen_clock  # noqa: F401  (autouse: reloj fijo)
 
 D0 = date(2026, 11, 10)
 LOAN_END = D0 + timedelta(days=364)  # 13 periodos de 28 días: el swap tiene exactamente las fechas del crédito

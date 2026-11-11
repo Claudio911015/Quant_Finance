@@ -39,6 +39,7 @@ vi.mock('../api/client', async (importOriginal) => {
 const SNAPSHOTS = [
   { id: 'MX-DEMO', label: 'Demo MX', as_of: '2026-11-10' },
   { id: 'D1', label: 'Rodado', as_of: '2026-12-15' },
+  { id: 'D2', label: 'Rodado 2', as_of: '2027-01-25' },
 ] as unknown as SnapshotSummary[];
 
 const NOTICE =
@@ -340,7 +341,7 @@ describe('HedgeScreen', () => {
     renderScreen();
     const form = await screen.findByRole('form', { name: 'Cerrar periodo' });
     const select = within(form).getByLabelText('Snapshot del cierre') as HTMLSelectElement;
-    expect(select.value).toBe('MX-DEMO');
+    expect(select.value).toBe('D2'); // el primero posterior al último cierre (2026-12-15), no el snapshot de la barra
     expect(within(form).getByRole('option', { name: 'Rodado · 2026-12-15' })).toBeTruthy();
     fireEvent.change(select, { target: { value: 'D1' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Cerrar periodo' }));
@@ -366,7 +367,7 @@ describe('HedgeScreen', () => {
     renderScreen();
     const form = await screen.findByRole('form', { name: 'Desdesignar' });
     const snap = within(form).getByLabelText('Snapshot de la desdesignación') as HTMLSelectElement;
-    expect(snap.value).toBe('MX-DEMO');
+    expect(snap.value).toBe('D2');
     fireEvent.change(snap, { target: { value: 'D1' } });
     fireEvent.change(within(form).getByLabelText('Causa'), { target: { value: 'criteria_not_met' } });
     fireEvent.change(within(form).getByLabelText('Motivo'), { target: { value: 'Prepago del crédito' } });
@@ -564,7 +565,7 @@ describe('HedgeScreen', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
     await waitFor(() =>
       expect(mocks.releaseHedgeReserve).toHaveBeenCalledWith(1, {
-        snapshot: 'MX-DEMO',
+        snapshot: 'D2',
         cause: 'flow_occurred',
         amount: -25000.5,
       }),
@@ -580,7 +581,7 @@ describe('HedgeScreen', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
     await waitFor(() =>
       expect(mocks.releaseHedgeReserve).toHaveBeenCalledWith(1, {
-        snapshot: 'MX-DEMO',
+        snapshot: 'D2',
         cause: 'flow_occurred',
         amount: 10000,
       }),
@@ -710,5 +711,146 @@ describe('HedgeScreen', () => {
     renderScreen();
     expect(await screen.findByText('No existe la relación de cobertura')).toBeTruthy();
     expect(screen.getByRole('note').textContent).toBe(NOTICE);
+  });
+  it('Cerrar periodo y Desdesignar arrancan en el primer snapshot con fecha posterior al último cierre', async () => {
+    setup();
+    mocks.listSnapshots.mockResolvedValue([
+      { id: 'D2', label: 'Rodado 2', as_of: '2027-01-25' },
+      { id: 'MX-DEMO', label: 'Demo MX', as_of: '2026-11-10' },
+      { id: 'D3', label: 'Rodado 3', as_of: '2027-03-01' },
+      { id: 'D1', label: 'Rodado', as_of: '2026-12-15' },
+    ]);
+    renderScreen();
+    const close = await screen.findByRole('form', { name: 'Cerrar periodo' });
+    expect((within(close).getByLabelText('Snapshot del cierre') as HTMLSelectElement).value).toBe('D2');
+    const ded = screen.getByRole('form', { name: 'Desdesignar' });
+    expect((within(ded).getByLabelText('Snapshot de la desdesignación') as HTMLSelectElement).value).toBe('D2');
+  });
+
+  it('sin cierres arranca en el primer snapshot posterior a la designación', async () => {
+    setup({ ...HEDGE, periods: [], last_close: null });
+    renderScreen();
+    const close = await screen.findByRole('form', { name: 'Cerrar periodo' });
+    expect((within(close).getByLabelText('Snapshot del cierre') as HTMLSelectElement).value).toBe('D1');
+  });
+
+  it('si no hay snapshot posterior al último cierre el selector queda vacío con una nota y no llama al backend', async () => {
+    setup();
+    mocks.listSnapshots.mockResolvedValue(SNAPSHOTS.slice(0, 2)); // el último es el del cierre (2026-12-15)
+    renderScreen();
+    const close = await screen.findByRole('form', { name: 'Cerrar periodo' });
+    expect((within(close).getByLabelText('Snapshot del cierre') as HTMLSelectElement).value).toBe('');
+    expect(within(close).getByText(/No hay ningún snapshot con fecha posterior a 2026-12-15/)).toBeTruthy();
+    fireEvent.click(within(close).getByRole('button', { name: 'Cerrar periodo' }));
+    expect((await within(close).findByRole('alert')).textContent).toBe('Indica el snapshot');
+    expect(mocks.closeHedgePeriod).not.toHaveBeenCalled();
+
+    const ded = screen.getByRole('form', { name: 'Desdesignar' });
+    expect(within(ded).getByText(/No hay ningún snapshot con fecha posterior a 2026-12-15/)).toBeTruthy();
+    fireEvent.change(within(ded).getByLabelText('Causa'), { target: { value: 'criteria_not_met' } });
+    fireEvent.change(within(ded).getByLabelText('Motivo'), { target: { value: 'x' } });
+    fireEvent.click(within(ded).getByRole('button', { name: 'Desdesignar' }));
+    expect((await within(ded).findAllByRole('alert')).map((a) => a.textContent)).toEqual(['Indica el snapshot']);
+    expect(mocks.dedesignateHedge).not.toHaveBeenCalled();
+    fireEvent.change(within(ded).getByLabelText('Snapshot de la desdesignación'), { target: { value: 'D1' } }); // el del cierre sí
+    expect(within(ded).queryByText(/No hay ningún snapshot/)).toBeNull();
+  });
+
+  it('Liberar reserva arranca en el primer snapshot que no es anterior al último evento', async () => {
+    setup(PARTLY_RELEASED); // última liberación: 2027-01-20
+    mocks.listSnapshots.mockResolvedValue([
+      ...SNAPSHOTS,
+      { id: 'D0', label: 'Del día', as_of: '2027-01-20' },
+    ]);
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Liberar reserva' });
+    expect((within(form).getByLabelText('Snapshot de la liberación') as HTMLSelectElement).value).toBe('D0');
+  });
+
+  it('una relación concluida se rotula, no admite cierres ni desdesignar, explica la reserva y permite liberarla', async () => {
+    setup({
+      ...HEDGE,
+      status: 'concluida',
+      oci_balance: 2500000,
+      periods: [period({ trade_status: 'vencida', oci: 2500000 })],
+      events: [
+        { id: 2, relationship_id: 1, type: 'period_close', event_date: '2026-12-15', data: {}, created_at: '2026-12-15T10:00:00+00:00' },
+      ],
+    });
+    renderScreen();
+    expect(await screen.findByText('Concluida')).toBeTruthy();
+    expect(screen.getByText(/Instrumento vencido antes que la partida/)).toBeTruthy();
+    expect(screen.getByText('Saldo de reserva')).toBeTruthy();
+    expect(screen.queryByRole('form', { name: 'Cerrar periodo' })).toBeNull();
+    expect(screen.queryByRole('form', { name: 'Desdesignar' })).toBeNull();
+    const form = screen.getByRole('form', { name: 'Liberar reserva' });
+    expect(within(form).getByText('Vacío libera todo el saldo (MXN 2,500,000.00)')).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText('Causa de la liberación'), { target: { value: 'flow_occurred' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
+    await waitFor(() =>
+      expect(mocks.releaseHedgeReserve).toHaveBeenCalledWith(1, { snapshot: 'D1', cause: 'flow_occurred' }), // el cierre final
+    );
+  });
+
+  it('una relación concluida sin reserva no ofrece acciones ni nota', async () => {
+    setup({ ...HEDGE, status: 'concluida', oci_balance: 0, periods: [period({ trade_status: 'vencida', oci: 0 })] });
+    renderScreen();
+    expect(await screen.findByText('Concluida')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Acciones' })).toBeNull();
+    expect(screen.queryByText(/Instrumento vencido antes que la partida/)).toBeNull();
+  });
+
+  it('muestra la fecha de designación y la de documentación, y el aviso de una cobertura documentada tarde', async () => {
+    setup({
+      ...HEDGE,
+      created_at: '2026-11-14T09:30:00+00:00',
+      warnings: [
+        {
+          code: 'designation_backdated',
+          message: 'La cobertura se documenta el 2026-11-14, 4 días después de su fecha de designación (2026-11-10)',
+        },
+      ],
+    });
+    renderScreen();
+    const facts = (await screen.findByText('Documentada el')).closest('dl')!;
+    expect(within(facts).getByText('Designación').nextElementSibling!.textContent).toBe('2026-11-10');
+    expect(within(facts).getByText('Documentada el').nextElementSibling!.textContent).toBe('2026-11-14');
+    const block = screen.getByRole('region', { name: 'Avisos de designación' });
+    expect(within(block).getByText(/se documenta el 2026-11-14, 4 días después/)).toBeTruthy();
+  });
+  it('un 409 de causa contrastada al desdesignar aparece bajo el campo Causa', async () => {
+    setup();
+    mocks.dedesignateHedge.mockRejectedValue(
+      new ApiError(
+        409,
+        'La operación sigue viva al 2027-01-25: la causa «El instrumento venció, se vendió o se terminó» solo aplica si ya no lo está',
+        'cause',
+      ),
+    );
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Desdesignar' });
+    fireEvent.change(within(form).getByLabelText('Causa'), { target: { value: 'instrument_ended' } });
+    fireEvent.change(within(form).getByLabelText('Motivo'), { target: { value: 'Prepago' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Desdesignar' }));
+    const alert = await within(form).findByRole('alert');
+    expect(alert.textContent).toContain('sigue viva al 2027-01-25');
+    expect(within(form).getByLabelText('Causa').getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('un 409 de causa contrastada al liberar aparece bajo el campo de la causa', async () => {
+    setup(PARTLY_RELEASED);
+    mocks.releaseHedgeReserve.mockRejectedValue(
+      new ApiError(
+        409,
+        'El flujo cubierto aún no ocurre al 2027-01-25 (su primera fecha es 2027-03-01): si ya no se espera, la causa es «El flujo cubierto ya no se espera»',
+        'cause',
+      ),
+    );
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Liberar reserva' });
+    fireEvent.change(within(form).getByLabelText('Causa de la liberación'), { target: { value: 'flow_occurred' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
+    expect((await within(form).findByRole('alert')).textContent).toContain('su primera fecha es 2027-03-01');
+    expect(within(form).getByLabelText('Causa de la liberación').getAttribute('aria-invalid')).toBe('true');
   });
 });

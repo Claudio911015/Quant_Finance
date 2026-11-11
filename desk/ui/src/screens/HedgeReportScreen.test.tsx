@@ -214,6 +214,44 @@ describe('HedgeReportScreen', () => {
     expect(text).toContain('no en gasto por intereses');
     expect(text).toContain('Desdesignar exige una causa');
     expect(text).toContain('fuente de inefectividad');
+    expect(text).toContain('devengo del cupón en curso'); // el ajuste de valor razonable no es un valor limpio
+    expect(text).toContain('no puede comprobar que la documentación existiera');
+  });
+
+  it('muestra la fecha de designación y la de documentación', async () => {
+    renderScreen();
+    expect(await screen.findByText('Designación al 2026-11-10 · documentada el 2026-11-11')).toBeTruthy();
+  });
+
+  it('una cobertura documentada tarde muestra ambas fechas y su aviso', async () => {
+    mocks.hedgeReport.mockResolvedValue({
+      ...REPORT,
+      relationship: {
+        ...REPORT.relationship,
+        created_at: '2026-11-20T09:00:00+00:00',
+        warnings: [
+          { code: 'designation_backdated', message: 'La cobertura se documenta el 2026-11-20, 10 días después de su fecha de designación (2026-11-10)' },
+        ],
+      },
+    });
+    renderScreen();
+    expect(await screen.findByText('Designación al 2026-11-10 · documentada el 2026-11-20')).toBeTruthy();
+    expect(screen.getByText(/se documenta el 2026-11-20, 10 días después/)).toBeTruthy();
+  });
+
+  it('una relación concluida muestra la nota de su reserva pendiente', async () => {
+    mocks.hedgeReport.mockResolvedValue({
+      ...REPORT,
+      relationship: { ...REPORT.relationship, status: 'concluida' },
+      reserve: {
+        balance: 2500000,
+        frozen: true,
+        note: 'Instrumento vencido antes que la partida: la reserva se reciclará a resultados cuando ocurra el flujo cubierto',
+        released: 0,
+      },
+    });
+    renderScreen();
+    expect(await screen.findByText(/^Instrumento vencido antes que la partida/)).toBeTruthy();
   });
 
   it('el resumen de la prueba prospectiva va en un bloque que no se parte al imprimir', async () => {

@@ -97,6 +97,29 @@ describe('MethodologyScreen', () => {
       expect(fv).toContain('no en gasto por intereses');
     });
 
+    it('declara la reserva con respaldo, el vencimiento del instrumento antes que la partida y el devengo del ajuste', () => {
+      render(<MethodologyScreen />);
+      const least = hedgeRow('Regla del menor');
+      expect(least).toContain('mientras no haya parte efectiva');
+      expect(least).toContain('6.5.11(a)');
+      const recycling = hedgeRow('Reciclaje');
+      expect(recycling).toContain('vencen juntos');
+      expect(recycling).toContain('Concluida');
+      expect(recycling).toContain('6.5.12(a)');
+      const fv = hedgeRow('Valor razonable');
+      expect(fv).toContain('devengo del cupón en curso');
+      expect(fv).toContain('no es un valor limpio');
+    });
+
+    it('la desdesignación contrasta la causa con el estado de la operación y mide la terminación', () => {
+      render(<MethodologyScreen />);
+      const ded = hedgeRow('Desdesignación');
+      expect(ded).toContain('se contrasta con el estado de la operación');
+      expect(ded).toContain('pago de la terminación');
+      expect(hedgeRow('Liberación de la reserva')).toContain('desdesignada o concluida');
+      expect(hedgeRow('Liberación de la reserva')).toContain('primera fecha de flujo');
+    });
+
     it('la desdesignación exige una causa, mide hasta su fecha y la reserva se libera a mano', () => {
       render(<MethodologyScreen />);
       const ded = hedgeRow('Desdesignación');
@@ -113,7 +136,12 @@ describe('MethodologyScreen', () => {
       render(<MethodologyScreen />);
       expect(hedgeRow('Derivado fuera de mercado')).toContain('fuente de inefectividad');
       expect(hedgeRow('Derivado fuera de mercado')).toContain('fin de semana');
-      expect(hedgeRow('Fecha de designación')).toContain('no es retroactiva');
+      const date = hedgeRow('Fecha de designación');
+      expect(date).not.toContain('no es retroactiva'); // el sistema no puede garantizarlo
+      expect(date).toContain('orden cronológico');
+      expect(date).toContain('no puede comprobar que la documentación existiera');
+      expect(date).toContain('más de un día después');
+      expect(hedgeRow('Derivado fuera de mercado')).toContain('documentada más de un día después');
       expect(hedgeRow('Efectividad prospectiva')).toContain('sentido');
     });
 

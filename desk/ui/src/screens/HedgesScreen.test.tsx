@@ -178,6 +178,15 @@ describe('HedgesScreen', () => {
     expect(second[7].textContent).toBe('MXN 0.00');
   });
 
+  it('rotula una relación concluida con su estado y el saldo de su reserva pendiente', async () => {
+    setup([{ ...HEDGES[0], status: 'concluida', oci_balance: 2500000, periods_count: 2 }]);
+    renderScreen();
+    const row = (await screen.findAllByRole('row'))[1];
+    const cells = within(row).getAllByRole('cell');
+    expect(cells[5].textContent).toBe('Concluida');
+    expect(cells[7].textContent).toBe('MXN 2,500,000.00');
+  });
+
   it('sin relaciones dice "Sin relaciones de cobertura"', async () => {
     setup([]);
     renderScreen();

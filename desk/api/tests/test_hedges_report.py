@@ -7,6 +7,7 @@ import pytest
 
 from desk.api import hedges
 from desk.api.tests.hedge_fixture import designate, load_fixings, par_irs, roll
+from desk.api.tests.hedge_fixture import frozen_clock  # noqa: F401  (autouse: reloj fijo)
 
 D0 = date(2026, 11, 10)
 LOAN_END = D0 + timedelta(days=364)
@@ -219,7 +220,7 @@ def test_csv_debits_equal_credits_to_the_cent(client):
 
 def _dedesignate(client, hid, snapshot):
     r = client.post(
-        "/api/hedges/%d/dedesignate" % hid, json={"snapshot": snapshot, "reason": "Prepago del crédito", "cause": "instrument_ended"}
+        "/api/hedges/%d/dedesignate" % hid, json={"snapshot": snapshot, "reason": "Prepago del crédito", "cause": "criteria_not_met"}
     )
     assert r.status_code == 201, r.get_json()
     return r.get_json()
@@ -234,7 +235,7 @@ def test_dedesignated_relationship_reports_the_frozen_reserve(client):
     assert report["reserve"] == {"balance": periods[-1]["oci"], "frozen": True, "note": hedges.FROZEN_NOTE, "released": 0}
     assert report["relationship"]["status"] == "desdesignada"
     dedesignation = report["relationship"]["dedesignation"]
-    assert dedesignation["frozen_oci"] == periods[-1]["oci"] and dedesignation["cause"] == "instrument_ended"
+    assert dedesignation["frozen_oci"] == periods[-1]["oci"] and dedesignation["cause"] == "criteria_not_met"
     assert dedesignation["snapshot"] == "D70"
 
 
@@ -290,3 +291,17 @@ def test_errors_keep_their_status_and_field(client):
     assert r.status_code == 404 and r.get_json()["field"] == "id"
     r = client.get("/api/hedges/%d/report?format=csv&snapshot=NOPE" % hid)
     assert r.status_code == 404 and r.get_json()["field"] == "snapshot"
+
+
+# ------------------------------------------------------------------------- F5: ambas fechas y los avisos
+
+def test_the_report_carries_both_the_designation_date_and_the_documentation_timestamp(monkeypatch, client):
+    monkeypatch.setattr("desk.api.hedges.now_iso", lambda: "2026-11-14T10:00:00+00:00")
+    trade = par_irs(client, "TIIE-F", NOTIONAL, D0, LOAN_END)
+    hid = designate(client, trade["id"], "floating_loan", _loan()).get_json()["id"]
+
+    relationship = _report(client, hid)["relationship"]
+
+    assert relationship["designation_date"] == "2026-11-10"
+    assert relationship["created_at"] == "2026-11-14T10:00:00+00:00"  # "Designación al … · documentada el …"
+    assert [w["code"] for w in relationship["warnings"]] == ["designation_backdated"]

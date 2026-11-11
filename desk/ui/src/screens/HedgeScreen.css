@@ -44,6 +44,11 @@
   color: var(--pos);
 }
 
+.hedge__status--concluida {
+  border-color: var(--text-dim);
+  color: var(--text-dim);
+}
+
 .hedge__status--desdesignada {
   border-color: var(--warn);
   color: var(--warn);

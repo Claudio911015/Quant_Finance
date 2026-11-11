@@ -25,6 +25,7 @@ import {
   DOC_FIELD_LABEL,
   HEDGE_STATUS_LABEL,
   HEDGE_TYPE_LABEL,
+  CONCLUDED_NOTE,
   ITEM_KIND_LABEL,
   RELEASE_CAUSE_LABEL,
   SIDE_LABEL,
@@ -70,13 +71,33 @@ interface SnapshotOption {
 /** Saldo mínimo de reserva (media centésima) que se considera distinto de cero. */
 const HALF_CENT = 0.005;
 
+/**
+ * Primer snapshot (por fecha) con fecha posterior a `after` —o igual o posterior si `inclusive`—, que es con el
+ * que el backend acepta la acción; `''` si no hay ninguno. El snapshot global de la barra suele ser anterior
+ * al último evento de la relación y daría un 409 al primer intento.
+ */
+function firstSnapshotAfter(options: SnapshotOption[], after: string, inclusive: boolean): string {
+  const later = options
+    .filter((o) => o.as_of != null && (inclusive ? o.as_of >= after : o.as_of > after))
+    .sort((a, b) => (a.as_of as string).localeCompare(b.as_of as string));
+  return later.length > 0 ? later[0].id : '';
+}
+
+function noSnapshotNote(after: string, inclusive: boolean): string {
+  const rel = inclusive ? 'de' : 'posterior a';
+  return `No hay ningún snapshot con fecha ${rel} ${fmtDate(after)}: crea uno rodando el actual en Mercado.`;
+}
+
 type FormName = 'close' | 'dedesignate' | 'release';
 
 /** Lo que comparten las acciones de la relación: quién está en uso, el snapshot activo y cómo recargar. */
 interface ActionProps {
   hedgeId: number;
   options: SnapshotOption[];
-  activeId: string;
+  /** Snapshot con el que arranca el selector (el primero aceptable); `''` si no hay ninguno. */
+  defaultId: string;
+  /** Nota que se muestra cuando no hay snapshot aceptable. */
+  emptyNote: string;
   /** Este es el formulario que el usuario está usando; los demás borran sus errores. */
   active: boolean;
   onUse(): void;
@@ -117,6 +138,7 @@ function SnapshotSelect({ id, label, options, value, invalid, onChange }: Snapsh
         aria-invalid={invalid ? true : undefined}
         onChange={(e) => onChange(e.target.value)}
       >
+        {value === '' && <option value="">Elige el snapshot</option>}
         {options.map((o) => (
           <option key={o.id} value={o.id}>
             {o.as_of ? `${o.label} · ${o.as_of}` : o.label}
@@ -132,7 +154,7 @@ function CloseForm(p: ActionProps) {
   const [choice, setChoice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const value = choice ?? p.activeId;
+  const value = choice ?? p.defaultId;
 
   useEffect(() => {
     if (!p.active) setError(null);
@@ -141,6 +163,10 @@ function CloseForm(p: ActionProps) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     p.onUse();
+    if (value === '') {
+      setError('Indica el snapshot');
+      return;
+    }
     setError(null);
     p.onBanner(null);
     setBusy(true);
@@ -172,6 +198,7 @@ function CloseForm(p: ActionProps) {
         invalid={error != null}
         onChange={setChoice}
       />
+      {value === '' && <span className="hedge__hint">{p.emptyNote}</span>}
       <FieldError message={error ?? undefined} />
       <button type="submit" className="hedge__btn" disabled={busy}>
         Cerrar periodo
@@ -197,7 +224,7 @@ function DedesignateForm(p: DedesignateFormProps) {
   const [reason, setReason] = useState('');
   const [errors, setErrors] = useState<Partial<Record<DedesignateField, string>>>({});
   const [busy, setBusy] = useState(false);
-  const snapshot = choice ?? p.activeId;
+  const snapshot = choice ?? p.defaultId;
 
   useEffect(() => {
     if (!p.active) setErrors({});
@@ -207,6 +234,7 @@ function DedesignateForm(p: DedesignateFormProps) {
     e.preventDefault();
     p.onUse();
     const local: typeof errors = {};
+    if (snapshot === '') local.snapshot = 'Indica el snapshot';
     if (cause === '') local.cause = 'Indica la causa';
     if (reason.trim() === '') local.reason = 'Indica el motivo';
     if (cause === '' || Object.keys(local).length > 0) {
@@ -247,6 +275,7 @@ function DedesignateForm(p: DedesignateFormProps) {
         invalid={errors.snapshot != null}
         onChange={setChoice}
       />
+      {snapshot === '' && <span className="hedge__hint">{p.emptyNote}</span>}
       <FieldError message={errors.snapshot} />
       {errors.snapshot && snapshot !== p.fallback.id && (
         <button type="button" className="hedge__link-btn" onClick={() => setChoice(p.fallback.id)}>
@@ -299,7 +328,7 @@ interface ReleaseFormProps extends ActionProps {
 type ReleaseField = 'snapshot' | 'cause' | 'amount';
 
 /**
- * Liberación de la reserva congelada de una relación desdesignada. El monto se teclea sin signo (vacío =
+ * Liberación de la reserva congelada de una relación desdesignada o concluida. El monto se teclea sin signo (vacío =
  * todo el saldo); al enviarlo lleva el signo del saldo, que es lo que el backend exige.
  */
 function ReleaseForm(p: ReleaseFormProps) {
@@ -308,7 +337,7 @@ function ReleaseForm(p: ReleaseFormProps) {
   const [amount, setAmount] = useState('');
   const [errors, setErrors] = useState<Partial<Record<ReleaseField, string>>>({});
   const [busy, setBusy] = useState(false);
-  const snapshot = choice ?? p.activeId;
+  const snapshot = choice ?? p.defaultId;
 
   useEffect(() => {
     if (!p.active) setErrors({});
@@ -318,6 +347,7 @@ function ReleaseForm(p: ReleaseFormProps) {
     e.preventDefault();
     p.onUse();
     const local: typeof errors = {};
+    if (snapshot === '') local.snapshot = 'Indica el snapshot';
     if (cause === '') local.cause = 'Indica la causa';
     const typed = amount.trim() === '' ? null : parseNumber(amount);
     if (amount.trim() !== '' && typed == null) local.amount = 'Indica un número';
@@ -362,6 +392,7 @@ function ReleaseForm(p: ReleaseFormProps) {
         invalid={errors.snapshot != null}
         onChange={setChoice}
       />
+      {snapshot === '' && <span className="hedge__hint">{p.emptyNote}</span>}
       <FieldError message={errors.snapshot} />
       <div className="hedge__field">
         <label htmlFor="hedge-release-cause">Causa de la liberación</label>
@@ -674,9 +705,18 @@ export default function HedgeScreen() {
     : [{ id: snapshotId, label: snapshotId, as_of: asOf }, ...snapshots];
   const spec = hedge ? PRODUCT_SPECS[hedge.product] : null;
   const frozen = hedge?.status === 'desdesignada';
-  const canRelease = frozen && hedge != null && Math.abs(hedge.oci_balance) >= HALF_CENT;
+  const concluded = hedge?.status === 'concluida';
+  const pendingReserve = hedge != null && Math.abs(hedge.oci_balance) >= HALF_CENT;
+  // La reserva de una relación desdesignada o concluida se libera a mano; la activa aún se mueve con los cierres.
+  const canRelease = (frozen || concluded) && pendingReserve;
   const lastPeriod = hedge && hedge.periods.length > 0 ? hedge.periods[hedge.periods.length - 1] : null;
   const releases = hedge ? hedge.events.filter((e) => e.type === 'reserve_release') : [];
+  // Cerrar y desdesignar arrancan en el primer snapshot posterior al último cierre (o a la designación); liberar,
+  // en el primero que no sea anterior al último evento.
+  const sinceDate = hedge ? (hedge.last_close ?? hedge.designation_date) : '';
+  const lastEventDate = hedge ? hedge.events.reduce((m, e) => (e.event_date > m ? e.event_date : m), hedge.designation_date) : '';
+  const closeDefault = hedge ? firstSnapshotAfter(options, sinceDate, false) : '';
+  const releaseDefault = hedge ? firstSnapshotAfter(options, lastEventDate, true) : '';
 
   return (
     <section className="hedge">
@@ -736,6 +776,10 @@ export default function HedgeScreen() {
               <dt>Designación</dt>
               <dd className="num">{fmtDate(hedge.designation_date)}</dd>
             </div>
+            <div>
+              <dt>Documentada el</dt>
+              <dd className="num">{fmtDate(hedge.created_at.slice(0, 10))}</dd>
+            </div>
             {frozen && hedge.dedesignation ? (
               <>
                 <div>
@@ -769,6 +813,8 @@ export default function HedgeScreen() {
             )}
           </dl>
 
+          {concluded && pendingReserve && <p className="hedge__meta">{CONCLUDED_NOTE}</p>}
+
           {hedge.warnings.length > 0 && (
             <section className="hedge__block hedge__warnings" aria-label="Avisos de designación">
               <h2>Avisos de designación</h2>
@@ -794,7 +840,8 @@ export default function HedgeScreen() {
                     <CloseForm
                       hedgeId={hedge.id}
                       options={options}
-                      activeId={snapshotId}
+                      defaultId={closeDefault}
+                      emptyNote={noSnapshotNote(sinceDate, false)}
                       active={activeForm === 'close'}
                       onUse={use('close')}
                       onDone={reload}
@@ -803,7 +850,8 @@ export default function HedgeScreen() {
                     <DedesignateForm
                       hedgeId={hedge.id}
                       options={options}
-                      activeId={snapshotId}
+                      defaultId={closeDefault}
+                      emptyNote={noSnapshotNote(sinceDate, false)}
                       active={activeForm === 'dedesignate'}
                       onUse={use('dedesignate')}
                       onDone={reload}
@@ -819,7 +867,8 @@ export default function HedgeScreen() {
                   <ReleaseForm
                     hedgeId={hedge.id}
                     options={options}
-                    activeId={snapshotId}
+                    defaultId={releaseDefault}
+                    emptyNote={noSnapshotNote(lastEventDate, true)}
                     active={activeForm === 'release'}
                     onUse={use('release')}
                     onDone={reload}

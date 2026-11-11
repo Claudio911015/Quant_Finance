@@ -33,8 +33,13 @@ export const VALID_ITEM_KINDS: Record<HedgeType, ItemKind[]> = {
 
 export const HEDGE_STATUS_LABEL: Record<HedgeStatus, string> = {
   activa: 'Activa',
+  concluida: 'Concluida',
   desdesignada: 'Desdesignada',
 };
+
+/** Lo que la relación `concluida` tiene pendiente (mismo texto que el reporte del backend). */
+export const CONCLUDED_NOTE =
+  'Instrumento vencido antes que la partida: la reserva se reciclará a resultados cuando ocurra el flujo cubierto';
 
 export const HEDGE_EVENT_LABEL: Record<HedgeEvent['type'], string> = {
   designation: 'Designación',

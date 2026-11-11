@@ -5,6 +5,8 @@ Las fechas se aceptan como `date` o como texto ISO.
 from datetime import date, timedelta
 from typing import Any, Dict, Union
 
+import pytest
+
 DOC = {
     "risk_management_objective": "Fijar el costo del crédito sindicado",
     "hedged_risk": "Variabilidad de los intereses por TIIE de Fondeo",
@@ -13,6 +15,20 @@ DOC = {
 }
 
 Day = Union[date, str]
+
+# Reloj de las pruebas de coberturas: el alta es el mismo día de la designación por defecto (MX-DEMO, 2026-11-10).
+# Sin esto el aviso `designation_backdated` dependería de la fecha real en que corre la suite.
+CLOCK = "2026-11-10T18:00:00+00:00"
+
+
+@pytest.fixture(autouse=True)
+def frozen_clock(monkeypatch):
+    """Fija `hedges.now_iso` en `CLOCK`; cada módulo de pruebas de coberturas lo importa (autouse).
+
+    Una prueba que necesite otra fecha la cambia con `monkeypatch.setattr("desk.api.hedges.now_iso", ...)`.
+    """
+    monkeypatch.setattr("desk.api.hedges.now_iso", lambda: CLOCK)
+    return CLOCK
 
 
 def _iso(day: Day) -> str:

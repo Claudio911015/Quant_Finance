@@ -39,7 +39,7 @@ HEDGE_EVENT_TYPES = ("designation", "period_close", "dedesignation", "reserve_re
 # IFRS 9 6.5.6: no hay desdesignación voluntaria sin causa; 6.5.12: qué pasa con la reserva congelada.
 DEDESIGNATION_CAUSES = ("instrument_ended", "criteria_not_met", "risk_objective_changed")
 RELEASE_CAUSES = ("flow_occurred", "flow_no_longer_expected")
-STATUS_ACTIVE, STATUS_DEDESIGNATED = "activa", "desdesignada"
+STATUS_ACTIVE, STATUS_CONCLUDED, STATUS_DEDESIGNATED = "activa", "concluida", "desdesignada"
 DOC_FIELDS = ("risk_management_objective", "hedged_risk", "effectiveness_method", "ineffectiveness_sources")
 NOTICE = "Asientos sugeridos. Metodología pendiente de revisión por un contador con experiencia en IFRS 9"
 ACC_DERIVATIVE = "Derivado (valor razonable)"
@@ -54,6 +54,8 @@ MAIN_RESULT_ACCOUNT = {"cash_flow": ACC_INEFFECTIVENESS, "fair_value": ACC_FV_RE
 FAIR_VALUE_LEVEL = 2
 FAIR_VALUE_BASIS = "Nivel 2: insumos observables (curvas, tipo de cambio y volatilidades del snapshot)"
 FROZEN_NOTE = "Reserva congelada al desdesignar: se reciclará a resultados cuando ocurra el flujo cubierto"
+CONCLUDED_NOTE = "Instrumento vencido antes que la partida: la reserva se reciclará a resultados cuando ocurra el flujo cubierto"
+BACKDATED_DAYS = 1  # días de holgura entre la fecha de designación y la de alta antes de avisar (F5)
 
 _TERM_DATE_KEYS = ("start_date", "maturity_date", "date")
 
@@ -152,9 +154,12 @@ def load_relationships(conn: sqlite3.Connection, trade_id: Optional[int] = None)
 
 
 def status(rel: Dict[str, Any]) -> str:
-    """`desdesignada` si existe un evento `dedesignation`, si no `activa`."""
+    """`desdesignada` si existe un evento `dedesignation`; `concluida` si el último cierre fue el final
+    (la operación venció: el instrumento terminó y ya no admite más cierres, F2); si no, `activa`."""
     if any(e["type"] == "dedesignation" for e in rel["events"]):
         return STATUS_DEDESIGNATED
+    if rel["periods"] and rel["periods"][-1]["result"].get("trade_status") == "vencida":
+        return STATUS_CONCLUDED
     return STATUS_ACTIVE
 
 
@@ -178,6 +183,12 @@ def last_close(rel: Dict[str, Any]) -> Optional[date]:
 def last_event_date(rel: Dict[str, Any]) -> date:
     """Fecha del último evento de la relación (siempre hay al menos la designación)."""
     return max(e["event_date"] for e in rel["events"])
+
+
+def first_flow_date(rel: Dict[str, Any]) -> date:
+    """Primera fecha de flujo de la partida cubierta: el inicio del crédito o la fecha del flujo pronosticado (F4)."""
+    terms = rel["item_terms"]
+    return terms["date"] if rel["item_kind"] == "forecast_fx" else terms["start_date"]
 
 
 # ------------------------------------------------------------------------------ forma HTTP
@@ -424,9 +435,13 @@ def _in_force(rel: Dict[str, Any], on: date) -> bool:
 
 
 def _designation_warnings(
-    rel: Dict[str, Any], trade: Dict[str, Any], v_inst: Dict[str, Any], mkt: Any, fixings: Any
+    rel: Dict[str, Any], trade: Dict[str, Any], v_inst: Dict[str, Any], mkt: Any, fixings: Any, documented_at: str
 ) -> List[Dict[str, str]]:
-    """Avisos `{code, message}` al designar (C6). No bloquean: el contador decide con ellos a la vista."""
+    """Avisos `{code, message}` al designar (C6, F5). No bloquean: el contador decide con ellos a la vista.
+
+    `documented_at` es la marca de tiempo del alta (`created_at`): si es más de un día posterior a la
+    fecha de designación, la documentación no fue contemporánea (IFRS 9 6.4.1(b)) y se avisa.
+    """
     from desk.api import hedge_effectiveness  # import tardío: hedge_effectiveness importa este módulo
 
     out = []  # type: List[Dict[str, str]]
@@ -453,6 +468,16 @@ def _designation_warnings(
                 "code": "forecast_date_weekend",
                 "message": "La fecha del flujo pronosticado (%s) es sábado o domingo: se liquidará con el spot "
                 "del snapshot, sin FIX publicado" % rel["item_terms"]["date"].isoformat(),
+            }
+        )
+    late = (date.fromisoformat(documented_at[:10]) - rel["designation_date"]).days
+    if late > BACKDATED_DAYS:
+        out.append(
+            {
+                "code": "designation_backdated",
+                "message": "La cobertura se documenta el %s, %d días después de su fecha de designación (%s): "
+                "IFRS 9 6.4.1(b) pide la documentación formal al inicio de la relación y el sistema no puede "
+                "comprobar que existiera antes" % (documented_at[:10], late, rel["designation_date"].isoformat()),
             }
         )
     return out
@@ -531,12 +556,13 @@ def create_hedge(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
             "pv_mxn"
         ]
     )
+    documented_at = now_iso()
     warnings = _designation_warnings(
         {
             "fraction": fraction, "hedge_ratio": hedge_ratio, "item_kind": item_kind, "item_terms": item_terms,
-            "designation": {"hypothetical": hypothetical},
+            "designation_date": designation_date, "designation": {"hypothetical": hypothetical},
         },
-        trade, v_inst, mkt, fixings,
+        trade, v_inst, mkt, fixings, documented_at,
     )
     snapshot_row = conn.execute("SELECT data FROM snapshots WHERE id = ?", (snapshot_id,)).fetchone()
     sources = market.sources_of(json.loads(snapshot_row["data"]))
@@ -545,7 +571,7 @@ def create_hedge(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
         " designation_date, designation_snapshot, documentation, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             trade_id, fraction, hedge_type, item_kind, json.dumps(_terms_out(item_terms)), hedge_ratio,
-            designation_date.isoformat(), snapshot_id, json.dumps(documentation), now_iso(),
+            designation_date.isoformat(), snapshot_id, json.dumps(documentation), documented_at,
         ),
     )
     insert_event(

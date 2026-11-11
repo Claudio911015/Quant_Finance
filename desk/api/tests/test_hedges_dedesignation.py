@@ -3,7 +3,10 @@ import json
 import sqlite3
 from datetime import date, timedelta
 
+import pytest
+
 from desk.api.tests.hedge_fixture import designate, load_fixings, market_forward, par_irs, roll
+from desk.api.tests.hedge_fixture import frozen_clock  # noqa: F401  (autouse: reloj fijo)
 
 D0 = date(2026, 11, 10)
 LOAN_END = D0 + timedelta(days=364)
@@ -42,7 +45,7 @@ def _close(client, hid, days):
     return r.get_json()
 
 
-def _dedesignate(client, hid, snapshot, reason="Prepago del crédito", cause="instrument_ended"):
+def _dedesignate(client, hid, snapshot, reason="Prepago del crédito", cause="criteria_not_met"):
     return client.post("/api/hedges/%d/dedesignate" % hid, json={"snapshot": snapshot, "reason": reason, "cause": cause})
 
 
@@ -79,14 +82,14 @@ def test_dedesignating_with_a_later_snapshot_closes_a_period_first_and_freezes_t
     when = (D0 + timedelta(days=40)).isoformat()
     assert detail["status"] == "desdesignada"
     assert detail["dedesignation"] == {
-        "date": when, "reason": "Prepago del crédito", "cause": "instrument_ended", "snapshot": sid,
+        "date": when, "reason": "Prepago del crédito", "cause": "criteria_not_met", "snapshot": sid,
         "frozen_oci": last["oci"],
     }
     assert detail["oci_balance"] == last["oci"] and detail["last_close"] == when
     assert [e["type"] for e in detail["events"]] == ["designation", "period_close", "period_close", "dedesignation"]
     event = detail["events"][-1]
     assert event["event_date"] == when
-    assert event["data"] == {"reason": "Prepago del crédito", "cause": "instrument_ended", "snapshot": sid, "frozen_oci": last["oci"]}
+    assert event["data"] == {"reason": "Prepago del crédito", "cause": "criteria_not_met", "snapshot": sid, "frozen_oci": last["oci"]}
     assert _detail(client, hid) == detail
 
 
@@ -131,23 +134,95 @@ def test_dedesignating_with_a_later_snapshot_and_no_closes_makes_the_first_close
     assert detail["dedesignation"]["frozen_oci"] == detail["periods"][0]["oci"]
 
 
-def test_the_closing_done_by_the_dedesignation_follows_the_close_rules(app, client):
+def test_a_terminated_swap_cannot_close_a_period_and_points_to_the_dedesignation(app, client):
     trade, hid = _hedge(client)
     sid = _snapshot(client, 35)
-    r = client.post(
-        "/api/trades/%d/events" % trade["id"],
-        json={"type": "termination", "event_date": "2026-12-01", "data": {"amount": 0.0}},
-    )
-    assert r.status_code == 201, r.get_json()
+    assert _terminate(client, trade["id"], "2026-12-01", 0.0).status_code == 201
     before = _counts(app)
 
-    r = _dedesignate(client, hid, sid)
+    r = client.post("/api/hedges/%d/periods" % hid, json={"snapshot": sid})
 
     assert r.status_code == 409 and r.get_json()["field"] == "snapshot"
-    assert "ya no está viva" in r.get_json()["error"] and "snapshot del último cierre" in r.get_json()["error"]
+    assert "ya no está viva" in r.get_json()["error"] and "desdesigna" in r.get_json()["error"]
     assert _counts(app) == before and _detail(client, hid)["status"] == "activa"
-    # Siempre queda el camino de desdesignar con el snapshot de la designación (o del último cierre).
-    assert _dedesignate(client, hid, "MX-DEMO").status_code == 201
+
+
+def _terminate(client, trade_id, day, amount):
+    return client.post(
+        "/api/trades/%d/events" % trade_id,
+        json={"type": "termination", "event_date": day, "data": {"amount": amount}},
+    )
+
+
+def test_dedesignating_a_terminated_swap_measures_until_the_termination_and_books_the_payment(client):
+    """F3 (N-2): swap terminado con pago de 250 000; la medición final incluye el pago y coincide con `/api/pnl`."""
+    trade = par_irs(client, "TIIE-F", NOTIONAL, D0, LOAN_END)
+    hid = designate(client, trade["id"], "floating_loan", _loan(), fraction=0.5).get_json()["id"]
+    first = _close(client, hid, 35)
+    sid = _snapshot(client, 70)
+    ended = (D0 + timedelta(days=70)).isoformat()
+    assert _terminate(client, trade["id"], ended, 250000.0).status_code == 201
+
+    r = _dedesignate(client, hid, sid, reason="Terminación anticipada", cause="instrument_ended")
+
+    assert r.status_code == 201, r.get_json()
+    detail = r.get_json()
+    final = detail["periods"][-1]
+    assert [p["snapshot"] for p in detail["periods"]] == ["D35", sid]
+    assert final["trade_status"] == "terminada" and final["pv_inst"] == 0
+    assert final["inst_cum"] == pytest.approx(-0.5 * detail["designation"]["pv_inst"], abs=1e-9)
+    transfer = [f for f in final["settled_flows"] if f["kind"] == "transfer"]
+    assert [f["amount_mxn"] for f in transfer] == [250000.0]
+    assert final["settled_period"] == pytest.approx(0.5 * sum(f["amount_mxn"] for f in final["settled_flows"]), abs=1e-6)
+    assert final["settled_period"] > 0.5 * 250000.0  # el pago y el cupón del día
+    pnl = client.get("/api/pnl?from=D35&to=%s" % sid).get_json()
+    row = next(x for x in pnl["rows"] if x["id"] == trade["id"])
+    assert final["inst_total"] - first["inst_total"] == pytest.approx(0.5 * row["pnl"], abs=1e-6)
+    assert final["instrument_pnl"] == pytest.approx(0.5 * row["pnl"], abs=1e-6)
+    assert abs(final["identity_residual"]) <= 1e-6
+    debit = sum(round(e["debit"] * 100) for e in final["entries"])
+    assert debit == sum(round(e["credit"] * 100) for e in final["entries"])
+    cash = [e for e in final["entries"] if e["account"] == "Efectivo"]
+    assert cash and cash[0]["debit"] == pytest.approx(final["settled_period"], abs=0.005)
+    assert detail["status"] == "desdesignada" and detail["dedesignation"]["cause"] == "instrument_ended"
+    assert detail["dedesignation"]["frozen_oci"] == final["oci"] == detail["oci_balance"]
+    assert detail["dedesignation"]["date"] == ended
+
+
+def test_the_cause_must_agree_with_the_state_of_the_trade(app, client):
+    """F4: `instrument_ended` exige que la operación no esté viva; las otras causas, que sí lo esté."""
+    trade, hid = _hedge(client)
+    live = _snapshot(client, 35)
+    before = _counts(app)
+    r = _dedesignate(client, hid, live, cause="instrument_ended")
+    assert r.status_code == 409 and r.get_json()["field"] == "cause" and "sigue viva" in r.get_json()["error"]
+    assert _counts(app) == before and _detail(client, hid)["status"] == "activa"
+
+    assert _terminate(client, trade["id"], "2026-12-20", 0.0).status_code == 201
+    later = _snapshot(client, 40)
+    before = _counts(app)
+    for cause in ("criteria_not_met", "risk_objective_changed"):
+        r = _dedesignate(client, hid, later, cause=cause)
+        assert r.status_code == 409 and r.get_json()["field"] == "cause", cause
+        assert "ya no está viva" in r.get_json()["error"]
+    assert _counts(app) == before and _detail(client, hid)["status"] == "activa"
+    # La fecha de la desdesignación es la del snapshot: antes de la terminación la operación aún estaba viva.
+    assert _dedesignate(client, hid, live, cause="instrument_ended").status_code == 409
+    assert _dedesignate(client, hid, live, cause="criteria_not_met").status_code == 201
+
+
+def test_a_matured_instrument_only_admits_the_instrument_ended_cause(app, client):
+    trade = market_forward(client, "buy", 10e6, FWD_END)
+    r = designate(client, trade["id"], "forecast_fx", {"amount_usd": 10e6, "date": FWD_END.isoformat(), "side": "buy_usd"})
+    hid = r.get_json()["id"]
+    roll(client, "MX-DEMO", "F1", 25)
+    before = _counts(app)
+    r = _dedesignate(client, hid, "F1", cause="criteria_not_met")
+    assert r.status_code == 409 and r.get_json()["field"] == "cause"
+    assert _counts(app) == before
+    r = _dedesignate(client, hid, "F1", cause="instrument_ended")
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["periods"][-1]["trade_status"] == "vencida"
 
 
 def test_a_later_snapshot_after_the_final_close_cannot_close_again(app, client):
@@ -160,11 +235,11 @@ def test_a_later_snapshot_after_the_final_close_cannot_close_again(app, client):
     assert client.post("/api/hedges/%d/periods" % hid, json={"snapshot": "F1"}).status_code == 201
     before = _counts(app)
 
-    r = _dedesignate(client, hid, "F2")
+    r = _dedesignate(client, hid, "F2", cause="instrument_ended")
     assert r.status_code == 409 and r.get_json()["field"] == "snapshot"
     assert _counts(app) == before
 
-    detail = _dedesignate(client, hid, "F1").get_json()  # con el snapshot del cierre final sí
+    detail = _dedesignate(client, hid, "F1", cause="instrument_ended").get_json()  # con el snapshot del cierre final sí
     assert detail["status"] == "desdesignada" and detail["dedesignation"]["frozen_oci"] == 0.0
 
 
