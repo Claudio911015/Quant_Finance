@@ -1,9 +1,10 @@
+import type { ReactNode } from 'react';
 import './MethodologyScreen.css';
 
 interface Section {
   id: string;
   title: string;
-  items: { label: string; text: string }[];
+  items: { label: string; text: ReactNode }[];
 }
 
 const PRODUCT_SECTIONS: Section[] = [
@@ -101,10 +102,66 @@ const GENERAL_SECTIONS: Section[] = [
       },
     ],
   },
+  {
+    id: 'fuentes',
+    title: 'Fuentes de datos',
+    items: [
+      {
+        label: 'MKT-LIVE',
+        text: 'Construido de MarketDataFeed (SOFR de FRBNY, Treasuries par de Treasury.gov) y FRED. Es de solo lectura; cada Actualizar datos lo reescribe por completo. MX-DEMO no cambia.',
+      },
+      {
+        label: 'Curva SOFR',
+        text: (
+          <>
+            Aproximada con Treasuries, sin el spread entre swaps SOFR y Treasuries. Cifras puntuales
+            de 2025, no actuales: swaps SOFR por debajo de los Treasuries −25 pb a 2 años, −56 pb a
+            10 años y −87 pb a 30 años (
+            <a href="https://www.tradition.com/media/365113/mml4_tradition.pdf" target="_blank" rel="noreferrer">
+              Tradition, julio de 2025
+            </a>
+            ); −26 pb a 10 años (
+            <a
+              href="https://www.advisorperspectives.com/articles/2025/05/05/interest-rate-swaps-plumbing-financial-system"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Advisor Perspectives, mayo de 2025
+            </a>
+            ). Para el porqué de que sean negativos, véase{' '}
+            <a href="https://www.bis.org/publ/qtrpdf/r_qt2412y.htm" target="_blank" rel="noreferrer">
+              BIS
+            </a>
+            . La curva aproximada con Treasuries probablemente sobreestima las tasas de swap en esas
+            magnitudes; el efecto no se midió aquí.
+          </>
+        ),
+      },
+      {
+        label: 'Conversión',
+        text: 'Con y decimal: hasta 1 año, y·360/365; a más de 1 año, ((1+y/2)²−1)·360/365; 1D = SOFR overnight tal cual.',
+      },
+      {
+        label: 'Sin datos libres',
+        text: 'TIIE-F, superficie de volatilidad, Hull-White, volatilidad diaria de TIIE-F y correlaciones son sintéticas: no hay datos libres (Banxico exige token; los swaps los venden proveedores).',
+      },
+      {
+        label: 'Spot',
+        text: 'DEXMXUS de FRED = mediodía de Nueva York, no el FIX de Banxico.',
+      },
+      {
+        label: 'Volatilidades diarias',
+        text: 'SOFR = cambio diario del rendimiento par de 5Y en pb; USDMXN = rendimiento logarítmico entre observaciones válidas consecutivas. Hasta 250 cambios diarios, desviación estándar muestral; con menos se usan los disponibles (el rótulo dice cuántos) y con menos de 60 no se construye el snapshot. Por eso la procedencia de Volatilidades de factores sale como Mixta.',
+      },
+    ],
+  },
 ];
 
 const LIMITS: { label: string; text: string }[] = [
-  { label: 'Datos', text: 'Sintéticos.' },
+  {
+    label: 'Datos',
+    text: 'Mixtos en MKT-LIVE: curva SOFR aproximada, spot y volatilidades de SOFR y USDMXN de fuentes reales; el resto sintético. Ver Fuentes de datos.',
+  },
   { label: 'Alcance', text: 'Sin XVA. Un solo usuario.' },
   {
     label: 'Fechas',

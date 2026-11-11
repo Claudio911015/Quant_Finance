@@ -34,12 +34,26 @@ Para usar otro intérprete de Python: `QF_PYTHON=/ruta/a/python ./desk/run.sh`.
 - Base SQLite: `desk/data/desk.db` (no versionada; se crea y siembra al arrancar).
 - `MX-DEMO` es una cartera sintética generada por el seed; no representa posiciones reales.
 
+## Datos de mercado reales
+
+- `MKT-LIVE` se construye desde la base de MarketDataFeed (SOFR y Treasuries) y FRED (DEXMXUS). Se actualiza con el botón "Actualizar datos" de la pantalla Mercado o con `POST /api/market/refresh`. Es de solo lectura y cada actualización lo reescribe por completo. `MX-DEMO` no cambia.
+- Rutas por omisión (sobrescribibles con variables de entorno):
+  - `MDF_DB`: `~/Git/MarketDataFeed/build/sofr.db`
+  - `MDF_FETCH`: `~/Git/MarketDataFeed/build/examples/fetch_sofr`
+- Actualizar la base a mano:
+
+  ```bash
+  ~/Git/MarketDataFeed/build/examples/fetch_sofr --latest --treasury --db ~/Git/MarketDataFeed/build/sofr.db
+  ```
+
+- Sigue sintético: TIIE-F, superficie de volatilidad, parámetros Hull-White y correlaciones. El detalle de fuentes está en la pantalla Metodología.
+
 ## Tests
 
 Desde la raíz del repo:
 
 ```bash
-# C++ (347 tests)
+# C++ (396 tests)
 cmake --build build -j4 2>&1 | tail -3 && cd build && ctest --output-on-failure 2>&1 | tail -3; cd ..
 
 # Bindings Python existentes
