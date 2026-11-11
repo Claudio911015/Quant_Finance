@@ -23,11 +23,6 @@ DESIGNATION = {
     "pv_inst": 0.0, "pv_hypo": 0.0, "hypothetical": HYPO,
 }
 
-# Rutas que responden 501 mientras sus módulos sean stub: quien implemente una ruta borra solo su fila.
-STUB_ROUTES = [
-    ("get", "/api/hedges/1/report"),
-]
-
 
 def _sql(app, sql, args=()):
     conn = sqlite3.connect(app.config["DESK_DB"])
@@ -211,13 +206,6 @@ def test_trade_id_filter_must_be_an_integer(client):
     for bad in ("abc", "1.5", "99999999999999999999"):
         r = client.get("/api/hedges?trade_id=%s" % bad)
         assert r.status_code == 400 and r.get_json()["field"] == "trade_id"
-
-
-@pytest.mark.parametrize("verb,path", STUB_ROUTES)
-def test_unimplemented_routes_answer_501_json(client, verb, path):
-    r = getattr(client, verb)(path, json={})
-    assert r.status_code == 501
-    assert r.get_json() == {"error": "No implementado", "field": None}
 
 
 def test_effectiveness_requires_the_snapshot_parameter(client):
