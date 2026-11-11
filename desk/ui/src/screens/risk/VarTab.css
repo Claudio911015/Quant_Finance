@@ -1,0 +1,115 @@
+/* Corte 6: pestaña VaR. Las clases comunes (.radv-*) vienen de risk-adv.css. */
+.vartab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.vartab-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.vartab-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 140px;
+  max-width: 220px;
+}
+
+.vartab-field label {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.vartab-field input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.vartab-field input:hover {
+  border-color: var(--text-dim);
+}
+
+.vartab-field input[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.vartab-field__error {
+  color: var(--neg);
+  font-size: var(--fs-xs);
+}
+
+/* Alineado con la base de los campos (la etiqueta ocupa una línea encima). */
+.vartab-submit {
+  align-self: flex-end;
+  height: 28px;
+  padding: 0 var(--space-4);
+}
+
+.vartab .is-loading {
+  opacity: 0.6;
+  transition: opacity 120ms;
+}
+
+.vartab-caption {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.vartab-value {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  text-align: left;
+}
+
+.vartab-sub {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.vartab-subtitle {
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.vartab-history {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.vartab-history dt {
+  color: var(--text-dim);
+}
+
+.vartab-history dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.vartab-foot {
+  margin: var(--space-2) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.vartab-diff {
+  align-self: flex-start;
+}
