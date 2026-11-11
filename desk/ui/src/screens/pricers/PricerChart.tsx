@@ -50,8 +50,8 @@ export function payoffSeries(
 }
 
 function buildOption(data: ChartData): EChartsCoreOption | null {
-  const text = token('--text-dim', '#8b95a5');
-  const line = token('--border', '#262d38');
+  const text = token('--text-dim', '#a59e90');
+  const line = token('--border', '#332f29');
   const pos = token('--pos', '#3fb68b');
   const neg = token('--neg', '#e5534b');
   const accent = token('--accent', '#4c9aff');
@@ -62,12 +62,13 @@ function buildOption(data: ChartData): EChartsCoreOption | null {
   };
   const base = {
     animation: false,
+    textStyle: { fontFamily: token('--font-sans', 'sans-serif') },
     grid: { left: 8, right: 16, top: 16, bottom: 8, containLabel: true },
     tooltip: {
       trigger: 'axis' as const,
-      backgroundColor: token('--bg-elev', '#161b22'),
-      borderColor: token('--border-strong', '#354050'),
-      textStyle: { color: token('--text', '#d8dee9'), fontSize: 12 },
+      backgroundColor: token('--bg-elev', '#221f1b'),
+      borderColor: token('--border-strong', '#4a453c'),
+      textStyle: { color: token('--text', '#e9e3d8'), fontSize: 12 },
     },
   };
 

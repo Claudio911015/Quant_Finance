@@ -100,9 +100,7 @@
 .market__hw thead th {
   color: var(--text-dim);
   font-size: var(--fs-xs);
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
 .market__hw th.num,
@@ -112,9 +110,4 @@
 
 .market__hw tbody th {
   font-weight: 500;
-}
-
-/* a y σ son símbolos: en mayúsculas dirían otra cosa (A, Σ) */
-.market__hw thead th.num {
-  text-transform: none;
 }

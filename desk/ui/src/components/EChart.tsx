@@ -51,7 +51,11 @@ export function EChart({ option, height = 260, ariaLabel }: EChartProps) {
   }, []);
 
   useEffect(() => {
-    chart.current?.setOption(option, { notMerge: true });
+    // Canvas no hereda la fuente de la página: se fija la de la interfaz para los ejes y leyendas.
+    chart.current?.setOption(
+      { textStyle: { fontFamily: cssColor('--font-sans') }, ...option },
+      { notMerge: true },
+    );
   }, [option]);
 
   return <div ref={host} role="img" aria-label={ariaLabel} style={{ width: '100%', height }} />;

@@ -23,9 +23,9 @@
 }
 
 .shell__brand-name {
+  font-family: var(--font-display);
   font-size: var(--fs-lg);
   font-weight: 600;
-  letter-spacing: 0.01em;
 }
 
 .shell__nav {
@@ -37,9 +37,7 @@
 .shell__caption {
   color: var(--text-dim);
   font-size: var(--fs-xs);
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
 .shell__nav > .shell__caption {
@@ -135,8 +133,6 @@
   color: var(--warn);
   font-size: var(--fs-xs);
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   white-space: nowrap;
   cursor: help;
 }
@@ -183,7 +179,6 @@
   border-radius: 3px;
   background: var(--bg-elev);
   color: var(--text-dim);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 

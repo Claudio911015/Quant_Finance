@@ -32,9 +32,7 @@
 .risk-caption {
   color: var(--text-dim);
   font-size: var(--fs-xs);
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
 .risk-foot {
@@ -133,7 +131,6 @@
   background: var(--bg);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
