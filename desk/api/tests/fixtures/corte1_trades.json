@@ -1,0 +1,61 @@
+{
+  "as_of": "2026-11-10",
+  "trades": [
+    {
+      "id": 1,
+      "product": "irs",
+      "counterparty": "Banco Alfa (sint\u00e9tico)",
+      "params": "{\"curve\": \"TIIE-F\", \"side\": \"payer\", \"notional\": 500000000.0, \"periods\": 26, \"fixed_rate\": 0.068}",
+      "created_at": "2026-11-11T12:25:28+00:00",
+      "pv_mxn": -942898.4794959975
+    },
+    {
+      "id": 2,
+      "product": "irs",
+      "counterparty": "Banco Beta (sint\u00e9tico)",
+      "params": "{\"curve\": \"TIIE-F\", \"side\": \"receiver\", \"notional\": 250000000.0, \"periods\": 65, \"fixed_rate\": 0.0695}",
+      "created_at": "2026-11-11T12:25:28+00:00",
+      "pv_mxn": 1602628.727023759
+    },
+    {
+      "id": 3,
+      "product": "irs",
+      "counterparty": "Banco Gamma (sint\u00e9tico)",
+      "params": "{\"curve\": \"SOFR\", \"side\": \"payer\", \"notional\": 20000000.0, \"periods\": 5, \"fixed_rate\": 0.036}",
+      "created_at": "2026-11-11T12:25:28+00:00",
+      "pv_mxn": -849246.6517847024
+    },
+    {
+      "id": 4,
+      "product": "fx_forward",
+      "counterparty": "Banco Alfa (sint\u00e9tico)",
+      "params": "{\"side\": \"buy\", \"notional_usd\": 10000000.0, \"strike\": 19.05, \"days\": 182}",
+      "created_at": "2026-11-11T12:25:28+00:00",
+      "pv_mxn": -1500768.4377872366
+    },
+    {
+      "id": 5,
+      "product": "fx_forward",
+      "counterparty": "Banco Beta (sint\u00e9tico)",
+      "params": "{\"side\": \"sell\", \"notional_usd\": 3000000.0, \"strike\": 18.85, \"days\": 91}",
+      "created_at": "2026-11-11T12:25:28+00:00",
+      "pv_mxn": 303764.6224301369
+    },
+    {
+      "id": 6,
+      "product": "fx_option",
+      "counterparty": "Banco Gamma (sint\u00e9tico)",
+      "params": "{\"side\": \"buy\", \"option_type\": \"call\", \"notional_usd\": 5000000.0, \"strike\": 19.0, \"days\": 91}",
+      "created_at": "2026-11-11T12:25:28+00:00",
+      "pv_mxn": 1665578.5527745958
+    },
+    {
+      "id": 7,
+      "product": "cap_floor",
+      "counterparty": "Banco Alfa (sint\u00e9tico)",
+      "params": "{\"curve\": \"TIIE-F\", \"cap_type\": \"cap\", \"notional\": 300000000.0, \"strike\": 0.075, \"periods\": 39}",
+      "created_at": "2026-11-11T12:25:28+00:00",
+      "pv_mxn": 1257727.3902222966
+    }
+  ]
+}
