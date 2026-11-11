@@ -18,8 +18,14 @@ import sqlite3
 from datetime import date
 from typing import Any, Dict, List, Optional
 
+from desk.api import fixings as fixing_store
+from desk.api import lifecycle, market, portfolio
+from desk.api import valuation as trade_valuation
 from desk.api.db import now_iso
 from desk.api.errors import ApiError
+from desk.api.market import CURVES
+from desk.api.pricing import PRODUCTS
+from desk.api.validation import MAX_AMOUNT, choice, integer, iso_date, number, text
 
 HEDGE_TYPES = ("cash_flow", "fair_value")
 ITEM_KINDS = ("floating_loan", "fixed_loan", "forecast_fx")
@@ -300,21 +306,181 @@ def hypothetical_trade(rel: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# ------------------------------------------------------------------------------ stubs
+# ------------------------------------------------------------------------------ designación
+
+_MAX_ID = 2 ** 63 - 1  # mayor entero de SQLite
+
 
 def build_hypothetical(
     item_kind: str, item_terms: Dict[str, Any], designation_date: date, mkt: Any, fixings: Any
 ) -> Dict[str, Any]:
     """Derivado hipotético `{"product","trade_date","start_date","maturity_date" (ISO),"params"}`
-    a la par en el snapshot de designación (T2)."""
-    raise NotImplementedError("build_hypothetical")
+    a la par en el snapshot de designación.
+
+    `item_terms` en su forma interna (fechas como `date`). Un crédito usa sus fechas tal cual y la
+    tasa par del swap con ellas; un flujo pronosticado, el forward de mercado a su fecha.
+    """
+    if item_kind == "forecast_fx":
+        forward_product = PRODUCTS["fx_forward"]
+        quote = forward_product.validate(
+            {
+                "side": "buy" if item_terms["side"] == "buy_usd" else "sell",
+                "notional_usd": item_terms["amount_usd"],
+                "strike": 1.0,
+                "days": (item_terms["date"] - designation_date).days,
+            }
+        )
+        forward = forward_product.price(quote, mkt)["risk"]["forward"]
+        return {
+            "product": "fx_forward",
+            "trade_date": designation_date.isoformat(),
+            "start_date": designation_date.isoformat(),
+            "maturity_date": item_terms["date"].isoformat(),
+            "params": forward_product.validate({**quote, "strike": float(forward)}),
+        }
+    start, maturity = item_terms["start_date"], item_terms["maturity_date"]
+    if item_kind == "floating_loan":
+        side = "payer" if item_terms["side"] == "pays_floating" else "receiver"
+    else:  # fixed_loan: el derivado hipotético recibe la fija que la deuda paga
+        side = "receiver" if item_terms["side"] == "pays_fixed" else "payer"
+    index = item_terms["index"]
+    params = {
+        "curve": index,
+        "side": side,
+        "notional": item_terms["notional"],
+        "periods": max(1, int(round((maturity - start).days / CURVES[index]["period_days"]))),
+        "fixed_rate": 0.0,
+    }
+    hypothetical = {
+        "id": None, "product": "irs", "counterparty": "Hipotético", "trade_date": designation_date,
+        "start_date": start, "maturity_date": maturity, "params": params, "created_at": None, "events": [],
+    }
+    swap = trade_valuation.aged_swap(hypothetical, params, mkt, fixings, [])
+    try:
+        params = PRODUCTS["irs"].validate({**params, "fixed_rate": float(swap.par_rate(mkt.env))})
+    except ApiError as e:
+        raise ApiError(400, "'maturity_date' fuera de rango: %s" % e.error, "maturity_date")
+    return {
+        "product": "irs",
+        "trade_date": designation_date.isoformat(),
+        "start_date": start.isoformat(),
+        "maturity_date": maturity.isoformat(),
+        "params": params,
+    }
+
+
+def _item_terms(item_kind: str, raw: Any, designation_date: date) -> Dict[str, Any]:
+    """Términos de la partida cubierta normalizados (fechas como `date`); claves desconocidas se ignoran."""
+    if not isinstance(raw, dict):
+        raise ApiError(400, "'item_terms' debe ser un objeto con los términos de la partida cubierta", "item_terms")
+    if item_kind == "forecast_fx":
+        amount = number(raw, "amount_usd", gt=0, le=MAX_AMOUNT)
+        day = iso_date(raw, "date")
+        if day <= designation_date:
+            raise ApiError(400, "'date' debe ser posterior a la fecha de designación", "date")
+        return {"amount_usd": amount, "date": day, "side": choice(raw, "side", FX_SIDES)}
+    index = choice(raw, "index", LOAN_INDICES)
+    notional = number(raw, "notional", gt=0, le=MAX_AMOUNT)
+    start = iso_date(raw, "start_date")
+    maturity = iso_date(raw, "maturity_date")
+    if maturity <= start:
+        raise ApiError(400, "'maturity_date' debe ser posterior a 'start_date'", "maturity_date")
+    if maturity <= designation_date:
+        raise ApiError(400, "'maturity_date' debe ser posterior a la fecha de designación", "maturity_date")
+    side = choice(raw, "side", LOAN_SIDES if item_kind == "floating_loan" else FIXED_LOAN_SIDES)
+    return {"index": index, "notional": notional, "start_date": start, "maturity_date": maturity, "side": side}
+
+
+def _documentation(raw: Any) -> Dict[str, str]:
+    if not isinstance(raw, dict):
+        raise ApiError(400, "'documentation' debe ser un objeto con %s" % ", ".join(DOC_FIELDS), "documentation")
+    return {name: text(raw, name) for name in DOC_FIELDS}
 
 
 def create_hedge(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Valida el cuerpo de `POST /api/hedges`, guarda relación y evento `designation` y devuelve
-    el detalle (T2)."""
-    raise NotImplementedError("create_hedge")
+    """Valida el cuerpo de `POST /api/hedges` en el orden del contrato, guarda la relación y el
+    evento `designation` (con el derivado hipotético de D3) y devuelve el detalle.
 
+    Quien llama hace `commit`; nada se inserta si algo falla.
+    """
+    trade_id = integer(body, "trade_id", ge=1, le=_MAX_ID)
+    try:
+        trade = portfolio.get_trade(conn, trade_id)
+    except ApiError:
+        raise ApiError(404, "Operación inexistente: %s" % trade_id, "trade_id")
+    snapshot_id = text(body, "snapshot")
+    mkt = market.load_context(conn, snapshot_id)
+    designation_date = iso_date(body, "designation_date", required=False)
+    if designation_date is None:
+        designation_date = mkt.as_of
+    elif designation_date != mkt.as_of:
+        raise ApiError(
+            400, "'designation_date' debe ser el as_of del snapshot (%s)" % mkt.as_of.isoformat(), "designation_date"
+        )
+    hedge_type = choice(body, "hedge_type", HEDGE_TYPES)
+    item_kind = choice(body, "item_kind", ITEM_KINDS)
+    item_terms = _item_terms(item_kind, body.get("item_terms"), designation_date)
+    if item_kind not in VALID_COMBINATIONS[hedge_type]:
+        raise ApiError(
+            400, "Una cobertura de %s no admite la partida %s" % (hedge_type, item_kind), "hedge_type"
+        )
+    if trade["product"] != INSTRUMENT_FOR[item_kind]:
+        raise ApiError(
+            400, "La partida %s se cubre con un %s, no con un %s" % (item_kind, INSTRUMENT_FOR[item_kind], trade["product"]),
+            "item_kind",
+        )
+    if item_kind != "forecast_fx" and (trade["params"] or {}).get("curve") != item_terms["index"]:
+        raise ApiError(400, "La curva de la operación no coincide con el índice de la partida cubierta", "index")
+    fraction = number(body, "fraction", gt=0, le=1)
+    hedge_ratio = number(body, "hedge_ratio", gt=0, le=MAX_AMOUNT, required=False, default=1.0)
+    documentation = _documentation(body.get("documentation"))
+    state = lifecycle.state(trade, trade["events"], designation_date)["status"]
+    if state != "viva":
+        raise ApiError(
+            409, "La operación no está viva al %s (estado: %s)" % (designation_date.isoformat(), state), "trade_id"
+        )
+    committed = sum(r["fraction"] for r in load_relationships(conn, trade_id) if status(r) == STATUS_ACTIVE)
+    if committed + fraction > 1 + 1e-12:
+        raise ApiError(
+            409, "La operación ya tiene designado %s de su nocional: la nueva fracción excede 1" % committed, "fraction"
+        )
+
+    fixings = fixing_store.load_all(conn)
+    hypothetical = build_hypothetical(item_kind, item_terms, designation_date, mkt, fixings)
+    pv_inst = float(trade_valuation.value_trade(trade, mkt, fixings)["pv_mxn"])
+    pv_hypo = float(
+        trade_valuation.value_trade(hypothetical_trade({"designation": {"hypothetical": hypothetical}}), mkt, fixings)[
+            "pv_mxn"
+        ]
+    )
+    snapshot_row = conn.execute("SELECT data FROM snapshots WHERE id = ?", (snapshot_id,)).fetchone()
+    sources = market.sources_of(json.loads(snapshot_row["data"]))
+    cur = conn.execute(
+        "INSERT INTO hedge_relationships (trade_id, fraction, hedge_type, item_kind, item_terms, hedge_ratio,"
+        " designation_date, designation_snapshot, documentation, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            trade_id, fraction, hedge_type, item_kind, json.dumps(_terms_out(item_terms)), hedge_ratio,
+            designation_date.isoformat(), snapshot_id, json.dumps(documentation), now_iso(),
+        ),
+    )
+    insert_event(
+        conn,
+        cur.lastrowid,
+        "designation",
+        designation_date,
+        {
+            "snapshot": snapshot_id,
+            "as_of": mkt.as_of.isoformat(),
+            "data_quality": market.data_quality(sources),
+            "pv_inst": pv_inst,
+            "pv_hypo": pv_hypo,
+            "hypothetical": hypothetical,
+        },
+    )
+    return public_relationship(load_relationship(conn, cur.lastrowid))
+
+
+# ------------------------------------------------------------------------------ stubs
 
 def dedesignate(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Desdesignación: evento `dedesignation` con `frozen_oci`; devuelve el detalle (T5)."""
