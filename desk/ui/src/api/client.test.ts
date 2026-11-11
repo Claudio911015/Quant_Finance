@@ -4,6 +4,7 @@ import {
   closeHedgePeriod,
   createHedge,
   dedesignateHedge,
+  getValidationReport,
   deleteTrade,
   hedgeEffectiveness,
   hedgeReportCsvUrl,
@@ -19,6 +20,9 @@ import {
   valuation,
 } from './client';
 import type { CreateHedgeBody } from './types';
+// corte 7
+import { VALIDATION_REPORT } from '../screens/validationFixture';
+// fin corte 7
 
 function mockFetch(status: number, body?: unknown) {
   const fn = vi.fn().mockResolvedValue({
@@ -227,3 +231,23 @@ describe('cliente API: coberturas', () => {
     expect(err.field).toBe('snapshot');
   });
 });
+
+// corte 7
+describe('cliente API: validación', () => {
+  it('getValidationReport hace GET a /api/validation/report y devuelve el cuerpo', async () => {
+    const fn = mockFetch(200, VALIDATION_REPORT);
+    const report = await getValidationReport();
+    expect(fn.mock.calls[0][0]).toBe('/api/validation/report');
+    expect(fn.mock.calls[0][1]).toEqual({ method: 'GET' });
+    expect(report).toEqual(VALIDATION_REPORT);
+  });
+
+  it('un 404 (aún no hay reporte) se convierte en ApiError con status 404 y el mensaje del backend', async () => {
+    mockFetch(404, { error: 'Aún no hay reporte de validación: genera uno con desk/validation/make_report.sh', field: null });
+    const err = await getValidationReport().catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(404);
+    expect(err.message).toContain('make_report.sh');
+  });
+});
+// fin corte 7

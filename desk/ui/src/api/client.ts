@@ -29,6 +29,9 @@ import type {
   ValuationResponse,
   VarResponse,
 } from './types';
+// corte 7
+import type { ValidationReport } from './types';
+// fin corte 7
 
 export class ApiError extends Error {
   status: number;
@@ -245,3 +248,9 @@ export function hedgeReport(id: number, snapshot?: string): Promise<HedgeReport>
 export function hedgeReportCsvUrl(id: number): string {
   return `${BASE}/hedges/${id}/report?format=csv`;
 }
+
+// corte 7
+export function getValidationReport(): Promise<ValidationReport> {
+  return request('GET', '/validation/report');
+}
+// fin corte 7

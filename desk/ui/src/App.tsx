@@ -9,6 +9,9 @@ import { PortfolioScreen } from './screens/PortfolioScreen';
 import { RiskScreen } from './screens/RiskScreen';
 import TradeScreen from './screens/TradeScreen';
 import { PricersScreen } from './screens/pricers/PricersScreen';
+// corte 7
+import ValidationScreen from './screens/ValidationScreen';
+// fin corte 7
 
 export default function App() {
   return (
@@ -25,6 +28,9 @@ export default function App() {
         <Route path="/coberturas/:id" element={<HedgeScreen />} />
         <Route path="/coberturas/:id/reporte" element={<HedgeReportScreen />} />
         <Route path="/metodologia" element={<MethodologyScreen />} />
+        {/* corte 7 */}
+        <Route path="/validacion" element={<ValidationScreen />} />
+        {/* fin corte 7 */}
       </Routes>
     </Shell>
   );
