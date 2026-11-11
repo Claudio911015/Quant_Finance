@@ -137,6 +137,13 @@
   cursor: help;
 }
 
+/* Sintético y mixto comparten el color de aviso (--warn, base de .shell__badge). */
+.shell__badge--live {
+  background: color-mix(in srgb, var(--pos) 14%, transparent);
+  border-color: var(--pos);
+  color: var(--pos);
+}
+
 .shell__badge::before {
   content: '';
   width: 6px;

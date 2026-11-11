@@ -11,7 +11,15 @@ import {
 import { ApiError, getSnapshot, listSnapshots } from '../api/client';
 import type { Snapshot, SnapshotSummary } from '../api/types';
 
-const DEFAULT_SNAPSHOT_ID = 'MX-DEMO';
+// Se abre en MKT-LIVE si la lista lo trae; si no, en el primero. MX-DEMO es solo el
+// marcador mientras llega la lista y el respaldo si la lista viene vacía o falla.
+const LIVE_SNAPSHOT_ID = 'MKT-LIVE';
+const FALLBACK_SNAPSHOT_ID = 'MX-DEMO';
+
+function initialChoice(list: SnapshotSummary[]): string {
+  if (list.some((s) => s.id === LIVE_SNAPSHOT_ID)) return LIVE_SNAPSHOT_ID;
+  return list[0]?.id ?? FALLBACK_SNAPSHOT_ID;
+}
 
 interface SnapshotState {
   snapshotId: string;
@@ -31,7 +39,12 @@ function describeError(e: unknown): string {
 }
 
 export function SnapshotProvider({ children }: { children: ReactNode }) {
-  const [snapshotId, setSnapshotId] = useState(DEFAULT_SNAPSHOT_ID);
+  const [snapshotId, setSnapshotIdState] = useState(FALLBACK_SNAPSHOT_ID);
+  // No se pide ningún snapshot completo hasta que la primera carga de la lista termina
+  // (o el usuario elige uno): así no se carga uno que enseguida se cambia por MKT-LIVE.
+  const [ready, setReady] = useState(false);
+  // Ya hay elección (automática o del usuario); recargar la lista no la pisa.
+  const chosen = useRef(false);
   const [snapshot, setSnapshotState] = useState<Snapshot | null>(null);
   const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -39,11 +52,24 @@ export function SnapshotProvider({ children }: { children: ReactNode }) {
   // respuesta lenta de un snapshot anterior pise al que el usuario eligió después).
   const latest = useRef(0);
 
+  const setSnapshotId = useCallback((id: string) => {
+    chosen.current = true;
+    setSnapshotIdState(id);
+    setReady(true);
+  }, []);
+
   const refreshList = useCallback(async () => {
     try {
-      setSnapshots(await listSnapshots());
+      const list = await listSnapshots();
+      setSnapshots(list);
+      if (!chosen.current) {
+        chosen.current = true;
+        setSnapshotIdState(initialChoice(list));
+      }
     } catch (e) {
       setError(describeError(e));
+    } finally {
+      setReady(true);
     }
   }, []);
 
@@ -66,9 +92,10 @@ export function SnapshotProvider({ children }: { children: ReactNode }) {
   }, [refreshList]);
 
   useEffect(() => {
+    if (!ready) return;
     setSnapshotState(null);
     void refreshSnapshot(snapshotId);
-  }, [snapshotId, refreshSnapshot]);
+  }, [ready, snapshotId, refreshSnapshot]);
 
   const reload = useCallback(async () => {
     await Promise.all([refreshList(), refreshSnapshot(snapshotId)]);
@@ -82,7 +109,7 @@ export function SnapshotProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<SnapshotState>(
     () => ({ snapshotId, setSnapshotId, snapshot, snapshots, reload, setSnapshot, error }),
-    [snapshotId, snapshot, snapshots, reload, setSnapshot, error],
+    [snapshotId, setSnapshotId, snapshot, snapshots, reload, setSnapshot, error],
   );
 
   return <SnapshotContext.Provider value={value}>{children}</SnapshotContext.Provider>;

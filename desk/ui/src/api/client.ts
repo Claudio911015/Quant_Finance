@@ -2,6 +2,7 @@ import type {
   Dv01Response,
   PriceResponse,
   ProductId,
+  RefreshResponse,
   ScenarioSpec,
   ScenariosResponse,
   Snapshot,
@@ -62,6 +63,10 @@ export function updateSnapshot(
   body: { quotes?: { id: string; rate: number }[]; spot?: number },
 ): Promise<Snapshot> {
   return request('PUT', `/market/snapshots/${encodeURIComponent(id)}`, body);
+}
+
+export function refreshMarket(): Promise<RefreshResponse> {
+  return request('POST', '/market/refresh');
 }
 
 export function price(product: ProductId, body: Record<string, unknown>): Promise<PriceResponse> {

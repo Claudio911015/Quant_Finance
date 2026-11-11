@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Snapshot } from '../api/types';
+import type { Snapshot, Source } from '../api/types';
 import { SnapshotProvider } from '../state/SnapshotContext';
 import { MarketScreen } from './MarketScreen';
 
@@ -18,11 +18,24 @@ function point(label: string, days: number, zero: number, forward: number) {
   return { label, days, t: days / 365, zero, df: 1 - zero * (days / 365), forward };
 }
 
+const SYNTHETIC: Source = { kind: 'synthetic', label: 'Sintético', as_of: null };
+
 const SNAPSHOT: Snapshot = {
   id: 'MX-DEMO',
   label: 'México demo (sintético)',
   synthetic: true,
   as_of: '2026-11-10',
+  data_quality: 'synthetic',
+  read_only: false,
+  sources: {
+    'curve:TIIE-F': SYNTHETIC,
+    'curve:SOFR': SYNTHETIC,
+    spot: SYNTHETIC,
+    surface: SYNTHETIC,
+    hw: SYNTHETIC,
+    factor_vols: SYNTHETIC,
+    factor_corr: SYNTHETIC,
+  },
   quotes: [
     { id: 'TIIE-F:13x28', curve: 'TIIE-F', label: '13x28', type: 'ois', days: 364, rate: 0.0675 },
     { id: 'SOFR:1Y', curve: 'SOFR', label: '1Y', type: 'ois', days: 365, rate: 0.04 },

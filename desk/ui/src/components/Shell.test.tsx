@@ -1,38 +1,79 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Snapshot, SnapshotSummary } from '../api/types';
+import type { Snapshot, SnapshotSummary, Source, SourceKey, SourceKind } from '../api/types';
+import { SOURCE_KEYS } from '../lib/provenance';
 import { PRODUCT_SPECS } from '../screens/pricers/registry';
-import { SnapshotProvider } from '../state/SnapshotContext';
+import { SnapshotProvider, useSnapshot } from '../state/SnapshotContext';
 import { Shell } from './Shell';
+
+function sourcesOf(kind: SourceKind, as_of: string | null): Record<SourceKey, Source> {
+  return Object.fromEntries(
+    SOURCE_KEYS.map((key) => [key, { kind, label: `Rótulo ${key}`, as_of }]),
+  ) as Record<SourceKey, Source>;
+}
 
 const DEMO: SnapshotSummary = {
   id: 'MX-DEMO',
   label: 'México demo (sintético)',
   synthetic: true,
   as_of: '2026-11-10',
+  data_quality: 'synthetic',
+  sources: sourcesOf('synthetic', null),
 };
-const LIVE: SnapshotSummary = { id: 'LIVE', label: 'Mercado en vivo', synthetic: false, as_of: '2026-11-11' };
+const MARKET: SnapshotSummary = {
+  id: 'MKT-LIVE',
+  label: 'Mercado vivo (SOFR aproximada)',
+  synthetic: true,
+  as_of: '2026-11-11',
+  data_quality: 'mixed',
+  sources: {
+    ...sourcesOf('synthetic', null),
+    'curve:SOFR': { kind: 'proxy', label: 'Aproximada: Treasuries par', as_of: '2026-11-10' },
+    spot: { kind: 'live', label: 'FRED DEXMXUS', as_of: '2026-11-06' },
+    factor_vols: { kind: 'mixed', label: 'SOFR y USDMXN medidas; TIIE-F sintética', as_of: '2026-11-10' },
+  },
+};
+const ALT: SnapshotSummary = {
+  id: 'ALT',
+  label: 'Mercado alterno',
+  synthetic: false,
+  as_of: '2026-11-12',
+  data_quality: 'live',
+  sources: sourcesOf('live', '2026-11-12'),
+};
 
 // Solo la cabecera importa para el marco; el resto del snapshot no se lee aquí.
-const full = (s: SnapshotSummary) => ({ ...s, quotes: [], curves: {} }) as unknown as Snapshot;
+const full = (s: SnapshotSummary) =>
+  ({ ...s, read_only: s.id === 'MKT-LIVE', quotes: [], curves: {} }) as unknown as Snapshot;
 
-function mockApi(summaries: SnapshotSummary[]) {
+/** `gate` retiene la respuesta de la lista hasta que se resuelva. */
+function mockApi(summaries: SnapshotSummary[], gate?: Promise<void>) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const path = String(input).replace(/^\/api/, '');
+    if (path === '/market/snapshots') {
+      await gate;
+      return new Response(JSON.stringify({ snapshots: summaries }), { status: 200 });
+    }
     const found = summaries.find((s) => path === `/market/snapshots/${s.id}`);
-    const body =
-      path === '/market/snapshots' ? { snapshots: summaries } : found ? full(found) : null;
-    return body
-      ? new Response(JSON.stringify(body), { status: 200 })
+    return found
+      ? new Response(JSON.stringify(full(found)), { status: 200 })
       : new Response(JSON.stringify({ error: 'Snapshot inexistente', field: 'snapshot' }), { status: 404 });
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
 
+const snapshotCalls = (m: ReturnType<typeof mockApi>) =>
+  m.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith('/api/market/snapshots/'));
+
 function Where() {
   return <div data-testid="path">{useLocation().pathname}</div>;
+}
+
+function Reload() {
+  const { reload } = useSnapshot();
+  return <button onClick={() => void reload()}>recargar</button>;
 }
 
 function renderShell(initialPath = '/mercado') {
@@ -41,6 +82,7 @@ function renderShell(initialPath = '/mercado') {
       <MemoryRouter initialEntries={[initialPath]}>
         <Shell>
           <Where />
+          <Reload />
         </Shell>
       </MemoryRouter>
     </SnapshotProvider>,
@@ -71,30 +113,56 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const selector = () => screen.getByLabelText('Snapshot') as HTMLSelectElement;
+
 describe('Shell: barra superior', () => {
-  it('muestra "Datos sintéticos" si el snapshot lo es', async () => {
+  it('muestra "Datos sintéticos" si la calidad es synthetic', async () => {
     mockApi([DEMO]);
     renderShell();
     expect(await screen.findByText('Datos sintéticos')).toBeTruthy();
     expect(screen.getByText('2026-11-10')).toBeTruthy();
   });
 
-  it('no muestra el distintivo si el snapshot no es sintético', async () => {
-    mockApi([{ ...DEMO, id: 'MX-DEMO', synthetic: false }]);
+  it('muestra "Datos mixtos" si la calidad es mixed', async () => {
+    mockApi([MARKET]);
     renderShell();
-    await screen.findByText('2026-11-10');
+    expect(await screen.findByText('Datos mixtos')).toBeTruthy();
     expect(screen.queryByText('Datos sintéticos')).toBeNull();
   });
 
-  it('cambiar el selector carga el otro snapshot y actualiza el distintivo', async () => {
-    const fetchMock = mockApi([DEMO, LIVE]);
+  it('muestra "Datos de mercado" si la calidad es live, aunque el booleano synthetic sea verdadero', async () => {
+    mockApi([{ ...ALT, synthetic: true }]);
+    renderShell();
+    const badge = await screen.findByText('Datos de mercado');
+    expect(badge.className).toContain('shell__badge--live');
+    expect(screen.queryByText('Datos sintéticos')).toBeNull();
+  });
+
+  it('el tooltip de la insignia trae una línea por componente con tipo, rótulo y fecha', async () => {
+    mockApi([MARKET]);
+    renderShell();
+    const badge = await screen.findByText('Datos mixtos');
+    expect(badge.getAttribute('title')?.split('\n')).toEqual([
+      'Curva TIIE-F: Sintética — Rótulo curve:TIIE-F (sin fecha)',
+      'Curva SOFR: Aproximada — Aproximada: Treasuries par (2026-11-10)',
+      'Spot USDMXN: En vivo — FRED DEXMXUS (2026-11-06)',
+      'Superficie de volatilidad: Sintética — Rótulo surface (sin fecha)',
+      'Parámetros Hull-White: Sintética — Rótulo hw (sin fecha)',
+      'Volatilidades de factores: Mixta — SOFR y USDMXN medidas; TIIE-F sintética (2026-11-10)',
+      'Correlaciones de factores: Sintética — Rótulo factor_corr (sin fecha)',
+    ]);
+  });
+
+  it('cambiar el selector carga el otro snapshot y actualiza la insignia', async () => {
+    const fetchMock = mockApi([DEMO, ALT]);
     renderShell();
     await screen.findByText('Datos sintéticos');
 
-    fireEvent.change(screen.getByLabelText('Snapshot'), { target: { value: 'LIVE' } });
+    fireEvent.change(selector(), { target: { value: 'ALT' } });
 
-    await screen.findByText('2026-11-11');
-    expect(fetchMock).toHaveBeenCalledWith('/api/market/snapshots/LIVE', expect.anything());
+    await screen.findByText('2026-11-12');
+    expect(fetchMock).toHaveBeenCalledWith('/api/market/snapshots/ALT', expect.anything());
+    expect(screen.getByText('Datos de mercado')).toBeTruthy();
     expect(screen.queryByText('Datos sintéticos')).toBeNull();
   });
 
@@ -102,6 +170,87 @@ describe('Shell: barra superior', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     renderShell();
     expect((await screen.findByRole('alert')).textContent).toBe('No se pudo conectar con el backend');
+  });
+});
+
+describe('Snapshot inicial', () => {
+  it.each([
+    ['primero', [MARKET, DEMO]],
+    ['segundo', [DEMO, MARKET]],
+  ])('abre en MKT-LIVE si está en la lista (%s)', async (_pos, list) => {
+    const fetchMock = mockApi(list);
+    renderShell();
+
+    await screen.findByText('Datos mixtos');
+
+    expect(selector().value).toBe('MKT-LIVE');
+    expect(snapshotCalls(fetchMock)).toEqual(['/api/market/snapshots/MKT-LIVE']);
+  });
+
+  it('sin MKT-LIVE abre en MX-DEMO cuando es el primero', async () => {
+    const fetchMock = mockApi([DEMO, ALT]);
+    renderShell();
+
+    await screen.findByText('Datos sintéticos');
+
+    expect(selector().value).toBe('MX-DEMO');
+    expect(snapshotCalls(fetchMock)).toEqual(['/api/market/snapshots/MX-DEMO']);
+  });
+
+  it('sin MKT-LIVE abre en el primero de la lista', async () => {
+    const fetchMock = mockApi([ALT, DEMO]);
+    renderShell();
+
+    await screen.findByText('Datos de mercado');
+
+    expect(selector().value).toBe('ALT');
+    expect(snapshotCalls(fetchMock)).toEqual(['/api/market/snapshots/ALT']);
+  });
+
+  it('no pide ningún snapshot completo hasta tener la lista', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const fetchMock = mockApi([DEMO, MARKET], gate);
+    renderShell();
+    await act(async () => {});
+
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(['/api/market/snapshots']);
+
+    await act(async () => open());
+    await screen.findByText('Datos mixtos');
+    expect(snapshotCalls(fetchMock)).toEqual(['/api/market/snapshots/MKT-LIVE']);
+  });
+
+  it('recargar la lista no pisa una elección explícita del usuario', async () => {
+    const fetchMock = mockApi([DEMO, MARKET]);
+    renderShell();
+    await screen.findByText('Datos mixtos');
+
+    fireEvent.change(selector(), { target: { value: 'MX-DEMO' } });
+    await screen.findByText('Datos sintéticos');
+    const listCalls = () => fetchMock.mock.calls.filter((c) => String(c[0]) === '/api/market/snapshots');
+    const before = listCalls().length;
+    fireEvent.click(screen.getByRole('button', { name: 'recargar' }));
+
+    await waitFor(() => expect(listCalls().length).toBe(before + 1));
+    await screen.findByText('Datos sintéticos');
+    expect(selector().value).toBe('MX-DEMO');
+  });
+
+  it('recargar la lista tampoco repite la elección automática', async () => {
+    const list = [DEMO];
+    const fetchMock = mockApi(list);
+    renderShell();
+    await screen.findByText('Datos sintéticos');
+
+    list.push(MARKET); // MKT-LIVE aparece después (p. ej. tras un refresco)
+    fireEvent.click(screen.getByRole('button', { name: 'recargar' }));
+
+    await waitFor(() => expect(within(selector()).getAllByRole('option')).toHaveLength(2));
+    expect(selector().value).toBe('MX-DEMO');
+    expect(snapshotCalls(fetchMock).every((u) => u.endsWith('/MX-DEMO'))).toBe(true);
   });
 });
 

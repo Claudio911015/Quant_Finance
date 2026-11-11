@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import { qualityText, sourcesTooltip } from '../lib/provenance';
 import { useSnapshot } from '../state/SnapshotContext';
 import { CommandPalette } from './CommandPalette';
 import './Shell.css';
@@ -131,12 +132,12 @@ export function Shell({ children }: { children: ReactNode }) {
               Valuación al <span className="num">{meta.as_of}</span>
             </span>
           )}
-          {meta?.synthetic && (
+          {meta && (
             <span
-              className="shell__badge"
-              title="Los datos de mercado de este snapshot son inventados; no provienen de ningún proveedor."
+              className={`shell__badge shell__badge--${meta.data_quality}`}
+              title={sourcesTooltip(meta.sources)}
             >
-              Datos sintéticos
+              {qualityText(meta.data_quality)}
             </span>
           )}
           {error && (
