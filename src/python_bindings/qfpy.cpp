@@ -25,6 +25,7 @@
 #include <qf/risk/delta_normal_var.hpp>
 #include <qf/math/daycount.hpp>
 #include <qf/termstructure/ois_bootstrap.hpp>
+#include <qf/termstructure/xccy_bootstrap.hpp>
 #include <qf/instruments/ois_swap.hpp>
 #include <qf/instruments/xccy_swap.hpp>
 #include <qf/instruments/fx_forward.hpp>
@@ -712,6 +713,36 @@ PYBIND11_MODULE(qfpy, m) {
              "XccyCashFlow rows of both legs by day; the sum of present_value_mxn equals npv().")
         .def("notional_mxn", &qf::instruments::XccySwap::notionalMxn,
              "MXN notional: notional_usd * fx_rate.");
+
+    // MXN-USD discount curve (USD collateral) from FX forwards and cross-currency basis.
+    py::class_<qf::termstructure::FxForwardQuote>(m, "FxForwardQuote")
+        .def(py::init([](int days, double points) {
+                 return qf::termstructure::FxForwardQuote{days, points};
+             }),
+             py::arg("days"), py::arg("points"),
+             "USDMXN forward quote in calendar days: points are MXN per USD, F = spot + points.")
+        .def_readwrite("days",   &qf::termstructure::FxForwardQuote::days)
+        .def_readwrite("points", &qf::termstructure::FxForwardQuote::points);
+
+    py::class_<qf::termstructure::XccyBasisQuote>(m, "XccyBasisQuote")
+        .def(py::init([](int days, double spread) {
+                 return qf::termstructure::XccyBasisQuote{days, spread};
+             }),
+             py::arg("days"), py::arg("spread"),
+             "Cross-currency basis quote in calendar days: par spread over TIIE-F (decimal).")
+        .def_readwrite("days",   &qf::termstructure::XccyBasisQuote::days)
+        .def_readwrite("spread", &qf::termstructure::XccyBasisQuote::spread);
+
+    m.def("bootstrap_xccy_discount", &qf::termstructure::bootstrapXccyDiscount,
+          py::arg("forwards"), py::arg("basis"), py::arg("spot"),
+          py::arg("usd_discount"), py::arg("mxn_projection"),
+          py::arg("period_days") = 28,
+          py::arg("accrual_dcc") = qf::math::DayCountConvention::ACT_360,
+          py::arg("method") = qf::math::InterpolationMethod::Linear,
+          "Bootstrap the MXN discount curve under USD collateral (t = days/365, continuous zeros): "
+          "one pillar per quote, FX forwards first (covered-interest parity) and then "
+          "cross-currency basis swaps (constant-notional XccySwap worth zero). "
+          "Needs at least two quotes in total; the first basis quote must lie after the last forward.");
 
     // ------------------------------------------------------------------ //
     // FX forward and FX option (Garman-Kohlhagen)                         //

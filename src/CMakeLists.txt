@@ -10,6 +10,7 @@ add_library(qf
     termstructure/volsurface.cpp
     termstructure/bootstrap.cpp
     termstructure/ois_bootstrap.cpp
+    termstructure/xccy_bootstrap.cpp
     instruments/instrument.cpp
     instruments/iunderlying.cpp
     instruments/bond.cpp
