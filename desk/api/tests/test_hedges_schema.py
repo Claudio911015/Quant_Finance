@@ -25,7 +25,6 @@ DESIGNATION = {
 
 # Rutas que responden 501 mientras sus módulos sean stub: quien implemente una ruta borra solo su fila.
 STUB_ROUTES = [
-    ("post", "/api/hedges/1/dedesignate"),
     ("get", "/api/hedges/1/report"),
 ]
 

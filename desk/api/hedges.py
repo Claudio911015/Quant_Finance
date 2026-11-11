@@ -480,8 +480,28 @@ def create_hedge(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
     return public_relationship(load_relationship(conn, cur.lastrowid))
 
 
-# ------------------------------------------------------------------------------ stubs
+# ------------------------------------------------------------------------------ desdesignación
 
 def dedesignate(conn: sqlite3.Connection, hedge_id: int, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Desdesignación: evento `dedesignation` con `frozen_oci`; devuelve el detalle (T5)."""
-    raise NotImplementedError("dedesignate")
+    """Desdesignación (`POST /api/hedges/<id>/dedesignate`): registra el evento `dedesignation` con la
+    reserva de cobertura congelada (`frozen_oci`) y devuelve el detalle.
+
+    Quien llama hace `commit`; si algo falla no se escribe nada. La relación deja de contar su
+    fracción como comprometida y ya no admite cierres.
+    """
+    rel = load_relationship(conn, hedge_id)
+    when = iso_date(body, "date")
+    reason = text(body, "reason")
+    if status(rel) == STATUS_DEDESIGNATED:
+        raise ApiError(409, "La cobertura ya está desdesignada", "id")
+    last = last_close(rel)
+    since = last if last is not None else rel["designation_date"]
+    if when < since:
+        raise ApiError(
+            409,
+            "La fecha (%s) no puede ser anterior a %s, la %s de la cobertura"
+            % (when.isoformat(), since.isoformat(), "último cierre" if last is not None else "designación"),
+            "date",
+        )
+    insert_event(conn, hedge_id, "dedesignation", when, {"reason": reason, "frozen_oci": oci_balance(rel)})
+    return public_relationship(load_relationship(conn, hedge_id))
