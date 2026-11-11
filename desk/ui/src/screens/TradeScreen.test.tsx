@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   listSnapshots: vi.fn(),
   getSnapshot: vi.fn(),
   getTrade: vi.fn(),
+  listHedges: vi.fn(),
   tradeState: vi.fn(),
   tradeFlows: vi.fn(),
   postEvent: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('../api/client', async (importOriginal) => {
     listSnapshots: mocks.listSnapshots,
     getSnapshot: mocks.getSnapshot,
     getTrade: mocks.getTrade,
+    listHedges: mocks.listHedges,
     tradeState: mocks.tradeState,
     tradeFlows: mocks.tradeFlows,
     postEvent: mocks.postEvent,
@@ -94,6 +96,7 @@ function setup(status: TradeStatus = 'viva', events: TradeEvent[] = LIVE_EVENTS)
   mocks.getTrade.mockResolvedValue({ ...TRADE, events });
   mocks.tradeState.mockResolvedValue(stateOf(status));
   mocks.tradeFlows.mockResolvedValue(FLOWS);
+  mocks.listHedges.mockResolvedValue([]);
   mocks.postEvent.mockResolvedValue([]);
 }
 
@@ -275,6 +278,48 @@ describe('TradeScreen', () => {
     expect(screen.getByRole('heading', { name: 'Acciones' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Terminar anticipadamente' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Cambiar nocional' })).toBeNull();
+  });
+
+  it('con una relación de cobertura activa la ficha muestra la designación enlazada', async () => {
+    setup();
+    mocks.listHedges.mockResolvedValue([
+      {
+        id: 1,
+        trade_id: 1,
+        product: 'irs',
+        counterparty: 'Banco Alfa',
+        hedge_type: 'cash_flow',
+        item_kind: 'floating_loan',
+        fraction: 0.5,
+        hedge_ratio: 1,
+        designation_date: '2026-11-10',
+        status: 'activa',
+        oci_balance: 0,
+        last_close: null,
+        periods_count: 0,
+      },
+    ]);
+    renderScreen();
+    const link = await screen.findByRole('link', { name: /Designada como cobertura #1/ });
+    expect(link.getAttribute('href')).toBe('/coberturas/1');
+    expect(link.textContent).toContain('Flujo de efectivo');
+    expect(link.textContent).toContain('50%');
+    expect(mocks.listHedges).toHaveBeenCalledWith({ trade_id: 1 });
+  });
+
+  it('sin relaciones de cobertura no aparece la línea de designación', async () => {
+    setup();
+    renderScreen();
+    await screen.findByText('Banco Alfa');
+    expect(screen.queryByText(/Designada/)).toBeNull();
+  });
+
+  it('si falla listar coberturas la ficha carga igual sin la línea', async () => {
+    setup();
+    mocks.listHedges.mockRejectedValue(new ApiError(500, 'fallo', 'id'));
+    renderScreen();
+    await screen.findByText('Banco Alfa');
+    expect(screen.queryByText(/Designada/)).toBeNull();
   });
 
   it('un 404 de la operación se muestra como error', async () => {

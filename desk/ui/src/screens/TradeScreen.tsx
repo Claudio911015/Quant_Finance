@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ApiError, getTrade, postEvent, tradeFlows, tradeState } from '../api/client';
+import { ApiError, getTrade, listHedges, postEvent, tradeFlows, tradeState } from '../api/client';
 import type {
   EventType,
   FlowKind,
   FlowsResponse,
+  HedgeSummary,
   TradeDetail,
   TradeEvent,
   TradeState,
   TradeStatus,
   Warning,
 } from '../api/types';
+import { HEDGE_STATUS_LABEL, HEDGE_TYPE_LABEL } from '../lib/hedgeLabels';
 import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import { PRODUCT_SPECS } from './pricers/registry';
@@ -190,6 +192,7 @@ export default function TradeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hedges, setHedges] = useState<HedgeSummary[]>([]);
   // Cada carga toma un número; solo la última escribe estado (una respuesta lenta de un
   // snapshot anterior no debe pisar la del que el usuario eligió después).
   const latest = useRef(0);
@@ -226,6 +229,23 @@ export default function TradeScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Las relaciones de cobertura solo informan la ficha: si fallan, la ficha sigue sin la línea.
+  useEffect(() => {
+    if (id == null) return;
+    let cancelled = false;
+    listHedges({ trade_id: id }).then(
+      (list) => {
+        if (!cancelled) setHedges(list);
+      },
+      () => {
+        if (!cancelled) setHedges([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   if (id == null) {
     return (
@@ -272,6 +292,12 @@ export default function TradeScreen() {
             </span>
             <span className="trade__meta">al {fmtDate(state.date)}</span>
           </header>
+          {hedges.map((h) => (
+            <Link key={h.id} to={`/coberturas/${h.id}`} className="trade__meta">
+              Designada como cobertura #{h.id} · {HEDGE_TYPE_LABEL[h.hedge_type]} · {fmtNumber(h.fraction * 100, 0)}% ·{' '}
+              {HEDGE_STATUS_LABEL[h.status]}
+            </Link>
+          ))}
           <dl className="trade__facts">
             <div>
               <dt>Producto</dt>
