@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import {
   DECL_DEDESIGNATION,
   DECL_DESIGNATION_DATE,
@@ -38,7 +39,7 @@ const PRODUCT_SECTIONS: Section[] = [
   },
   {
     id: 'fx-forward',
-    title: 'Forward USDMXN',
+    title: 'Forward FX',
     items: [
       { label: 'Modelo', text: 'Paridad de tasas cubierta.' },
       { label: 'Curvas', text: 'TIIE-F (MXN) y SOFR (USD).' },
@@ -46,7 +47,7 @@ const PRODUCT_SECTIONS: Section[] = [
   },
   {
     id: 'fx-option',
-    title: 'Opción USDMXN',
+    title: 'Opción FX',
     items: [
       { label: 'Modelo', text: 'Garman-Kohlhagen.' },
       { label: 'Volatilidad', text: 'Vol de la superficie por plazo y strike.' },
@@ -54,7 +55,7 @@ const PRODUCT_SECTIONS: Section[] = [
   },
   {
     id: 'cap-floor',
-    title: 'Cap / floor',
+    title: 'Cap / Floor',
     items: [
       { label: 'Modelo', text: 'Hull-White de un factor.' },
       { label: 'Parámetros', text: 'a y σ por curva, tomados del snapshot.' },
@@ -77,7 +78,7 @@ const PRODUCT_SECTIONS: Section[] = [
   },
   {
     id: 'equity-option',
-    title: 'Opción de renta variable',
+    title: 'Opción sobre acción',
     items: [
       { label: 'Modelo', text: 'Black-Scholes con insumos capturados en la operación.' },
     ],
@@ -348,7 +349,7 @@ const RISK_ADV_SECTIONS: Section[] = [
     items: [
       {
         label: 'Orden de la cascada',
-        text: 'El paso del tiempo y las liquidaciones con el mercado de origen rodado a la fecha final; luego TIIE-F, SOFR y las demás curvas en orden alfabético, tipo de cambio, volatilidad (superficie y parámetros Hull-White), operaciones nuevas y eventos. Cada paso cambia un bloque del mercado de origen por el de destino.',
+        text: 'El paso del tiempo y las liquidaciones con el mercado de origen rodado a la fecha final; luego TIIE-F, SOFR y las demás curvas en orden alfabético, los puntos forward y la base que calibran la curva MXN-USD, tipo de cambio, volatilidad (superficie y parámetros Hull-White), operaciones nuevas y eventos. Cada paso cambia un bloque del mercado de origen por el de destino.',
       },
       {
         label: 'Residuo',
@@ -392,7 +393,7 @@ const RISK_ADV_SECTIONS: Section[] = [
       },
       {
         label: 'Coherencia con la valuación',
-        text: 'El modelo de exposición revalúa un swap de pagos regulares, distinto del swap del desk (base de días ACT/360, calendario por fechas, periodo en curso con su devengo). Para que ambos coincidan, cada swap se entrega al modelo con pagos diarios, que aproximan la acumulación continua, y con una tasa fija efectiva calibrada para que valga hoy exactamente el PV del desk. Así el perfil arranca en el PV del desk y no tiene escalón en el primer mes; el error que queda es del orden de un cupón diario.',
+        text: 'El modelo de exposición revalúa un swap de pagos regulares, distinto del swap del desk (base de días ACT/360, calendario por fechas, periodo en curso con su devengo). Para que ambos coincidan, cada swap se entrega al modelo con pagos diarios, que aproximan la acumulación continua, y con una tasa fija efectiva calibrada para que valga hoy exactamente el PV del desk. Así el modelo vale el PV del desk exactamente en t = 0 y el perfil no tiene escalón en el primer mes. Un instante después el modelo pierde el cupón diario en curso: el valor simulado queda hasta un cupón diario (nocional × tasa / 365) por debajo del PV, en la cartera de ejemplo unos 86 mil MXN en Alfa (0.017 % del nocional, 9 % de su PV), y cada punto mensual carga un error de ese orden.',
       },
       {
         label: 'CVA informativo',
@@ -427,7 +428,7 @@ const LIMITS: { label: string; text: string }[] = [
   },
   {
     label: 'Renta variable',
-    text: 'equity_option aporta su PV pero cero a DV01, escenarios y VaR.',
+    text: 'La opción sobre acción aporta su PV pero cero a DV01, escenarios y VaR.',
   },
   {
     label: 'Operaciones',
@@ -479,7 +480,7 @@ const VALIDATION_SECTIONS: Section[] = [
         text: (
           <>
             El último reporte, con su fecha, la versión de QuantLib, el commit con que se generó y
-            cómo regenerarlo, está en la <a href="/validacion">pantalla Validación</a>.
+            cómo regenerarlo, está en la <Link to="/validacion">pantalla Validación</Link>.
           </>
         ),
       },

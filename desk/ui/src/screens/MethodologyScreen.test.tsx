@@ -1,6 +1,15 @@
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { MethodologyScreen } from './MethodologyScreen';
+
+/** La pantalla enlaza con `Link` (React Router), así que necesita un enrutador. */
+const renderScreen = () =>
+  render(
+    <MemoryRouter>
+      <MethodologyScreen />
+    </MemoryRouter>,
+  );
 
 /** Texto de la fila `label` de la sección de ciclo de vida. */
 function row(label: string): string {
@@ -10,7 +19,7 @@ function row(label: string): string {
 
 describe('MethodologyScreen', () => {
   it('describe el envejecimiento exacto de bono y cap/floor', () => {
-    render(<MethodologyScreen />);
+    renderScreen();
     const text = row('Bono y cap/floor envejecidos');
     expect(text).toContain('envejecido día a día');
     expect(text).toContain('se liquidan');
@@ -20,7 +29,7 @@ describe('MethodologyScreen', () => {
   });
 
   it('explica la regla de fines de semana y que un inhábil del índice no es faltante', () => {
-    render(<MethodologyScreen />);
+    renderScreen();
     expect(row('Fines de semana')).toContain('la del viernes devenga también sábado y domingo (3 días)');
     expect(row('Fines de semana')).toContain('no avisan');
     expect(row('Fijación faltante')).toContain('Un día inhábil de su índice no es faltante');
@@ -28,14 +37,25 @@ describe('MethodologyScreen', () => {
   });
 
   it('no conserva frases de "hasta el corte 3" ni "sin calendario de inhábiles"', () => {
-    const { container } = render(<MethodologyScreen />);
+    const { container } = renderScreen();
     const text = container.textContent ?? '';
     expect(text).not.toContain('hasta el corte 3');
     expect(text).not.toContain('sin calendario de inhábiles');
   });
 
+  it('la cascada del P&L explicado nombra el paso de los puntos forward y la base de MXN-USD', () => {
+    renderScreen();
+    expect(row('Orden de la cascada')).toContain('puntos forward y la base que calibran la curva MXN-USD');
+  });
+
+  it('usa los mismos rótulos de producto que Pricers', () => {
+    const { container } = renderScreen();
+    const titles = [...container.querySelectorAll('h3, h2')].map((h) => h.textContent);
+    for (const t of ['Forward FX', 'Opción FX', 'Cap / Floor', 'Opción sobre acción']) expect(titles).toContain(t);
+  });
+
   it('describe la sección de colateral y curvas MXN con sus conceptos', () => {
-    render(<MethodologyScreen />);
+    renderScreen();
     expect(document.getElementById('meth-csa')).not.toBeNull();
     expect(row('Curva MXN-USD')).toContain('Sin cotizaciones no existe');
     expect(row('Efecto del colateral')).toContain('MXN-USD');
@@ -44,7 +64,7 @@ describe('MethodologyScreen', () => {
   });
 
   it('declara las limitaciones que dejó la auditoría del corte 3', () => {
-    render(<MethodologyScreen />);
+    renderScreen();
     // R2: la paridad con TIIE-F es exacta solo con los días de cotización en los pilares de TIIE-F.
     expect(row('Curva MXN-USD')).toContain('solo si los días de cotización coinciden con los pilares de TIIE-F');
     expect(row('Curva MXN-USD')).toContain('No tiene pilar a un día');
@@ -61,7 +81,7 @@ describe('MethodologyScreen', () => {
   });
 
   it('dice que un swap sin tasa fija nace a la par', () => {
-    render(<MethodologyScreen />);
+    renderScreen();
     expect(row('Alta a la par')).toContain('nace a la par');
     expect(row('Alta a la par')).toContain('PV en la fecha de pacto es cero');
   });
@@ -75,7 +95,7 @@ describe('MethodologyScreen', () => {
     }
 
     it('muestra la revisión contable con el texto exacto de la banda', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(hedgeRow('Revisión contable')).toContain(
         'Asientos sugeridos. Metodología pendiente de revisión por un contador con experiencia en IFRS 9',
       );
@@ -83,7 +103,7 @@ describe('MethodologyScreen', () => {
     });
 
     it('describe la regla del menor, el valor razonable, el reciclaje y las simplificaciones', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(hedgeRow('Regla del menor')).toContain('menor');
       expect(hedgeRow('Valor razonable')).toContain('tasa fija');
       expect(hedgeRow('Reciclaje')).toContain('liquidaciones');
@@ -95,7 +115,7 @@ describe('MethodologyScreen', () => {
     });
 
     it('declara las reglas de la regla del menor y del reciclaje tras la auditoría', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(hedgeRow('Regla del menor')).toContain('desde la designación');
       expect(hedgeRow('Regla del menor')).toContain('lo ya liquidado');
       const recycling = hedgeRow('Reciclaje');
@@ -106,7 +126,7 @@ describe('MethodologyScreen', () => {
     });
 
     it('declara el componente de tasa, la presentación del cupón y que el ajuste no se amortiza', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       const fv = hedgeRow('Valor razonable');
       expect(fv).toContain('componente de tasa de referencia');
       expect(fv).toContain('no por su cupón contractual');
@@ -115,7 +135,7 @@ describe('MethodologyScreen', () => {
     });
 
     it('declara la reserva con respaldo, el vencimiento del instrumento antes que la partida y el devengo del ajuste', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       const least = hedgeRow('Regla del menor');
       expect(least).toContain('mientras no haya parte efectiva');
       expect(least).toContain('6.5.11(a)');
@@ -129,7 +149,7 @@ describe('MethodologyScreen', () => {
     });
 
     it('la desdesignación contrasta la causa con el estado de la operación y mide la terminación', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       const ded = hedgeRow('Desdesignación');
       expect(ded).toContain('se contrasta con el estado de la operación');
       expect(ded).toContain('pago de la terminación');
@@ -138,7 +158,7 @@ describe('MethodologyScreen', () => {
     });
 
     it('la desdesignación exige una causa, mide hasta su fecha y la reserva se libera a mano', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       const ded = hedgeRow('Desdesignación');
       expect(ded).toContain('exige una causa');
       expect(ded).toContain('6.5.6');
@@ -150,7 +170,7 @@ describe('MethodologyScreen', () => {
     });
 
     it('declara el derivado fuera de mercado, los avisos del alta y la fecha de designación', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(hedgeRow('Derivado fuera de mercado')).toContain('fuente de inefectividad');
       expect(hedgeRow('Derivado fuera de mercado')).toContain('fin de semana');
       const date = hedgeRow('Fecha de designación');
@@ -163,13 +183,13 @@ describe('MethodologyScreen', () => {
     });
 
     it('ya no deja fuera de alcance la designación de componentes de riesgo', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(hedgeRow('Fuera de alcance')).not.toContain('componentes de riesgo');
       expect(hedgeRow('Fuera de alcance')).toContain('libro mayor');
     });
 
     it('incluye las filas de cambios de nocional y derivado hipotético', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(hedgeRow('Cambios de nocional')).toContain('nocional vigente');
       expect(hedgeRow('Derivado hipotético')).toContain('swap a la par');
     });
@@ -184,13 +204,13 @@ describe('MethodologyScreen', () => {
     }
 
     it('describe la cascada, el residuo y el VaR histórico como sensibilidades', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(riskRow('Residuo')).toContain('orden');
       expect(riskRow('VaR histórico')).toContain('sensibilidades');
     });
 
     it('declara la semilla de la historia sintética y el CVA informativo', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(riskRow('Historia sintética de MX-DEMO')).toContain('20261110');
       expect(riskRow('CVA informativo')).toContain('no entra al PV');
       expect(riskRow('Coherencia con la valuación')).toContain('PV del desk');
@@ -199,14 +219,14 @@ describe('MethodologyScreen', () => {
     });
 
     it('lista los escenarios históricos con sus choques y excluye DVA del alcance', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(riskRow('Escenarios históricos')).toContain('Marzo 2020');
       expect(riskRow('Escenarios históricos')).toContain('+35 %');
       expect(riskRow('Fuera de alcance')).toContain('DVA');
     });
 
     it('"Límites de este corte" ya no dice "Sin XVA": el CVA informativo existe', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       const term = Array.from(document.querySelectorAll('dt')).filter((dt) => dt.textContent === 'Alcance').pop();
       const text = term?.nextElementSibling?.textContent ?? '';
       expect(text).toContain('CVA informativo');
@@ -217,20 +237,20 @@ describe('MethodologyScreen', () => {
   // corte 7
   describe('validación contra QuantLib', () => {
     it('da las tolerancias y la regla de curvas idénticas', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(row('Tolerancias')).toContain('5e-4');
       expect(row('Tolerancias')).toContain('1e-8');
       expect(row('Curvas idénticas')).toContain('lineal en tasa cero');
     });
 
     it('declara qué no se compara', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(row('Qué no se compara')).toContain('VaR');
       expect(row('Qué no se compara')).toContain('contabilidad de coberturas');
     });
 
     it('enlaza la pantalla Validación', () => {
-      render(<MethodologyScreen />);
+      renderScreen();
       expect(screen.getByRole('link', { name: 'pantalla Validación' }).getAttribute('href')).toBe(
         '/validacion',
       );
