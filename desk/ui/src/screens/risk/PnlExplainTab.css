@@ -64,7 +64,14 @@
   transition: opacity 120ms;
 }
 
-/* Tabla por operación */
+/* Tabla por operación: los encabezados de los pasos pueden partirse en líneas (el de "Paso del tiempo y
+   liquidaciones" fijaba una columna de 190 px) para que las doce columnas quepan a 1280 px. */
+.radv-table.pnlx-table th.num {
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+
 .pnlx-table th.num,
 .pnlx-table td.num {
   text-align: right;

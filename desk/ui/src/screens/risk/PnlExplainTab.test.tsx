@@ -243,15 +243,15 @@ describe('PnlExplainTab: tabla por operación', () => {
     const cells = within(row).getAllByRole('cell').map((c) => c.textContent);
     expect(cells.slice(0, 3)).toEqual(['1', productTitle('irs'), 'Banco Alfa (sintético)']);
     expect(cells.slice(3)).toEqual([
-      'MXN -400,000.00',
-      'MXN 50,000.00',
-      'MXN -450,000.00',
-      'MXN 0.00',
-      'MXN 0.00',
-      'MXN 0.00',
-      'MXN 0.00',
-      'MXN 0.00',
-      'MXN 0.00',
+      'MXN -400,000',
+      'MXN 50,000',
+      'MXN -450,000',
+      'MXN 0',
+      'MXN 0',
+      'MXN 0',
+      'MXN 0',
+      'MXN 0',
+      'MXN 0',
     ]);
   });
 
@@ -262,16 +262,27 @@ describe('PnlExplainTab: tabla por operación', () => {
     const total = screen.getByRole('rowheader', { name: 'Total' }).closest('tr')!;
     const cells = within(total).getAllByRole('cell').map((c) => c.textContent);
     expect(cells).toEqual([
-      'MXN -812,345.12',
-      'MXN 120,000.00',
-      'MXN -950,000.00',
-      'MXN 3,000.00',
-      'MXN 14,654.88',
-      'MXN 0.00',
-      'MXN 0.00',
-      'MXN 0.00',
-      'MXN 0.00',
+      'MXN -812,345',
+      'MXN 120,000',
+      'MXN -950,000',
+      'MXN 3,000',
+      'MXN 14,655',
+      'MXN 0',
+      'MXN 0',
+      'MXN 0',
+      'MXN 0',
     ]);
+  });
+
+  it('muestra pesos enteros y deja el importe con centavos en el title de la celda', async () => {
+    renderTab();
+    await screen.findByRole('table');
+
+    const total = screen.getByRole('rowheader', { name: 'Total' }).closest('tr')!;
+    const cells = within(total).getAllByRole('cell');
+    expect(cells[0].textContent).toBe('MXN -812,345');
+    expect(cells[0].getAttribute('title')).toBe('MXN -812,345.12');
+    expect(cells[4].getAttribute('title')).toBe('MXN 14,654.88');
   });
 
   it('una fila con error muestra el error en una celda que abarca los pasos', async () => {
@@ -292,8 +303,8 @@ describe('PnlExplainTab: tabla por operación', () => {
     expect(note.getAttribute('role')).toBe('status');
     const row = screen.getByText('Banco Gamma (sintético)').closest('tr')!;
     const cells = within(row).getAllByRole('cell').map((c) => c.textContent);
-    expect(cells[3]).toBe('MXN 1,500.00');
-    expect(cells[cells.length - 1]).toBe('MXN 1,500.00');
+    expect(cells[3]).toBe('MXN 1,500');
+    expect(cells[cells.length - 1]).toBe('MXN 1,500');
   });
 
   it('el pie recuerda que la suma de pasos y residuo es el P&L y que el orden importa', async () => {
@@ -302,7 +313,7 @@ describe('PnlExplainTab: tabla por operación', () => {
 
     expect(
       screen.getByText(
-        'La suma de los pasos más el residuo es el P&L de la pestaña P&L; el orden de la cascada importa (ver Metodología).',
+        'La suma de los pasos más el residuo es el P&L de la pestaña P&L; el orden de la cascada importa (ver Metodología). Importes en pesos enteros; el detalle con centavos aparece al pasar el cursor.',
       ),
     ).toBeTruthy();
   });

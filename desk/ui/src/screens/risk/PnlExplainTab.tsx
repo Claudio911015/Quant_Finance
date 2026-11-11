@@ -364,7 +364,7 @@ export function PnlExplainTab() {
             </div>
             <p className="pnlx-foot">
               La suma de los pasos más el residuo es el P&amp;L de la pestaña P&amp;L; el orden de la cascada importa
-              (ver Metodología).
+              (ver Metodología). Importes en pesos enteros; el detalle con centavos aparece al pasar el cursor.
             </p>
           </section>
         </>
@@ -375,5 +375,11 @@ export function PnlExplainTab() {
 
 /** Celda de importe en MXN; los negativos se pintan. */
 function Money({ value }: { value: number }) {
-  return <td className={`num${value < 0 ? ' pnlx-neg' : ''}`}>{fmtMoney(value, 'MXN')}</td>;
+  // Pesos enteros para que la tabla de nueve importes quepa a 1280 px sin desplazarse; el importe con
+  // centavos queda en `title`. La identidad (suma de pasos = P&L) la garantiza el backend, no el redondeo.
+  return (
+    <td className={`num${value < 0 ? ' pnlx-neg' : ''}`} title={fmtMoney(value, 'MXN')}>
+      {`MXN ${fmtNumber(value, 0)}`}
+    </td>
+  );
 }
