@@ -3,6 +3,7 @@
 #include <qf/termstructure/ois_bootstrap.hpp>
 #include <qf/core/market_environment.hpp>
 #include <qf/risk/scenario.hpp>
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
@@ -334,4 +335,161 @@ TEST(OisSwapAged, NewConstructorValidates) {
     EXPECT_THROW(make(kNotional, 0, {28}, 1.0001),          std::invalid_argument);   // == 1 if startDays >= 0
     EXPECT_THROW(make(kNotional, 7, {28}, 1.0001),          std::invalid_argument);
     EXPECT_THROW(make(kNotional, 0, {28}, 1.0, DayCountConvention::THIRTY_360), std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// Separate discount curve (QF Desk, corte 3): projection on curveKey, discounting on another curve
+// ---------------------------------------------------------------------------
+
+namespace {
+    bool relNear(double a, double b, double rel = 1e-12) {
+        return std::abs(a - b) <= rel * std::abs(b);
+    }
+
+    // Environment the goldens below were captured on: 26-pillar TIIE-F and the SOFR of twoCurveEnv().
+    MarketEnvironment goldenEnv() {
+        MarketEnvironment env = twoCurveEnv();
+        env.addCurve("TIIE-F", tiiefCurve26());
+        return env;
+    }
+
+    // npv / parRate / annuity of the swaps below, captured from the build that predates the
+    // discount-curve key (goldenEnv(), K = 6.90 %, N = 1e8; aged: start -10, factor 1.0003): the old behaviour, to 1e-12.
+    struct Golden { const char* key; int maturity, period; SwapType side;
+                    double npv, par, annuity, agedNpv, agedPar, agedAnnuity; };
+    const Golden kGolden[] = {
+        {"TIIE-F", 364,  28,  SwapType::Payer,
+         602467.95619263477, 0.075199999999999975, 97172250.998812735,
+         441845.05580718879, 0.073421328766652597, 99934901.72903657},
+        {"TIIE-F", 364,  28,  SwapType::Receiver,
+         -602467.95619263477, 0.075199999999999975, 97172250.998812735,
+         -441845.05580718879, 0.073421328766652597, 99934901.72903657},
+        {"SOFR",   1825, 365, SwapType::Payer,
+         -11169260.695901666, 0.043999999999999997, 446770427.83606654,
+         -11323457.172142982, 0.043805405318128786, 449439941.98449153},
+        {"SOFR",   1825, 365, SwapType::Receiver,
+         11169260.695901666, 0.043999999999999997, 446770427.83606654,
+         11323457.172142982, 0.043805405318128786, 449439941.98449153},
+    };
+
+    // Expected value of an OIS swap by hand: sum of (projected floating - fixed) * DF of the discount curve.
+    double handNpv(const YieldCurve& proj, const YieldCurve& disc, SwapType side, double rate,
+                   int startDays, const std::vector<int>& pay, double accrued) {
+        const double sign = side == SwapType::Payer ? 1.0 : -1.0;
+        double total = 0.0;
+        int prev = startDays;
+        for (std::size_t i = 0; i < pay.size(); ++i) {
+            const double tau   = (pay[i] - prev) / 360.0;
+            const double fl    = kNotional * ((i == 0 ? accrued : 1.0) * dfDay(proj, std::max(prev, 0))
+                                              / dfDay(proj, pay[i]) - 1.0);
+            total += sign * (fl - kNotional * rate * tau) * dfDay(disc, pay[i]);
+            prev = pay[i];
+        }
+        return total;
+    }
+}
+
+TEST(OisSwapDiscountCurve, NoKeyEmptyKeyOrSameKeyReproduceTheSingleCurveSwap) {
+    // R4 retrocompat: golden values from before the change, and the three spellings agree.
+    const MarketEnvironment env = goldenEnv();
+    for (const Golden& g : kGolden) {
+        const std::string key = g.key;
+        const auto pay = oisPaymentDays(g.maturity, g.period);
+        const OisSwap plain(kNotional, 0.0690, g.maturity, g.period, g.side, key);
+        const OisSwap empty(kNotional, 0.0690, g.maturity, g.period, g.side, key,
+                            DayCountConvention::ACT_360, "");
+        const OisSwap same (kNotional, 0.0690, g.maturity, g.period, g.side, key,
+                            DayCountConvention::ACT_360, key);
+        const OisSwap agedPlain(kNotional, 0.0690, -10, pay, 1.0003, g.side, key);
+        const OisSwap agedSame (kNotional, 0.0690, -10, pay, 1.0003, g.side, key,
+                                DayCountConvention::ACT_360, key);
+        EXPECT_EQ(plain.discountCurveKey(), key);
+        EXPECT_EQ(empty.discountCurveKey(), key);
+        EXPECT_EQ(same.discountCurveKey(),  key);
+        for (const OisSwap* s : {&plain, &empty, &same}) {
+            EXPECT_TRUE(relNear(s->npv(env),     g.npv))     << key;
+            EXPECT_TRUE(relNear(s->parRate(env), g.par))     << key;
+            EXPECT_TRUE(relNear(s->annuity(env), g.annuity)) << key;
+        }
+        for (const OisSwap* s : {&agedPlain, &agedSame}) {
+            EXPECT_TRUE(relNear(s->npv(env),     g.agedNpv))     << key;
+            EXPECT_TRUE(relNear(s->parRate(env), g.agedPar))     << key;
+            EXPECT_TRUE(relNear(s->annuity(env), g.agedAnnuity)) << key;
+        }
+        const auto a = plain.cashFlows(env);
+        const auto b = same.cashFlows(env);
+        ASSERT_EQ(a.size(), b.size());
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            EXPECT_EQ(a[i].payDays, b[i].payDays);
+            EXPECT_TRUE(relNear(b[i].floatAmount,    a[i].floatAmount))    << key << " row " << i;
+            EXPECT_TRUE(relNear(b[i].discountFactor, a[i].discountFactor)) << key << " row " << i;
+            EXPECT_TRUE(relNear(b[i].presentValue,   a[i].presentValue))   << key << " row " << i;
+        }
+    }
+}
+
+TEST(OisSwapDiscountCurve, OtherDiscountCurveDiscountsEveryFlowAndKeepsTheProjection) {
+    MarketEnvironment env = twoCurveEnv();
+    env.addCurve("TIIE-F-30", env.curve("TIIE-F").parallelBump(-30.0));   // TIIE-F - 30 bp
+    const YieldCurve& proj = env.curve("TIIE-F");
+    const YieldCurve& disc = env.curve("TIIE-F-30");
+    const std::vector<int> pay = oisPaymentDays(364, kPeriod);
+
+    for (SwapType side : {SwapType::Payer, SwapType::Receiver}) {
+        const OisSwap two (kNotional, 0.0690, 364, kPeriod, side, "TIIE-F",
+                           DayCountConvention::ACT_360, "TIIE-F-30");
+        const OisSwap one (kNotional, 0.0690, 364, kPeriod, side, "TIIE-F");
+        EXPECT_EQ(two.curveKey(), "TIIE-F");
+        EXPECT_EQ(two.discountCurveKey(), "TIIE-F-30");
+        EXPECT_NEAR(two.npv(env), handNpv(proj, disc, side, 0.0690, 0, pay, 1.0), 1e-10 * kNotional);
+        EXPECT_GT(std::abs(two.npv(env) - one.npv(env)), 1.0);   // the discount curve matters
+
+        // Rows: floating coupons come from the projection curve, DFs from the discount curve.
+        const auto rows2 = two.cashFlows(env);
+        const auto rows1 = one.cashFlows(env);
+        ASSERT_EQ(rows2.size(), rows1.size());
+        double sum = 0.0;
+        for (std::size_t i = 0; i < rows2.size(); ++i) {
+            EXPECT_TRUE(relNear(rows2[i].floatAmount, rows1[i].floatAmount));
+            EXPECT_TRUE(relNear(rows2[i].discountFactor, dfDay(disc, rows2[i].payDays)));
+            sum += rows2[i].presentValue;
+        }
+        EXPECT_NEAR(sum, two.npv(env), 1e-12 * std::abs(two.npv(env)));
+
+        // Annuity on the discount curve; par rate = discounted floating / annuity, and a swap at that rate is worth 0.
+        double ann = 0.0, floatPv = 0.0;
+        int prev = 0;
+        for (int d : pay) {
+            ann += kNotional * ((d - prev) / 360.0) * dfDay(disc, d);
+            floatPv += kNotional * (dfDay(proj, prev) / dfDay(proj, d) - 1.0) * dfDay(disc, d);
+            prev = d;
+        }
+        EXPECT_TRUE(relNear(two.annuity(env), ann));
+        EXPECT_NEAR(two.parRate(env), floatPv / ann, 1e-12);
+        const OisSwap atPar(kNotional, two.parRate(env), 364, kPeriod, side, "TIIE-F",
+                            DayCountConvention::ACT_360, "TIIE-F-30");
+        EXPECT_LT(std::abs(atPar.npv(env)), 1e-10 * kNotional);
+    }
+}
+
+TEST(OisSwapDiscountCurve, AgedConstructorAcceptsTheDiscountCurve) {
+    MarketEnvironment env = twoCurveEnv();
+    env.addCurve("TIIE-F-30", env.curve("TIIE-F").parallelBump(-30.0));
+    const std::vector<int> pay = {14, 42, 70, 98};
+    const OisSwap aged(kNotional, 0.0690, -14, pay, 1.0007, SwapType::Receiver, "TIIE-F",
+                       DayCountConvention::ACT_360, "TIIE-F-30");
+    EXPECT_EQ(aged.discountCurveKey(), "TIIE-F-30");
+    EXPECT_NEAR(aged.npv(env),
+                handNpv(env.curve("TIIE-F"), env.curve("TIIE-F-30"), SwapType::Receiver, 0.0690,
+                        -14, pay, 1.0007),
+                1e-10 * kNotional);
+}
+
+TEST(OisSwapDiscountCurve, MissingDiscountCurveThrows) {
+    const MarketEnvironment env = twoCurveEnv();
+    const OisSwap swap(kNotional, 0.0690, 364, kPeriod, SwapType::Payer, "TIIE-F",
+                       DayCountConvention::ACT_360, "NOPE");
+    EXPECT_THROW(swap.npv(env),      std::out_of_range);
+    EXPECT_THROW(swap.annuity(env),  std::out_of_range);
+    EXPECT_THROW(swap.parRate(env),  std::out_of_range);
 }

@@ -26,6 +26,7 @@
 #include <qf/math/daycount.hpp>
 #include <qf/termstructure/ois_bootstrap.hpp>
 #include <qf/instruments/ois_swap.hpp>
+#include <qf/instruments/xccy_swap.hpp>
 #include <qf/instruments/fx_forward.hpp>
 #include <qf/instruments/fx_option.hpp>
 #include <qf/instruments/capfloor.hpp>
@@ -644,20 +645,23 @@ PYBIND11_MODULE(qfpy, m) {
 
     py::class_<qf::instruments::OisSwap, qf::instruments::Instrument>(m, "OisSwap")
         .def(py::init<double, double, int, int, qf::instruments::SwapType, std::string,
-                      qf::math::DayCountConvention>(),
+                      qf::math::DayCountConvention, std::string>(),
              py::arg("notional"), py::arg("fixed_rate"), py::arg("maturity_days"),
              py::arg("period_days"), py::arg("swap_type"), py::arg("curve_key"),
              py::arg("dcc") = qf::math::DayCountConvention::ACT_360,
-             "Overnight-index swap with a day-based schedule, projected and discounted "
-             "off the curve named curve_key.")
+             py::arg("discount_curve_key") = "",
+             "Overnight-index swap with a day-based schedule, projected off the curve named "
+             "curve_key and discounted off discount_curve_key (empty = the same curve).")
         .def(py::init<double, double, int, std::vector<int>, double, qf::instruments::SwapType,
-                      std::string, qf::math::DayCountConvention>(),
+                      std::string, qf::math::DayCountConvention, std::string>(),
              py::arg("notional"), py::arg("fixed_rate"), py::arg("start_days"),
              py::arg("pay_days"), py::arg("accrued_factor"), py::arg("swap_type"),
              py::arg("curve_key"), py::arg("dcc") = qf::math::DayCountConvention::ACT_360,
+             py::arg("discount_curve_key") = "",
              "Swap valued mid-life or before it starts: days are relative to the valuation date, "
              "period 1 runs from start_days (negative if already started, with the compounded "
-             "fixings in accrued_factor) to pay_days[0].")
+             "fixings in accrued_factor) to pay_days[0]. Discounts off discount_curve_key "
+             "(empty = curve_key).")
         .def("npv", &qf::instruments::OisSwap::npv, py::arg("env"),
              "Net present value from the swap_type perspective.")
         .def("par_rate", &qf::instruments::OisSwap::parRate, py::arg("env"),
@@ -665,7 +669,49 @@ PYBIND11_MODULE(qfpy, m) {
         .def("annuity", &qf::instruments::OisSwap::annuity, py::arg("env"),
              "Sum of notional * accrual * DF over the schedule.")
         .def("cash_flows", &qf::instruments::OisSwap::cashFlows, py::arg("env"),
-             "One OisCashFlow per period; the sum of present_value equals npv().");
+             "One OisCashFlow per period; the sum of present_value equals npv().")
+        .def("discount_curve_key", &qf::instruments::OisSwap::discountCurveKey,
+             "Effective discount curve key (curve_key when none was given).");
+
+    // ------------------------------------------------------------------ //
+    // Cross-currency basis swap USD (SOFR) vs MXN (TIIE-F + spread)       //
+    // ------------------------------------------------------------------ //
+    py::enum_<qf::instruments::XccySide>(m, "XccySide")
+        .value("PayUsd", qf::instruments::XccySide::PayUsd)
+        .value("PayMxn", qf::instruments::XccySide::PayMxn);
+
+    py::class_<qf::instruments::XccyCashFlow>(m, "XccyCashFlow")
+        .def_readonly("leg",              &qf::instruments::XccyCashFlow::leg)
+        .def_readonly("kind",             &qf::instruments::XccyCashFlow::kind)
+        .def_readonly("pay_days",         &qf::instruments::XccyCashFlow::payDays)
+        .def_readonly("accrual",          &qf::instruments::XccyCashFlow::accrual)
+        .def_readonly("amount",           &qf::instruments::XccyCashFlow::amount)
+        .def_readonly("discount_factor",  &qf::instruments::XccyCashFlow::discountFactor)
+        .def_readonly("present_value",    &qf::instruments::XccyCashFlow::presentValue)
+        .def_readonly("present_value_mxn", &qf::instruments::XccyCashFlow::presentValueMxn);
+
+    py::class_<qf::instruments::XccySwap, qf::instruments::Instrument>(m, "XccySwap")
+        .def(py::init<double, double, double, int, std::vector<int>, double, double,
+                      qf::instruments::XccySide, bool, bool, std::string, std::string,
+                      std::string, std::string, qf::math::DayCountConvention>(),
+             py::arg("notional_usd"), py::arg("fx_rate"), py::arg("spread"), py::arg("start_days"),
+             py::arg("pay_days"), py::arg("accrued_factor_usd"), py::arg("accrued_factor_mxn"),
+             py::arg("side"), py::arg("initial_exchange"), py::arg("final_exchange"),
+             py::arg("usd_curve") = "SOFR", py::arg("mxn_projection_curve") = "TIIE-F",
+             py::arg("mxn_discount_curve") = "MXN-USD", py::arg("pair") = "USDMXN",
+             py::arg("dcc") = qf::math::DayCountConvention::ACT_360,
+             "Constant-notional USD (SOFR) vs MXN (TIIE-F + spread) cross-currency swap. "
+             "Days are relative to the valuation date; the MXN notional is notional_usd * fx_rate. "
+             "The USD leg uses usd_curve; the MXN leg projects on mxn_projection_curve and "
+             "discounts on mxn_discount_curve. The value is in MXN.")
+        .def("npv", &qf::instruments::XccySwap::npv, py::arg("env"),
+             "Net present value in MXN from the side perspective.")
+        .def("par_spread", &qf::instruments::XccySwap::parSpread, py::arg("env"),
+             "Spread over TIIE-F that makes the NPV zero.")
+        .def("cash_flows", &qf::instruments::XccySwap::cashFlows, py::arg("env"),
+             "XccyCashFlow rows of both legs by day; the sum of present_value_mxn equals npv().")
+        .def("notional_mxn", &qf::instruments::XccySwap::notionalMxn,
+             "MXN notional: notional_usd * fx_rate.");
 
     // ------------------------------------------------------------------ //
     // FX forward and FX option (Garman-Kohlhagen)                         //

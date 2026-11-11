@@ -15,6 +15,7 @@ add_library(qf
     instruments/bond.cpp
     instruments/swap.cpp
     instruments/ois_swap.cpp
+    instruments/xccy_swap.cpp
     instruments/fx_forward.cpp
     instruments/fx_option.cpp
     instruments/option.cpp

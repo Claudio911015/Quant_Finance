@@ -16,7 +16,7 @@ struct OisCashFlow {
     double fixedAmount;      ///< Fixed coupon N * K * tau.
     double floatAmount;      ///< Compounded floating coupon N * (DF(t_prev) / DF(t) - 1).
     double netAmount;        ///< Float - fixed for a Payer, fixed - float for a Receiver.
-    double discountFactor;   ///< DF(payTime) on the swap's curve.
+    double discountFactor;   ///< DF(payTime) on the swap's discount curve.
     double presentValue;     ///< netAmount * discountFactor.
 };
 
@@ -39,8 +39,10 @@ double compoundOvernight(const std::vector<double>& rates, const std::vector<int
 /// tau_i from the actual days of the period under the day-count convention. Payment
 /// dates come from termstructure::oisPaymentDays and times are t = days / 365, the
 /// same conventions as termstructure::bootstrapOis, so a swap struck at a bootstrapped
-/// quote prices to zero on the bootstrapped curve. Discounting and projection use the
-/// single curve stored under @c curveKey.
+/// quote prices to zero on the bootstrapped curve. By default discounting and projection use
+/// the single curve stored under @c curveKey; an optional @c discountCurveKey discounts every
+/// cash flow on another curve while the floating coupons are still projected on @c curveKey
+/// (collateralised discounting).
 ///
 /// A swap can also be valued mid-life or before it starts (second constructor): days are
 /// then relative to the valuation date, the current period may have started in the past
@@ -52,13 +54,17 @@ public:
     /// @param maturityDays  Days from today to the last payment (> 0).
     /// @param periodDays    Days between coupons (> 0): 28 for TIIE-F, 365 for SOFR.
     /// @param type          Payer (pays fixed, receives floating) or Receiver.
-    /// @param curveKey      Name of the curve in the MarketEnvironment used to project and discount.
+    /// @param curveKey      Name of the curve in the MarketEnvironment used to project the floating
+    ///                      coupons (and to discount them unless @p discountCurveKey is given).
     /// @param dcc           Accrual convention; ACT/360 (default), ACT/365 or ACT/ACT (not 30/360).
+    /// @param discountCurveKey  Name of the curve that discounts every cash flow; empty (default)
+    ///                      or equal to @p curveKey means the same curve as the projection.
     /// @throws std::invalid_argument if notional, maturityDays or periodDays is not positive,
     ///         or @p dcc is THIRTY_360 (it needs calendar dates, which this swap does not carry).
     OisSwap(double notional, double fixedRate, int maturityDays, int periodDays, SwapType type,
             std::string curveKey,
-            math::DayCountConvention dcc = math::DayCountConvention::ACT_360);
+            math::DayCountConvention dcc = math::DayCountConvention::ACT_360,
+            std::string discountCurveKey = "");
 
     /// @brief Swap valued on a date other than its start: current period already running
     ///        (@p startDays < 0, fixings compounded into @p accruedFactor) or starting later.
@@ -75,17 +81,21 @@ public:
     /// @param accruedFactor  Compounded overnight factor of the days of period 1 already elapsed (> 0);
     ///                       must be exactly 1 when @p startDays >= 0.
     /// @param type           Payer (pays fixed, receives floating) or Receiver.
-    /// @param curveKey       Name of the curve in the MarketEnvironment used to project and discount.
+    /// @param curveKey       Name of the curve in the MarketEnvironment used to project the floating
+    ///                       coupons (and to discount them unless @p discountCurveKey is given).
     /// @param dcc            Accrual convention; ACT/360 (default), ACT/365 or ACT/ACT (not 30/360).
+    /// @param discountCurveKey  Name of the curve that discounts every cash flow; empty (default)
+    ///                       or equal to @p curveKey means the same curve as the projection.
     /// @throws std::invalid_argument if notional <= 0, @p payDays is empty, not strictly increasing
     ///         or starts at <= 0, @p startDays >= payDays[0], @p accruedFactor <= 0, @p accruedFactor != 1
     ///         with @p startDays >= 0, or @p dcc is THIRTY_360.
     OisSwap(double notional, double fixedRate, int startDays, std::vector<int> payDays,
             double accruedFactor, SwapType type, std::string curveKey,
-            math::DayCountConvention dcc = math::DayCountConvention::ACT_360);
+            math::DayCountConvention dcc = math::DayCountConvention::ACT_360,
+            std::string discountCurveKey = "");
 
     /// @brief Net present value: the sum of the presentValue column of cashFlows().
-    /// @param env  Market environment holding the curve @c curveKey().
+    /// @param env  Market environment holding the curves @c curveKey() and @c discountCurveKey().
     /// @return     NPV in the curve's currency, from the holder's side (Payer or Receiver).
     double npv(const core::MarketEnvironment& env) const;
 
@@ -94,17 +104,17 @@ public:
 
     /// @brief Fixed rate that makes npv() zero: sum(floatAmount_i * DF(t_i)) / annuity.
     ///        For a swap starting today this is N * (1 - DF(T)) / annuity.
-    /// @param env  Market environment holding the curve @c curveKey().
+    /// @param env  Market environment holding the curves @c curveKey() and @c discountCurveKey().
     /// @return     Par rate (decimal).
     double parRate(const core::MarketEnvironment& env) const;
 
     /// @brief Annuity sum(N * tau_i * DF(t_i)): PV of receiving 1.0 of fixed rate per year.
-    /// @param env  Market environment holding the curve @c curveKey().
+    /// @param env  Market environment holding the curve @c discountCurveKey().
     /// @return     Annuity in currency units.
     double annuity(const core::MarketEnvironment& env) const;
 
     /// @brief Full cash-flow table, one row per period.
-    /// @param env  Market environment holding the curve @c curveKey().
+    /// @param env  Market environment holding the curves @c curveKey() and @c discountCurveKey().
     /// @return     Rows in payment order; the sum of presentValue equals npv().
     std::vector<OisCashFlow> cashFlows(const core::MarketEnvironment& env) const;
 
@@ -113,7 +123,9 @@ public:
     int         maturityDays() const { return maturityDays_; }   ///< Last payment day.
     int         periodDays()   const { return periodDays_; }     ///< Coupon period; for the second constructor, the length of period 1.
     SwapType    type()         const { return type_; }
-    const std::string& curveKey() const { return curveKey_; }
+    const std::string& curveKey() const { return curveKey_; }   ///< Projection curve.
+    /// @brief Effective discount curve key: the one given, or curveKey() when none was given.
+    const std::string& discountCurveKey() const { return discountCurveKey_.empty() ? curveKey_ : discountCurveKey_; }
 
 private:
     double                   notional_;
@@ -122,6 +134,7 @@ private:
     int                      periodDays_   = 0;
     SwapType                 type_;
     std::string              curveKey_;
+    std::string              discountCurveKey_;   // empty = same as curveKey_
     math::DayCountConvention dcc_;
     int                      startDays_;
     std::vector<int>         payDays_;

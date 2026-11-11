@@ -69,19 +69,21 @@ double compoundOvernight(const std::vector<double>& rates, const std::vector<int
 }
 
 OisSwap::OisSwap(double notional, double fixedRate, int maturityDays, int periodDays,
-                 SwapType type, std::string curveKey, math::DayCountConvention dcc)
+                 SwapType type, std::string curveKey, math::DayCountConvention dcc,
+                 std::string discountCurveKey)
     : OisSwap(notional, fixedRate, 0, scheduleFor(maturityDays, periodDays), 1.0,
-              type, std::move(curveKey), dcc)
+              type, std::move(curveKey), dcc, std::move(discountCurveKey))
 {
     periodDays_ = periodDays;
 }
 
 OisSwap::OisSwap(double notional, double fixedRate, int startDays, std::vector<int> payDays,
                  double accruedFactor, SwapType type, std::string curveKey,
-                 math::DayCountConvention dcc)
+                 math::DayCountConvention dcc, std::string discountCurveKey)
     : Instrument(payDays.empty() ? 0.0 : payDays.back() / kDaysPerYear),
       notional_(notional), fixedRate_(fixedRate),
-      type_(type), curveKey_(std::move(curveKey)), dcc_(dcc),
+      type_(type), curveKey_(std::move(curveKey)),
+      discountCurveKey_(std::move(discountCurveKey)), dcc_(dcc),
       startDays_(startDays), payDays_(std::move(payDays)), accruedFactor_(accruedFactor)
 {
     if (notional_ <= 0.0)
@@ -107,13 +109,15 @@ OisSwap::OisSwap(double notional, double fixedRate, int startDays, std::vector<i
 
 std::vector<OisCashFlow> OisSwap::cashFlows(const core::MarketEnvironment& env) const
 {
-    const termstructure::YieldCurve& curve = env.curve(curveKey_);
+    const termstructure::YieldCurve& curve = env.curve(curveKey_);                 // projection
+    const termstructure::YieldCurve& disc  = env.curve(discountCurveKey());        // discounting
     const double sign = (type_ == SwapType::Payer) ? 1.0 : -1.0;   // Payer: float - fixed
 
     std::vector<OisCashFlow> rows;
     for (const Period& p : buildPeriods(startDays_, payDays_, dcc_)) {
         const double dfPrev  = discountAt(curve, p.prevDay);
-        const double df      = discountAt(curve, p.day);
+        const double dfProj  = discountAt(curve, p.day);
+        const double df      = discountAt(disc, p.day);
         const double accrued = rows.empty() ? accruedFactor_ : 1.0;   // only period 1 has elapsed fixings
 
         OisCashFlow row;
@@ -121,7 +125,7 @@ std::vector<OisCashFlow> OisSwap::cashFlows(const core::MarketEnvironment& env) 
         row.payTime        = p.day / kDaysPerYear;
         row.accrual        = p.tau;
         row.fixedAmount    = notional_ * fixedRate_ * p.tau;
-        row.floatAmount    = notional_ * (accrued * dfPrev / df - 1.0);
+        row.floatAmount    = notional_ * (accrued * dfPrev / dfProj - 1.0);
         row.netAmount      = sign * (row.floatAmount - row.fixedAmount);
         row.discountFactor = df;
         row.presentValue   = row.netAmount * df;
@@ -140,10 +144,10 @@ double OisSwap::npv(const core::MarketEnvironment& env) const
 
 double OisSwap::annuity(const core::MarketEnvironment& env) const
 {
-    const termstructure::YieldCurve& curve = env.curve(curveKey_);
+    const termstructure::YieldCurve& disc = env.curve(discountCurveKey());
     double sum = 0.0;
     for (const Period& p : buildPeriods(startDays_, payDays_, dcc_))
-        sum += notional_ * p.tau * discountAt(curve, p.day);
+        sum += notional_ * p.tau * discountAt(disc, p.day);
     return sum;
 }
 
