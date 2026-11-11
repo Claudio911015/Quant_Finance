@@ -2,12 +2,14 @@
 
 No importa QuantLib ni `compare.py`: recalcula diferencias y veredictos desde los PV guardados con `common`, para que
 un reporte editado a mano, desactualizado respecto de sus propios números o con un caso fuera de tolerancia sin
-explicar rompa la suite del backend. Para regenerarlo: `desk/validation/make_report.sh`.
+explicar rompa la suite del backend. Además cruza el reporte con sus fuentes versionadas (`cases.json` y
+`reference.json`), para que un PV editado a mano y con las diferencias recalculadas también se detecte aunque
+quede dentro de tolerancia. Para regenerarlo: `desk/validation/make_report.sh`.
 """
 import copy
 import json
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
@@ -146,6 +148,56 @@ def _problems(report: dict, known: dict) -> List[str]:
     return out
 
 
+def _source_problems(report: dict, cases_doc: dict, reference_doc: dict) -> List[str]:
+    """Incoherencias entre `report.json` y las fuentes de las que sale (`cases.json`, `reference.json`).
+
+    `_problems` solo mira el reporte contra sí mismo: un `pv_desk` editado con `abs_diff`/`rel_diff` recalculados a
+    mano y un cambio que quede dentro de tolerancia lo dejaba pasar. Aquí cada cifra se compara con su origen.
+    """
+    out = []  # type: List[str]
+    for key in ("snapshot", "desk_commit", "desk_dirty"):
+        if report.get(key) != cases_doc.get(key):
+            out.append("%s del reporte %r distinto del de cases.json %r" % (key, report.get(key), cases_doc.get(key)))
+    if report.get("reference") != reference_doc.get("reference"):
+        out.append("reference del reporte distinto del de reference.json")
+
+    desk_ids = [c["id"] for c in cases_doc["cases"]]
+    if [c["id"] for c in report["cases"]] != desk_ids:
+        out.append("los ids de los casos del reporte no son los de cases.json (mismo orden)")
+        return out
+    refs = {r["id"]: r for r in reference_doc["cases"]}
+    for c, src in zip(report["cases"], cases_doc["cases"]):
+        cid = c["id"]
+        for key in ("product", "label", "source", "trade_id", "currency", "notional", "pv_desk"):
+            if c[key] != src[key]:
+                out.append("%s: %s del reporte %r distinto del de cases.json %r" % (cid, key, c[key], src[key]))
+        ref = refs.get(cid)
+        if ref is None:
+            out.append("%s: no está en reference.json" % cid)
+            continue
+        for key in ("pv_ref", "error"):
+            if c[key] != ref[key]:
+                out.append("%s: %s del reporte %r distinto del de reference.json %r" % (cid, key, c[key], ref[key]))
+
+    # Curvas: la diferencia máxima guardada se recalcula con los DF de ambas fuentes.
+    rows = {r["curve"]: r for r in report["curves"]}
+    if sorted(rows) != sorted(cases_doc["curves"]):
+        out.append("las curvas del reporte %r no son las de cases.json %r" % (sorted(rows), sorted(cases_doc["curves"])))
+        return out
+    for name, spec in cases_doc["curves"].items():
+        ref = reference_doc["curves"][name]
+        for kind, stored in (("pillars", "pillar_max_abs_diff"), ("checks", "check_max_abs_diff")):
+            desk_by_days = {r["days"]: r["df"] for r in spec[kind]}
+            ref_by_days = {r["days"]: r["df_ref"] for r in ref[kind]}
+            if sorted(desk_by_days) != sorted(ref_by_days):
+                out.append("curva %s: los días de %s difieren entre cases.json y reference.json" % (name, kind))
+                continue
+            worst = max(abs(desk_by_days[d] - ref_by_days[d]) for d in desk_by_days)
+            if not _close(rows[name][stored], worst):
+                out.append("curva %s: %s guardado %r, recalculado %r" % (name, stored, rows[name][stored], worst))
+    return out
+
+
 def _load_report() -> dict:
     with open(common.REPORT_PATH, encoding="utf-8") as f:
         return json.load(f)
@@ -167,6 +219,18 @@ def report() -> dict:
 @pytest.fixture
 def known() -> dict:
     return _load_known()
+
+
+@pytest.fixture
+def sources() -> Tuple[dict, dict]:
+    """(cases.json, reference.json): las fuentes versionadas del reporte."""
+    for path in (common.CASES_PATH, common.REFERENCE_PATH):
+        assert path.exists(), "No existe %s: genera el reporte con desk/validation/make_report.sh y versiónalo" % path
+    with open(common.CASES_PATH, encoding="utf-8") as f:
+        cases_doc = json.load(f)
+    with open(common.REFERENCE_PATH, encoding="utf-8") as f:
+        reference_doc = json.load(f)
+    return cases_doc, reference_doc
 
 
 def test_el_reporte_existe():
@@ -203,3 +267,50 @@ def test_una_explicacion_sin_caso_falla(report, known):
         "max_rel_diff": 2e-6,
     })
     assert _problems(report, altered) != []
+
+
+def test_el_reporte_coincide_con_sus_fuentes(report, sources):
+    problems = _source_problems(report, *sources)
+    assert problems == [], "El reporte no coincide con cases.json / reference.json:\n- " + "\n- ".join(problems)
+
+
+def _reescribir_a_mano(report: dict, case_id: str, delta: float) -> dict:
+    """Copia del reporte con `pv_desk` de un caso movido `delta` y sus diferencias recalculadas a mano (veredicto,
+    totales y resumen intactos mientras el caso siga dentro de tolerancia y por debajo de la peor del producto)."""
+    altered = copy.deepcopy(report)
+    case = next(c for c in altered["cases"] if c["id"] == case_id)
+    case["pv_desk"] += delta
+    case["abs_diff"], case["rel_diff"] = common.diffs(case["pv_desk"], case["pv_ref"], case["notional"])
+    return altered
+
+
+def test_un_pv_editado_dentro_de_tolerancia_con_diferencias_recalculadas_falla_el_cruce(report, known, sources):
+    # swaption-01 mueve su PV 1e-5 del nocional (tolerancia 5e-4, y su diferencia sigue por debajo de la peor del
+    # producto, swaption-04): el reporte queda coherente consigo mismo, así que _problems no lo ve...
+    case = next(c for c in report["cases"] if c["id"] == "swaption-01")
+    altered = _reescribir_a_mano(report, "swaption-01", 1e-5 * case["notional"])
+    assert _problems(altered, known) == []
+    # ...pero el cruce con cases.json lo detecta.
+    problems = _source_problems(altered, *sources)
+    assert any(p.startswith("swaption-01: pv_desk") for p in problems), problems
+
+
+def test_un_pv_ref_editado_a_mano_falla_el_cruce_con_la_referencia(report, sources):
+    altered = copy.deepcopy(report)
+    case = next(c for c in altered["cases"] if c["id"] == "irs-01")
+    case["pv_ref"] += 1e-9 * case["notional"]
+    problems = _source_problems(altered, *sources)
+    assert any(p.startswith("irs-01: pv_ref") for p in problems), problems
+
+
+def test_una_curva_editada_a_mano_falla_el_cruce(report, sources):
+    altered = copy.deepcopy(report)
+    altered["curves"][0]["pillar_max_abs_diff"] = 0.5e-12   # sigue ≤ 1e-12 pero no es lo que sale de los DF
+    problems = _source_problems(altered, *sources)
+    assert any("pillar_max_abs_diff" in p for p in problems), problems
+
+
+def test_un_reporte_de_otro_commit_falla_el_cruce(report, sources):
+    altered = copy.deepcopy(report)
+    altered["desk_commit"] = "0" * 40
+    assert any(p.startswith("desk_commit") for p in _source_problems(altered, *sources))
