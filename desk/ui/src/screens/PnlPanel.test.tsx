@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PnlResponse, SnapshotSummary } from '../api/types';
 import { SnapshotProvider } from '../state/SnapshotContext';
-import PnlPanel from './PnlPanel';
+import PnlPanel, { columnDefs } from './PnlPanel';
 
 const SOURCES = {} as SnapshotSummary['sources'];
 
@@ -142,6 +142,16 @@ describe('PnlPanel', () => {
     expect(screen.getAllByRole('option', { name: 'Cierre C · 2026-12-08' })).toHaveLength(2);
   });
 
+  it('la tabla vacía habla español, no el "No Rows To Show" de AG Grid', async () => {
+    mockApi();
+    const { container } = renderPanel();
+    await selectors();
+    await waitFor(() => expect(container.querySelector('.ag-overlay-no-rows-center')).not.toBeNull());
+    expect(container.querySelector('.ag-overlay-no-rows-center')?.textContent).toBe(
+      'Sin resultados: elige las fechas y presiona Calcular.',
+    );
+  });
+
   it('sin snapshot anterior deja "Desde" vacío y no deja calcular', async () => {
     mockApi();
     renderPanel();
@@ -167,6 +177,12 @@ describe('PnlPanel', () => {
     expect(cellText(pinned!.querySelector('[col-id="pnl"]')!)).toBe('1,500,000.25');
     expect(cellText(pinned!.querySelector('[col-id="pv_from"]')!)).toBe('9,000,000.50');
     expect(cellText(pinned!.querySelector('[col-id="settled"]')!)).toBe('500,000.00');
+  });
+
+  it('las columnas caben en 1280 px: la suma de anchos mínimos no pasa de 1025 px (1280 − barra lateral − márgenes − barra de desplazamiento)', () => {
+    const min = columnDefs.map((c) => (c.flex ? (c.minWidth ?? 0) : (c.width ?? 0)));
+    expect(min.every((w) => w > 0)).toBe(true);
+    expect(min.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(1025);
   });
 
   it('la suma de las filas sin error es igual al total y la fila con error se marca', async () => {

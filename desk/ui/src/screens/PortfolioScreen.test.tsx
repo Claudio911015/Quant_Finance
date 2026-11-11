@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ValuationResponse } from '../api/types';
 import { SnapshotProvider, useSnapshot } from '../state/SnapshotContext';
-import { PortfolioScreen, rowTooltip } from './PortfolioScreen';
+import { PortfolioScreen, columnDefs, rowTooltip } from './PortfolioScreen';
 
 const VALUATION: ValuationResponse = {
   snapshot: 'MX-DEMO',
@@ -216,6 +216,12 @@ describe('PortfolioScreen', () => {
     expect(row?.textContent).toContain('2026-11-10');
     expect(row?.textContent).toContain('2027-11-09');
     expect(row?.textContent).toContain('Viva');
+  });
+
+  it('las columnas caben en 1280 px: la suma de anchos mínimos no pasa de 1025 px (1280 − barra lateral − márgenes − barra de desplazamiento)', () => {
+    const min = columnDefs.map((c) => (c.flex ? (c.minWidth ?? 0) : (c.width ?? 0)));
+    expect(min.every((w) => w > 0)).toBe(true);
+    expect(min.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(1025);
   });
 
   it('la columna PV lleva la moneda de pv: MXN para FX y la de la curva para tasas', async () => {

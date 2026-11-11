@@ -110,12 +110,13 @@ const openTrade: { current: (path: string) => void } = { current: () => {} };
 
 const numberCell = { type: 'rightAligned', cellClass: 'num', filter: 'agNumberColumnFilter' } as const;
 
-const columnDefs: ColDef<GridRow>[] = [
+/** Exportadas para la prueba de anchos: la suma de los anchos mínimos debe caber en 1280 px. */
+export const columnDefs: ColDef<GridRow>[] = [
   {
     colId: 'id',
     field: 'id',
     headerName: 'ID',
-    width: 72,
+    width: 56,
     // El id es un enlace real (clic derecho, nueva pestaña); el clic simple navega sin recargar.
     cellRenderer: (p: ICellRendererParams<GridRow>) => {
       if (p.data?.id == null) return '';
@@ -131,22 +132,22 @@ const columnDefs: ColDef<GridRow>[] = [
     },
     ...numberCell,
   },
-  { colId: 'product', field: 'product', headerName: 'Producto', width: 140 },
-  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 160 },
+  { colId: 'product', field: 'product', headerName: 'Producto', width: 92 },
+  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 148 },
   {
     colId: 'notional',
     field: 'notional',
     headerName: 'Nocional',
-    width: 150,
+    width: 110,
     valueFormatter: (p) => (p.value == null ? '' : fmtNumber(p.value, 2)),
     ...numberCell,
   },
-  { colId: 'currency', field: 'currency', headerName: 'Moneda', width: 90 },
+  { colId: 'currency', field: 'currency', headerName: 'Moneda', width: 84 },
   {
     colId: 'trade_date',
     field: 'trade_date',
     headerName: 'Pacto',
-    width: 110,
+    width: 96,
     cellClass: 'num',
     valueFormatter: (p) => (p.value == null ? '' : fmtDate(p.value)),
   },
@@ -154,7 +155,7 @@ const columnDefs: ColDef<GridRow>[] = [
     colId: 'maturity_date',
     field: 'maturity_date',
     headerName: 'Vencimiento',
-    width: 120,
+    width: 110,
     cellClass: 'num',
     valueFormatter: (p) => (p.value == null ? '' : fmtDate(p.value)),
   },
@@ -162,7 +163,7 @@ const columnDefs: ColDef<GridRow>[] = [
     colId: 'status',
     field: 'status',
     headerName: 'Estado',
-    width: 110,
+    width: 96,
     filter: false, // el selector de arriba filtra por estado
     valueFormatter: (p) => (p.value == null ? '' : (STATUS_LABEL[p.value as TradeStatus] ?? p.value)),
   },
@@ -170,7 +171,7 @@ const columnDefs: ColDef<GridRow>[] = [
     colId: 'pv',
     field: 'pv',
     headerName: 'PV',
-    width: 170,
+    width: 118,
     valueFormatter: (p) =>
       p.data?.error ? 'Error' : p.value == null || !p.data ? '' : fmtMoney(p.value, pvCurrency(p.data)),
     cellClassRules: {
@@ -183,7 +184,7 @@ const columnDefs: ColDef<GridRow>[] = [
     colId: 'pv_mxn',
     field: 'pv_mxn',
     headerName: 'PV MXN',
-    width: 160,
+    width: 108,
     valueFormatter: (p) => (p.data?.error ? 'Error' : p.value == null ? '' : fmtNumber(p.value, 2)),
     cellClassRules: {
       'portfolio__neg': (p) => typeof p.value === 'number' && p.value < 0,

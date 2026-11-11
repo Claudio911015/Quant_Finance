@@ -56,7 +56,7 @@ function moneyCol(colId: keyof PnlRow, headerName: string, showError = false): C
     colId,
     field: colId,
     headerName,
-    width: 150,
+    width: 118,
     valueFormatter: (p) =>
       showError && p.data?.error ? 'Error' : p.value == null ? '' : fmtNumber(p.value, 2),
     cellClassRules: {
@@ -67,12 +67,13 @@ function moneyCol(colId: keyof PnlRow, headerName: string, showError = false): C
   };
 }
 
-const columnDefs: ColDef<GridRow>[] = [
-  { colId: 'id', field: 'id', headerName: 'ID', width: 72, ...numberCell },
-  { colId: 'product', field: 'product', headerName: 'Producto', width: 140 },
-  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 160 },
-  { colId: 'status_from', field: 'status_from', headerName: 'Estado desde', width: 130, valueFormatter: statusFormatter },
-  { colId: 'status_to', field: 'status_to', headerName: 'Estado hasta', width: 130, valueFormatter: statusFormatter },
+/** Exportadas para la prueba de anchos: la suma de los anchos mínimos debe caber en 1280 px. */
+export const columnDefs: ColDef<GridRow>[] = [
+  { colId: 'id', field: 'id', headerName: 'ID', width: 56, ...numberCell },
+  { colId: 'product', field: 'product', headerName: 'Producto', width: 92 },
+  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 148 },
+  { colId: 'status_from', field: 'status_from', headerName: 'Estado desde', width: 112, valueFormatter: statusFormatter },
+  { colId: 'status_to', field: 'status_to', headerName: 'Estado hasta', width: 112, valueFormatter: statusFormatter },
   moneyCol('pv_from', 'PV desde'),
   moneyCol('pv_to', 'PV hasta'),
   moneyCol('settled', 'Liquidado'),
@@ -130,6 +131,7 @@ export default function PnlPanel() {
     const api = createGrid<GridRow>(gridEl.current!, {
       theme,
       columnDefs,
+      localeText: { noRowsToShow: 'Sin resultados: elige las fechas y presiona Calcular.' },
       defaultColDef: {
         sortable: true,
         tooltipValueGetter: (p) => rowTip(p.data),
