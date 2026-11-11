@@ -10,10 +10,13 @@ from desk.api import market, portfolio
 from desk.api.errors import ApiError
 from desk.api.market import MarketContext
 from desk.api.qf import qfpy
-from desk.api.validation import finite_number, number
+from desk.api.validation import MAX_HORIZON_DAYS, finite_number, number
 
 _FX_FACTOR = "USDMXN"
 _FX_BUMP_PCT = 1.0  # el delta FX se toma por diferencia central de ±1 %
+# Cota superior (inclusiva) de la vol diaria por unidad de factor: por encima, el VaR desborda a
+# Infinity/NaN. "bp" = puntos base (TIIE-F, SOFR); "ret" = fracción (USDMXN).
+_MAX_FACTOR_VOL = {"bp": 1000.0, "ret": 1.0}
 
 
 def _exposure_fns(mkt: MarketContext) -> List[Callable[[Dict[str, Any], float], float]]:
@@ -38,8 +41,10 @@ def _exposure_fns(mkt: MarketContext) -> List[Callable[[Dict[str, Any], float], 
     return fns
 
 
-def _factor_vols(body: Dict[str, Any], names: List[str]) -> Dict[str, float]:
-    """`factor_vols` opcional y parcial: {factor: vol diaria >= 0}; 400 `field: "factor_vols"`."""
+def _factor_vols(
+    body: Dict[str, Any], names: List[str], units: List[str]
+) -> Dict[str, float]:
+    """`factor_vols` opcional y parcial: {factor: vol diaria en [0, cota de su unidad]}; 400 `field: "factor_vols"`."""
     raw = body.get("factor_vols")
     if raw is None:
         return {}
@@ -53,9 +58,16 @@ def _factor_vols(body: Dict[str, Any], names: List[str]) -> Dict[str, float]:
                 "Factor desconocido en 'factor_vols': %s (válidos: %s)" % (key, ", ".join(names)),
                 "factor_vols",
             )
+        cap = _MAX_FACTOR_VOL.get(units[names.index(key)])
         if not finite_number(v) or v < 0:
             raise ApiError(
                 400, "La vol de '%s' en 'factor_vols' debe ser un número >= 0" % key, "factor_vols"
+            )
+        if cap is not None and v > cap:
+            raise ApiError(
+                400,
+                "La vol de '%s' en 'factor_vols' debe ser menor o igual que %g" % (key, cap),
+                "factor_vols",
             )
         out[key] = float(v)
     return out
@@ -65,13 +77,13 @@ def compute_var(
     conn: sqlite3.Connection, snapshot_id: str, body: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Cuerpo de `POST /api/risk/var`; valida `horizon_days`, `confidence` y `factor_vols`."""
-    horizon = number(body, "horizon_days", gt=0)
+    horizon = number(body, "horizon_days", gt=0, le=MAX_HORIZON_DAYS)
     confidence = number(body, "confidence", gt=0, lt=1)
     mkt = market.load_context(conn, snapshot_id)
     names = list(mkt.factors["names"])
     units = list(mkt.factors["units"])
     vols = list(mkt.factors["daily_vols"])
-    overrides = _factor_vols(body, names)
+    overrides = _factor_vols(body, names, units)
     vols = [overrides.get(n, v) for n, v in zip(names, vols)]
 
     fns = _exposure_fns(mkt)

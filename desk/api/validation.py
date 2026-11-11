@@ -13,6 +13,10 @@ MAX_AMOUNT = 1e13  # montos: notional, notional_usd, face, quantity
 MAX_PRICE = 1e6  # precios y strikes de precio: spot, strike de FX y de acción
 MAX_RATE = 10.0  # tasas y volatilidades en decimal (10 = 1000 %)
 MIN_RATE = -1.0  # cota inferior de las tasas con signo (fixed_rate, rate): por debajo, exp/descuento desbordan a NaN
+MAX_FREQUENCY = 365.0  # pagos por año de un bono: más que uno diario no tiene sentido
+MAX_HORIZON_DAYS = 3650.0  # horizonte máximo del VaR: 10 años
+
+NON_FINITE_MESSAGE = "El cálculo produjo un valor no finito con esos parámetros"
 
 
 def body_object() -> Dict[str, Any]:
@@ -23,6 +27,28 @@ def body_object() -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise ApiError(400, "El cuerpo debe ser un objeto JSON")
     return data
+
+
+def has_non_finite(obj: Any) -> bool:
+    """True si `obj` (dicts, listas y tuplas anidados) contiene algún float NaN o ±inf."""
+    stack = [obj]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, float):
+            if not math.isfinite(v):
+                return True
+        elif isinstance(v, dict):
+            stack.extend(v.values())
+        elif isinstance(v, (list, tuple)):
+            stack.extend(v)
+    return False
+
+
+def ensure_finite(payload: Any) -> Any:
+    """Devuelve `payload` tal cual, o 400 si lleva un no finito (que `jsonify` emitiría como JSON inválido)."""
+    if has_non_finite(payload):
+        raise ApiError(400, NON_FINITE_MESSAGE)
+    return payload
 
 
 def _missing(d: Dict[str, Any], name: str) -> bool:

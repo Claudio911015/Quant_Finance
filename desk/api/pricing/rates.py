@@ -10,7 +10,7 @@ from desk.api.errors import ApiError
 from desk.api.market import CURVES, MarketContext
 from desk.api.pricing.base import MAX_BOND_YEARS, MAX_PERIODS, MAX_YEARS, Product
 from desk.api.qf import qfpy
-from desk.api.validation import MAX_AMOUNT, MAX_RATE, MIN_RATE, choice, integer, number
+from desk.api.validation import MAX_AMOUNT, MAX_FREQUENCY, MAX_RATE, MIN_RATE, choice, integer, number
 
 _CURVE_NAMES = tuple(CURVES)
 _DAYS_PER_YEAR = 365.0
@@ -252,7 +252,7 @@ def _bond_validate(d: Dict[str, Any]) -> Dict[str, Any]:
         "face": number(d, "face", gt=0, le=MAX_AMOUNT),
         "coupon_rate": number(d, "coupon_rate", ge=0, le=MAX_RATE),
         "periods": integer(d, "periods", ge=1, le=MAX_PERIODS),
-        "frequency": number(d, "frequency", gt=0, required=False, default=2.0),
+        "frequency": number(d, "frequency", gt=0, le=MAX_FREQUENCY, required=False, default=2.0),
     }
     if p["periods"] / p["frequency"] > MAX_BOND_YEARS:
         raise ApiError(

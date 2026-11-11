@@ -47,7 +47,7 @@ SPECS: Dict[str, Dict[str, Any]] = {
         "base": {"curve": "TIIE-F", "face": 1e6, "coupon_rate": 0.07, "periods": 10, "frequency": 2.0},
         "req": ["face", "coupon_rate", "periods"],
         "gt0": ["face", "frequency"], "ge0": ["coupon_rate"], "free": [], "int1": ["periods"],
-        "choice": ["curve"], "cap": {"periods": 1200},
+        "choice": ["curve"], "cap": {"periods": 1200, "frequency": 365},
     },
     "fx_forward": {
         "base": {"side": "buy", "notional_usd": 1e6, "strike": 19.0, "days": 91},
