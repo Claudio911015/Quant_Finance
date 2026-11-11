@@ -128,6 +128,13 @@ def post_event(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) ->
     kind = body.get("type")
     if not isinstance(kind, str) or kind not in EVENT_TYPES:
         raise ApiError(400, "Tipo de evento desconocido: %s" % (kind,), "type")
+    # --- corte 5 --- el único `transfer` que se registra a mano es la confirmación de una liquidación
+    from desk.api import ops_settlements  # import tardío: ops_settlements importa este módulo
+
+    if kind == "transfer" and isinstance(body.get("data"), dict) \
+            and body["data"].get("kind") == ops_settlements.CONFIRMED_KIND:
+        return _confirmation_events(conn, trade_id, body)
+    # --- fin corte 5 ---
     if kind not in API_EVENT_TYPES:
         raise ApiError(400, "El tipo '%s' no se registra por la API" % kind, "type")
     if kind == "exercise" and trade["product"] not in _OPTIONS:
@@ -135,7 +142,10 @@ def post_event(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) ->
     event_date = iso_date(body, "event_date")
     if event_date < trade["trade_date"]:
         raise ApiError(400, "'event_date' no puede ser anterior a 'trade_date'", "event_date")
-    if not trade["events"]:  # operación sin su `execution` (BD externa): no hay con qué encadenar ni ordenar
+    # --- corte 5 --- las confirmaciones de liquidación no cuentan para el orden cronológico
+    ordered = [e for e in trade["events"] if not ops_settlements.is_confirmation(e)]
+    # --- fin corte 5 ---
+    if not ordered:  # operación sin su `execution` (BD externa): no hay con qué encadenar ni ordenar
         raise ApiError(
             409, "La operación no tiene eventos registrados (falta su 'execution'): no admite más", "id"
         )
@@ -150,7 +160,7 @@ def post_event(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) ->
         data = _terms_data(trade, event_date, data)
     else:  # termination / exercise
         data = {"amount": number(data, "amount", ge=-MAX_AMOUNT, le=MAX_AMOUNT)}
-    last = max(e["event_date"] for e in trade["events"])
+    last = max(e["event_date"] for e in ordered)
     if event_date < last:
         raise ApiError(
             409,
@@ -175,3 +185,22 @@ def post_event(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) ->
             )
         )
     return created
+
+
+# --- corte 5 ---
+def _confirmation_events(conn: sqlite3.Connection, trade_id: int, body: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """`transfer` de confirmación por `POST …/events`: misma validación que `POST …/settlements`."""
+    from desk.api import ops_settlements  # import tardío: ops_settlements importa este módulo
+
+    data = body["data"]
+    mapped = {"date": body.get("event_date"), "amount": data.get("amount"),
+              "currency": data.get("currency"), "snapshot": data.get("snapshot")}
+    try:
+        result = ops_settlements.confirm_settlement(conn, trade_id, mapped)
+    except ApiError as e:
+        if e.field == "date":  # en este cuerpo la fecha va en `event_date`
+            raise ApiError(e.status, e.error.replace("'date'", "'event_date'"), "event_date")
+        raise
+    event = result["event"]
+    return [{**event, "event_date": date.fromisoformat(event["event_date"])}]
+# --- fin corte 5 ---
