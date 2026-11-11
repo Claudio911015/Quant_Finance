@@ -96,9 +96,14 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .shell__select {
+  min-width: 0;
+  /* Un snapshot rodado varias veces arrastra una etiqueta larga: sin tope empuja el resto de la barra fuera de la pantalla. */
+  max-width: 420px;
+  text-overflow: ellipsis;
   height: 28px;
   padding: 0 var(--space-2);
   background: var(--bg);
