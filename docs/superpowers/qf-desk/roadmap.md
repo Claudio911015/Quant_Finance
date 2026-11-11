@@ -24,12 +24,13 @@ El corte 1 (en curso) deja una calculadora con portafolio y riesgo. Lo que lo se
 ```
 Corte 1  Workstation núcleo ........................ hecho y auditado
 Corte 2  La operación con vida + mercado con historia ... hecho y auditado 2026-11-11 (docs/superpowers/qf-desk/corte2/)
-Corte 3  Curvas MXN multi-curva + cross currency swap
+Corte 3  Curvas MXN multi-curva + cross currency swap ... hecho y auditado en 2 rondas 2026-11-11 (corte3/)
 Corte 4  Contabilidad de coberturas IFRS 9 ......... hecho y auditado en 3 rondas 2026-11-11 (corte4/); falta revisión de un contador
-Corte 5  Operaciones: flujos, confirmaciones, conciliación (requiere 2)
-Corte 6  Riesgo avanzado: P&L explicado, límites, VaR histórico, CVA (requiere 2)
-Corte 7  Validación independiente y reporte de credibilidad
-Corte 8  Plataforma: usuarios, aprobación, datos reales, despliegue
+Corte 5  Operaciones: flujos, confirmaciones, conciliación ... hecho y auditado en 2 rondas 2026-11-11 (corte5/)
+Corte 6  Riesgo avanzado: P&L explicado, límites, VaR histórico, CVA ... hecho y auditado en 2 rondas 2026-11-11 (corte6/)
+Corte 7  Validación independiente y reporte de credibilidad ... hecho y auditado 2026-11-11 (corte7/): 62 casos contra QuantLib, 62 dentro de tolerancia
+Corte 8  Plataforma ... alcance reducido hecho y auditado 2026-11-11 (corte8/): fijaciones reales de SOFR, cliente de Banxico (falta token), respaldo, carga por pantalla.
+         Pendiente de un cliente piloto: usuarios, aprobación de dos personas, empresas separadas, contenedores, licencia, archivos de PiP/Valmer
 ```
 
 Orden recomendado: 2 → 4 → 3 → 5 → 6 → 7 → 8. El 4 va antes que el 3 porque es por lo que el cliente paga; el 3 mejora la exactitud y puede esperar. El 7 puede adelantarse si un prospecto pide evidencia.
@@ -199,3 +200,15 @@ Para lanzar un corte: `/fableorchestrate corte N de docs/superpowers/qf-desk/roa
 - Banorte, valuación de swaps de TIIE: https://www.banorte.com/dam/jcr:46935817-9fa9-46ff-bdb4-5514b03f396a/03.%20Valuaci%C3%B3n%20de%20Swaps%20de%20TIIE%20Legacy.pdf
 - CME, metodología MXN: https://www.cmegroup.com/articles/files/2024/mxn-methodology-and-examples.pdf
 - Contabilidad de coberturas (fichas de proveedores): https://iongroup.com/blog/treasury/ifrs-9-hedge-accounting-from-policy-to-execution/
+
+## 6. Estado al cierre del 2026-11-11
+
+Los cortes 2 a 7 y la versión reducida del 8 están construidos, auditados por un agente independiente y fusionados en `feat/qf-desk`. Los cortes 3, 5, 6 y 7 se construyeron en paralelo desde el mismo commit y se integraron después (`corte8/audit.md` cubre también esa integración).
+
+Qué sigue abierto, por orden de importancia para vender:
+
+1. **Revisión de un contador IFRS 9** de la contabilidad de coberturas (corte 4). La pantalla lo avisa de forma permanente.
+2. **Token de Banxico** (`BANXICO_TOKEN`): el cliente de TIIE de Fondeo y FIX está escrito y probado solo con respuestas simuladas; no se ha probado contra la API real. El token lleva captcha y lo genera Claudio en `https://www.banxico.org.mx/SieAPIRest/service/v1/token`.
+3. **Curva TIIE-F, superficie de volatilidad, Hull-White, puntos forward y base de cross currency siguen sintéticos.** No hay fuente gratuita; entran con el archivo del proveedor de precios del cliente.
+4. **Plataforma multiusuario** (resto del corte 8): espera a un cliente piloto.
+5. Límites declarados en Metodología por corte (envejecimiento del cap/floor, CVA informativo solo de swaps de tasa con un escalón inicial de hasta un cupón diario, conciliación indicativa, FpML solo de irs/fx_forward/fx_option, confirmación imprimible sin plantilla para cross currency swap).

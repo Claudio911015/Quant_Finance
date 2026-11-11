@@ -11,7 +11,7 @@ cmake -S . -B build
 # Build everything
 cmake --build build --target all 2>&1
 
-# Run C++ tests (GoogleTest) — 402 tests, must all pass before commit
+# Run C++ tests (GoogleTest) — 463 tests, must all pass before commit
 cd build && ctest --output-on-failure 2>&1
 
 # Single test file
@@ -77,13 +77,13 @@ Workstation local de valuación y riesgo sobre `qfpy` (rama `feat/qf-desk`): bac
 Las cuatro suites (todas verdes antes de commit; `desk/api` y vitest crecen con cada corte, la cuenta vigente la da su propia salida):
 
 ```bash
-cmake --build build -j4 && (cd build && ctest --output-on-failure)   # C++ (402)
+cmake --build build -j4 && (cd build && ctest --output-on-failure)   # C++ (463)
 cmake --build build --target pytests                                  # bindings qfpy (unittest)
 /home/claudio/anaconda3/bin/python -m pytest desk/api/tests -q        # backend
 cd desk/ui && npm test && npm run build                               # UI (vitest + tsc -b && vite build)
 ```
 
-Diseño, plan y hoja de ruta: `docs/superpowers/qf-desk/` (`design.md`, `plan.md`, `roadmap.md`) y, por corte, `corte2/` (`design.md`, `plan.md`). Para pruebas con servidor, usar otro puerto que 5070 y una base temporal.
+Diseño, plan y hoja de ruta: `docs/superpowers/qf-desk/` (`design.md`, `plan.md`, `roadmap.md`) y, por corte, `corte2/` … `corte8/` e `integracion/` (`design.md`, `plan.md`, `audit.md`). El estado y lo pendiente están en la sección 6 de `roadmap.md`. Fijaciones reales: `POST /api/fixings/fetch` (SOFR de la Fed de Nueva York; Banxico requiere `BANXICO_TOKEN`). Respaldo: `python -m desk.api.backup`. Validación contra QuantLib: `desk/validation/make_report.sh` (regenerar tras tocar valuación). Para pruebas con servidor, usar otro puerto que 5070 y una base temporal.
 
 ## File Conventions
 

@@ -105,7 +105,7 @@ Quedan fuera hasta tener un cliente piloto, cuyos requisitos mandan: usuarios, r
 Desde la raíz del repo:
 
 ```bash
-# C++ (396 tests)
+# C++ (463 tests)
 cmake --build build -j4 2>&1 | tail -3 && cd build && ctest --output-on-failure 2>&1 | tail -3; cd ..
 
 # Bindings Python existentes
