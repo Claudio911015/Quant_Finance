@@ -186,7 +186,8 @@ def test_bond_projected_flows_add_up_to_the_valuation_pv(client):
     _roll(client, "D40", 40)
     body = _flows(client, tid, "D40")
     settled, projected = _split(body)
-    assert settled == [] and len(projected) > 20
+    assert [(f["date"], f["kind"]) for f in settled] == [(_iso(30), "coupon")]  # el bono ya liquida cupones
+    assert len(projected) > 20
     assert all(f["kind"] == "coupon" and f["currency"] == "MXN" for f in projected)
     pv = _rows(client, "D40")[tid]["pv"]
     assert sum(f["pv"] for f in projected) == pytest.approx(pv, rel=1e-9)

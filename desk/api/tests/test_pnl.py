@@ -202,17 +202,18 @@ def test_trade_agreed_after_the_final_snapshot_is_all_zero(client):
 
 # --------------------------------------------------------------------- avisos
 
-def test_cap_and_bond_maturing_in_the_window_warn_that_they_have_no_settlement(client):
+def test_cap_maturing_in_the_window_warns_that_it_has_no_settlement_but_a_bond_does_settle(client):
     cap = _book(client, "cap_floor", {"curve": "TIIE-F", "cap_type": "cap", "notional": 1e8,
                                        "strike": 0.07, "periods": 1})
     bond = _book(client, "bond", {"curve": "TIIE-F", "face": 100.0, "coupon_rate": 0.08,
                                    "periods": 1, "frequency": 12.0})
     _roll(client, "D40", 40)
     body, rows = _pnl(client, "MX-DEMO", "D40")
-    for tid, day in ((cap, 28), (bond, 30)):
-        row = rows[tid]
-        assert row["settled"] == 0 and row["status_to"] == "vencida" and row["pv_to"] == 0
-        assert [(w["code"], w["dates"]) for w in row["warnings"]] == [("no_settlement", [_iso(day)])]
+    assert rows[cap]["settled"] == 0 and rows[cap]["status_to"] == "vencida" and rows[cap]["pv_to"] == 0
+    assert [(w["code"], w["dates"]) for w in rows[cap]["warnings"]] == [("no_settlement", [_iso(28)])]
+    # el bono (vence el día 30) liquida su cupón y su principal y ya no avisa `no_settlement`
+    assert rows[bond]["status_to"] == "vencida" and rows[bond]["pv_to"] == 0 and rows[bond]["warnings"] == []
+    assert rows[bond]["settled"] == pytest.approx(100.0 * 0.08 / 12.0 + 100.0, rel=1e-12)
     _assert_adds_up(body)
 
 
