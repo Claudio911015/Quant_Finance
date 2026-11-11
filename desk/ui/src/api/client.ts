@@ -23,31 +23,54 @@ export class ApiError extends Error {
   }
 }
 
-function pending(): never {
-  throw new Error('pendiente');
+const BASE = '/api';
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const init: RequestInit = { method };
+  if (body !== undefined) {
+    init.headers = { 'Content-Type': 'application/json' };
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(`${BASE}${path}`, init);
+  if (res.status >= 400) {
+    let message = `Error ${res.status}`;
+    let field: string | null = null;
+    try {
+      const data = await res.json();
+      if (typeof data?.error === 'string') message = data.error;
+      if (typeof data?.field === 'string') field = data.field;
+    } catch {
+      // cuerpo no JSON: se conserva el mensaje genérico
+    }
+    throw new ApiError(res.status, message, field);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
 }
 
-export function listSnapshots(): Promise<SnapshotSummary[]> {
-  return pending();
+export async function listSnapshots(): Promise<SnapshotSummary[]> {
+  const data = await request<{ snapshots: SnapshotSummary[] }>('GET', '/market/snapshots');
+  return data.snapshots;
 }
 
 export function getSnapshot(id: string): Promise<Snapshot> {
-  return pending();
+  return request('GET', `/market/snapshots/${encodeURIComponent(id)}`);
 }
 
 export function updateSnapshot(
   id: string,
   body: { quotes?: { id: string; rate: number }[]; spot?: number },
 ): Promise<Snapshot> {
-  return pending();
+  return request('PUT', `/market/snapshots/${encodeURIComponent(id)}`, body);
 }
 
 export function price(product: ProductId, body: Record<string, unknown>): Promise<PriceResponse> {
-  return pending();
+  return request('POST', `/price/${product}`, body);
 }
 
-export function listTrades(): Promise<Trade[]> {
-  return pending();
+export async function listTrades(): Promise<Trade[]> {
+  const data = await request<{ trades: Trade[] }>('GET', '/trades');
+  return data.trades;
 }
 
 export function createTrade(body: {
@@ -55,26 +78,26 @@ export function createTrade(body: {
   counterparty: string;
   params: Record<string, unknown>;
 }): Promise<Trade> {
-  return pending();
+  return request('POST', '/trades', body);
 }
 
 export function deleteTrade(id: number): Promise<void> {
-  return pending();
+  return request('DELETE', `/trades/${id}`);
 }
 
 export function valuation(snapshot: string): Promise<ValuationResponse> {
-  return pending();
+  return request('GET', `/portfolio/valuation?snapshot=${encodeURIComponent(snapshot)}`);
 }
 
 export function riskDv01(snapshot: string): Promise<Dv01Response> {
-  return pending();
+  return request('POST', '/risk/dv01', { snapshot });
 }
 
 export function riskScenarios(
   snapshot: string,
   scenarios: ScenarioSpec[],
 ): Promise<ScenariosResponse> {
-  return pending();
+  return request('POST', '/risk/scenarios', { snapshot, scenarios });
 }
 
 export function riskVar(
@@ -82,5 +105,9 @@ export function riskVar(
   horizonDays: number,
   confidence: number,
 ): Promise<VarResponse> {
-  return pending();
+  return request('POST', '/risk/var', {
+    snapshot,
+    horizon_days: horizonDays,
+    confidence,
+  });
 }
