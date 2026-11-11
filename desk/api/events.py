@@ -66,9 +66,19 @@ def insert_event(
     """
     if type not in EVENT_TYPES:
         raise ValueError("Tipo de evento desconocido: %s" % type)
-    prev = conn.execute(
-        "SELECT MAX(id) FROM trade_events WHERE trade_id = ?", (trade_id,)
-    ).fetchone()[0]
+    # --- corte 5 --- las confirmaciones de liquidación son registro, no ciclo de vida: no extienden
+    # la cadena (una terminación posterior no debe apuntar a una confirmación de fecha anterior)
+    from desk.api import ops_settlements  # import tardío: ops_settlements importa este módulo
+
+    prev = None
+    for row in conn.execute(
+        "SELECT id, type, data FROM trade_events WHERE trade_id = ? ORDER BY id DESC", (trade_id,)
+    ):
+        data_ = json.loads(row["data"]) if row["type"] == "transfer" else {}
+        if not ops_settlements.is_confirmation({"type": row["type"], "data": data_ if isinstance(data_, dict) else {}}):
+            prev = row["id"]
+            break
+    # --- fin corte 5 ---
     created_at = now_iso()
     cur = conn.execute(
         "INSERT INTO trade_events (trade_id, type, event_date, data, prev_event_id, created_at)"

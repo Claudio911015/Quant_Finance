@@ -359,3 +359,19 @@ def test_the_chronological_rule_still_holds_without_confirmations(client):
     back = {"type": "quantity_change", "event_date": "2026-11-15", "data": {"notional": 3e6}}
     r = client.post("/api/trades/%d/events" % t["id"], json=back)
     assert r.status_code == 409 and r.get_json()["field"] == "event_date"
+
+
+# ------------------------------------------------- las confirmaciones no entran en la cadena del ciclo de vida
+
+def test_confirmations_do_not_enter_the_lifecycle_prev_event_chain(app, rolled):
+    """Auditoría corte 5: una terminación posterior apuntaba a la confirmación (de fecha anterior)."""
+    execution_id = events_in_db(app, 1)[0][0]
+    first = settle(rolled).get_json()["event"]
+    assert first["prev_event_id"] == execution_id
+    term = rolled.post("/api/trades/1/events", json={
+        "type": "termination", "event_date": iso(D1_AS_OF), "data": {"amount": 10.0},
+    })
+    assert term.status_code == 201, term.get_json()
+    termination, transfer = term.get_json()["events"]
+    assert termination["prev_event_id"] == execution_id
+    assert transfer["prev_event_id"] == termination["id"]
