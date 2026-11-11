@@ -94,7 +94,7 @@ const GRID_THEME = themeQuartz.withParams({
 });
 
 const CASHFLOW_COLUMNS: ColDef<Cashflow>[] = [
-  { headerName: 'Fecha', field: 'date', minWidth: 100, flex: 1 },
+  { headerName: 'Fecha', field: 'date', minWidth: 116, flex: 1.2 },
   { headerName: 'Días', field: 'days', minWidth: 64, flex: 0.6, cellClass: 'num', headerClass: 'ag-right-aligned-header' },
   {
     headerName: 'Monto',
