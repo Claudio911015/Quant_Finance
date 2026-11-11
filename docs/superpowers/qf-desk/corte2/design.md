@@ -59,3 +59,18 @@ Novaciones, asignaciones, compensación; calendarios de días inhábiles y ajust
 - Tareas C++ en serie (comparten `build/`); contratos (rutas y formas de datos) en la primera tarea; una tarea final de integración contra el backend real.
 - Commits por tarea con rutas explícitas (`git commit -- <rutas>`), `GRAPHIFY_SKIP_HOOK=1`, autor Claudio, sin `Co-Authored-By`, sin `git stash`, sin push.
 - No tocar `~/Git/MarketDataFeed`. Puerto 5070 en uso por el desk: los agentes usan puertos propios.
+
+## Aclaraciones de Fable al plan (P1–P10)
+
+- **P1** `DELETE /api/trades/<id>` se conserva pero responde siempre 409 con el mensaje "una operación no se borra: termínala". La interfaz quita el botón de borrar del blotter.
+- **P2** Valuar antes de `trade_date`: estado `no_pactada`, PV 0, fuera de riesgo y de flujos. En P&L, una operación pactada dentro de la ventana tiene `pv_from = 0` (no se modela prima ni pago inicial; se declara).
+- **P3** Bono y cap/floor envejecidos: **aproximación declarada**, sin C++ nuevo. Se valúan con el tiempo restante y el número de periodos enteros restantes (`ceil`); el caplet o cupón en curso ya fijado se omite. Metodología lo dice; el tratamiento exacto queda para el corte 3.
+- **P4** Swaption: `maturity_date` es la **expiración de la opción**; el plazo del swap subyacente sigue en `terms`. Opciones (FX, swaption, acción) vencidas sin evento `exercise`: `vencida`, PV 0 y aviso "vencida sin ejercicio registrado". No hay ejercicio automático.
+- **P5** Aritmética de montos ya fijados (`N·K·τ`, `N·(factor − 1)`, `N·(FIX − K)`) se acepta en Python; la composición de fijaciones usa siempre `compoundOvernight` de C++ y la tasa a un día de la curva sale de los factores de descuento que ya expone `qfpy`. No hay más tareas C++.
+- **P6** Se acepta lo provisional: importe positivo = cobra el tenedor, en MXN, el `transfer` cuenta en `settled`; `exercise` solo para `fx_option`, `swaption` y `equity_option`.
+- **P7** Fechas por omisión: `trade_date = start_date = as_of` del snapshot indicado en la petición (o `MX-DEMO` si no viene). Si viene `maturity_date`, manda sobre el plazo; si no, `maturity_date = start_date + plazo`. En `irs`, `periods = max(1, round(días / días_del_periodo))` y `maturity_date` se ajusta a `start_date + periods × periodo`; la respuesta devuelve la fecha ajustada. Migración: transacción única; una fila corrupta aborta el arranque con un error que la nombra, sin migración parcial.
+- **P8** `terms_change` solo admite el campo de precio del producto (`fixed_rate` o `strike`). Basta la API y su test; ninguna pantalla lo usa.
+- **P9** `execution`, `reset` y `transfer` enviados por la API → 400 con `field: "type"`.
+- **P10** Tras un `quantity_change` a mitad de periodo, el cupón usa el nocional vigente a la fecha de pago. Se declara.
+- **Método de R3/R4** Se acepta armar la "curva desplazada" con un snapshot cuyos pilares caen en los pagos restantes. La ruta real es `/api/portfolio/valuation` (R10 se refiere a ella).
+- **P11** La regla de `irs` vale igual para `cap_floor` y `bond` con `maturity_date` explícita: `periods = max(1, round(días / días_del_periodo))` y la fecha se ajusta; no se rechaza con 400.
