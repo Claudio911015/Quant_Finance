@@ -28,6 +28,8 @@ if(GTest_FOUND)
         test_dualcurve.cpp
         test_ois_bootstrap.cpp
         test_ois_swap.cpp
+        test_fx_forward.cpp
+        test_fx_option.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)
