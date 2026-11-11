@@ -3,6 +3,7 @@
 #include <qf/math/daycount.hpp>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace qf::instruments {
 
@@ -88,39 +89,97 @@ CapFloor::CapFloor(CapFloorType type, double notional, double strike,
         throw std::invalid_argument("CapFloor: Hull-White parameter sigma must be positive");
 }
 
-double CapFloor::price(const termstructure::YieldCurve& curve) const
+CapFloor::CapFloor(CapFloorType type, double notional, double strike,
+                   std::vector<double> boundaryTimes,
+                   double hw_a, double hw_sigma,
+                   math::DayCountConvention dcc)
+    : Instrument(boundaryTimes.empty() ? 0.0 : boundaryTimes.back()),
+      type_(type), notional_(notional), strike_(strike),
+      frequency_(0.0), hw_a_(hw_a), hw_sigma_(hw_sigma), dcc_(dcc),
+      boundaryTimes_(std::move(boundaryTimes))
 {
-    int n = static_cast<int>(std::round(maturity() * frequency_));
-    if (n < 1)
-        throw std::invalid_argument(
-            "CapFloor: maturity must cover at least half a payment period "
-            "(maturity * frequency rounds to zero periods)");
+    if (!(notional > 0.0) || !std::isfinite(notional))
+        throw std::invalid_argument("CapFloor: notional must be positive");
+    if (!(strike > 0.0) || !std::isfinite(strike))
+        throw std::invalid_argument("CapFloor: strike must be positive");
+    if (!(hw_a > 0.0) || !std::isfinite(hw_a))
+        throw std::invalid_argument("CapFloor: Hull-White parameter a must be positive");
+    if (!(hw_sigma > 0.0) || !std::isfinite(hw_sigma))
+        throw std::invalid_argument("CapFloor: Hull-White parameter sigma must be positive");
+    if (boundaryTimes_.size() < 2)
+        throw std::invalid_argument("CapFloor: boundaryTimes needs at least two entries (one caplet)");
+    if (!std::isfinite(boundaryTimes_.front()) || boundaryTimes_.front() < 0.0)
+        throw std::invalid_argument("CapFloor: boundaryTimes must start at 0 or later");
+    for (std::size_t i = 1; i < boundaryTimes_.size(); ++i) {
+        if (!std::isfinite(boundaryTimes_[i]) || !(boundaryTimes_[i] > boundaryTimes_[i - 1]))
+            throw std::invalid_argument("CapFloor: boundaryTimes must be finite and strictly increasing");
+    }
+}
 
-    // dt:  uniform time step between payment dates (calendar schedule, not affected by DCC).
-    // tau: accrual fraction for interest calculation (affected by DCC).
-    double dt  = 1.0 / frequency_;
-    double tau = math::periodFraction(frequency_, dcc_);
+std::vector<CapFloor::Caplet> CapFloor::caplets(const termstructure::YieldCurve& curve) const
+{
+    // One accrual period per caplet: [start, end] with calendar length dt = end − start
+    // (drives the HW σ_p formula) and accrual fraction tau (drives the strike scaling).
+    struct Period { double start, end, dt, tau; };
+    std::vector<Period> periods;
 
-    // Strike price of the embedded ZCB option: X = 1/(1+K*tau).
-    // The caplet/floorlet payout is N*(1+K*tau) * hwBondOption(X, ...).
-    double X     = 1.0 / (1.0 + strike_ * tau);
-    double scale = notional_ * (1.0 + strike_ * tau);
+    if (boundaryTimes_.empty()) {
+        // Regular calendar from maturity / frequency.
+        int n = static_cast<int>(std::round(maturity() * frequency_));
+        if (n < 1)
+            throw std::invalid_argument(
+                "CapFloor: maturity must cover at least half a payment period "
+                "(maturity * frequency rounds to zero periods)");
+        double dt  = 1.0 / frequency_;
+        double tau = math::periodFraction(frequency_, dcc_);
+        periods.reserve(n);
+        for (int i = 1; i <= n; ++i)
+            periods.push_back({(i - 1) * dt, i * dt, dt, tau});
+    } else {
+        periods.reserve(boundaryTimes_.size() - 1);
+        for (std::size_t i = 1; i < boundaryTimes_.size(); ++i) {
+            double dt = boundaryTimes_[i] - boundaryTimes_[i - 1];
+            periods.push_back({boundaryTimes_[i - 1], boundaryTimes_[i], dt,
+                               math::periodFraction(1.0 / dt, dcc_)});
+        }
+    }
 
-    double total = 0.0;
-    for (int i = 1; i <= n; ++i) {
-        double T_start = (i - 1) * dt;  // option expiry: start of accrual period
-        double T_end   = i * dt;        // bond maturity: end of accrual period
+    std::vector<Caplet> out;
+    out.reserve(periods.size());
+    for (const Period& p : periods) {
+        // Strike price of the embedded ZCB option: X = 1/(1+K*tau).
+        // The caplet/floorlet payout is N*(1+K*tau) * hwBondOption(X, ...).
+        double X     = 1.0 / (1.0 + strike_ * p.tau);
+        double scale = notional_ * (1.0 + strike_ * p.tau);
 
-        double P_start = (i == 1) ? 1.0 : curve.discountFactor(T_start);
-        double P_end   = curve.discountFactor(T_end);
+        // A caplet that starts today has P(0,0) = 1 (DF(0) is not defined on the curve).
+        double P_start = (p.start < 1e-12) ? 1.0 : curve.discountFactor(p.start);
+        double P_end   = curve.discountFactor(p.end);
 
         // Pass dt (the time interval T_end - T_start) as the bond tenor parameter,
         // since the HW σ_p formula depends on the length of the period in years,
         // not on the accrual fraction.
-        total += hwBondOption(type_, P_start, P_end, X, T_start, dt,
-                              hw_a_, hw_sigma_);
+        out.push_back({p.end, scale * hwBondOption(type_, P_start, P_end, X, p.start, p.dt,
+                                                   hw_a_, hw_sigma_)});
     }
-    return scale * total;
+    return out;
+}
+
+double CapFloor::price(const termstructure::YieldCurve& curve) const
+{
+    double total = 0.0;
+    for (const Caplet& c : caplets(curve))
+        total += c.value;
+    return total;
+}
+
+double CapFloor::priceDualCurve(const termstructure::YieldCurve& projection,
+                                const termstructure::YieldCurve& discount) const
+{
+    double total = 0.0;
+    for (const Caplet& c : caplets(projection))
+        total += c.value * discount.discountFactor(c.tEnd) / projection.discountFactor(c.tEnd);
+    return total;
 }
 
 double CapFloor::calculatePV(const core::MarketEnvironment& env) const

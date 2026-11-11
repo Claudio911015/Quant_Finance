@@ -50,6 +50,19 @@ public:
     /// @throws std::invalid_argument if swapTenor * frequency rounds to zero payments.
     double price(const termstructure::YieldCurve& curve) const;
 
+    /// @brief Price with a projection curve (Hull-White price) apart from the discount curve.
+    ///
+    /// Deterministic basis, not a two-curve Hull-White model: the price on the projection curve
+    /// is carried to the discount curve with the ratio of the underlying swap's annuities,
+    ///   price(projection) · A_d / A_p,   A = Σ_{k=1..n} τ · DF(expiry + k/frequency),
+    /// with n = round(swapTenor · frequency) and τ = periodFraction(frequency, dcc).
+    /// @param projection  Curve the swaption is priced on (the index curve).
+    /// @param discount    Curve the payments are discounted with (e.g. the collateral curve).
+    /// @return            Present value; equals price(projection) when discount == projection.
+    /// @throws std::invalid_argument as price().
+    double priceDualCurve(const termstructure::YieldCurve& projection,
+                          const termstructure::YieldCurve& discount) const;
+
     /// @brief Implement Instrument interface — delegates to price(env.curve()).
     double calculatePV(const core::MarketEnvironment& env) const override;
 

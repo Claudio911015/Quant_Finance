@@ -194,6 +194,26 @@ double Swaption::price(const termstructure::YieldCurve& curve) const
     return total;
 }
 
+double Swaption::priceDualCurve(const termstructure::YieldCurve& projection,
+                                const termstructure::YieldCurve& discount) const
+{
+    // price() validates the tenor (n >= 1) and throws before the annuities are needed.
+    double basePrice = price(projection);
+
+    int n = static_cast<int>(std::round(swapTenor_ * frequency_));
+    double dt  = 1.0 / frequency_;
+    double tau = math::periodFraction(frequency_, dcc_);
+
+    // Annuity of the underlying swap: Σ τ · DF(expiry + k·dt).
+    double annProj = 0.0, annDisc = 0.0;
+    for (int k = 1; k <= n; ++k) {
+        double T = expiry_ + k * dt;
+        annProj += tau * projection.discountFactor(T);
+        annDisc += tau * discount.discountFactor(T);
+    }
+    return basePrice * annDisc / annProj;
+}
+
 double Swaption::calculatePV(const core::MarketEnvironment& env) const
 {
     return price(env.curve());

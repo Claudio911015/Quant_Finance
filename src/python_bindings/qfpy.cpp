@@ -186,7 +186,18 @@ PYBIND11_MODULE(qfpy, m) {
         .def(py::init<double, double, int, double, qf::math::DayCountConvention>(),
              py::arg("faceValue"), py::arg("couponRate"), py::arg("periods"), py::arg("frequency") = 2.0,
              py::arg("dcc") = qf::math::DayCountConvention::ACT_365)
+        .def(py::init<double, double, double, std::vector<double>, double,
+                      qf::math::DayCountConvention>(),
+             py::arg("faceValue"), py::arg("couponRate"), py::arg("frequency"),
+             py::arg("payTimes"), py::arg("prevCouponTime"),
+             py::arg("dcc") = qf::math::DayCountConvention::ACT_365,
+             "Bond over an explicit calendar: payTimes are the remaining payment times in years "
+             "(> 0, strictly increasing) and prevCouponTime (<= 0) the last paid coupon.")
         .def("price", &qf::instruments::Bond::price)
+        .def("accrued_interest", &qf::instruments::Bond::accruedInterest,
+             "Coupon accrued since the previous coupon date (0 for the periods constructor).")
+        .def("clean_price", &qf::instruments::Bond::cleanPrice, py::arg("curve"),
+             "Dirty price minus the accrued interest.")
         .def("cash_flow_schedule", &qf::instruments::Bond::cashFlowSchedule,
              "List of (time in years, cash flow amount) per coupon period; the last "
              "amount includes the principal.")
@@ -801,8 +812,17 @@ PYBIND11_MODULE(qfpy, m) {
              py::arg("frequency"), py::arg("hw_a"), py::arg("hw_sigma"),
              py::arg("dcc") = qf::math::DayCountConvention::ACT_365,
              "Cap or floor priced analytically under Hull-White.")
+        .def(py::init<qf::instruments::CapFloorType, double, double, std::vector<double>,
+                      double, double, qf::math::DayCountConvention>(),
+             py::arg("type"), py::arg("notional"), py::arg("strike"), py::arg("boundary_times"),
+             py::arg("hw_a"), py::arg("hw_sigma"),
+             py::arg("dcc") = qf::math::DayCountConvention::ACT_365,
+             "Cap or floor over an explicit caplet calendar t_0 < t_1 < ... < t_n (years).")
         .def("price", &qf::instruments::CapFloor::price, py::arg("curve"),
-             "Present value against a YieldCurve.");
+             "Present value against a YieldCurve.")
+        .def("price_dual", &qf::instruments::CapFloor::priceDualCurve,
+             py::arg("projection"), py::arg("discount"),
+             "Caplets on the projection curve, each times DF_discount/DF_projection at its payment.");
 
     py::enum_<qf::instruments::SwaptionType>(m, "SwaptionType")
         .value("Payer",    qf::instruments::SwaptionType::Payer)
@@ -816,7 +836,10 @@ PYBIND11_MODULE(qfpy, m) {
              py::arg("dcc") = qf::math::DayCountConvention::ACT_365,
              "European swaption priced under Hull-White (Jamshidian decomposition).")
         .def("price", &qf::instruments::Swaption::price, py::arg("curve"),
-             "Present value against a YieldCurve.");
+             "Present value against a YieldCurve.")
+        .def("price_dual", &qf::instruments::Swaption::priceDualCurve,
+             py::arg("projection"), py::arg("discount"),
+             "Price on the projection curve times the swap annuity ratio discount/projection.");
 
     // ------------------------------------------------------------------ //
     // Delta-normal VaR over signed factor exposures                       //

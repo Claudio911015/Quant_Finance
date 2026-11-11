@@ -34,6 +34,7 @@ if(GTest_FOUND)
         test_fx_option.cpp
         test_delta_normal_var.cpp
         test_bond_cashflows.cpp
+        test_bond_schedule.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)

@@ -240,3 +240,36 @@ TEST(Swaption, PriceThrowsWhenTenorCoversNoPayments) {
     Swaption one(SwaptionType::Payer, 1e6, 0.05, 1.0, 0.25, 2.0, 0.1, 0.01);
     EXPECT_NO_THROW(one.price(curve));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Dual-curve pricing (QF Desk, corte 3): price(projection) x annuity ratio
+// ═══════════════════════════════════════════════════════════════════════════
+
+TEST(SwaptionDual, SameCurveForBothGivesThePlainPrice) {
+    auto curve = slopedCurve();
+    for (SwaptionType type : {SwaptionType::Payer, SwaptionType::Receiver}) {
+        Swaption s(type, 1e8, 0.05, 1.0, 5.0, 2.0, 0.03, 0.01);
+        double plain = s.price(curve);
+        EXPECT_LT(std::fabs(s.priceDualCurve(curve, curve) - plain) / std::fabs(plain), 1e-12);
+    }
+}
+
+TEST(SwaptionDual, IsThePriceTimesTheAnnuityRatio) {
+    auto projection = flatCurve(0.05);
+    auto discount   = flatCurve(0.048);   // 20 bp below: discounts less
+    for (SwaptionType type : {SwaptionType::Payer, SwaptionType::Receiver}) {
+        const double expiry = 1.0, tenor = 5.0, freq = 2.0;
+        Swaption s(type, 1e8, 0.05, expiry, tenor, freq, 0.03, 0.01);
+        double ratio = annuity(discount, expiry, tenor, freq) / annuity(projection, expiry, tenor, freq);
+        double expected = s.price(projection) * ratio;
+        EXPECT_LT(std::fabs(s.priceDualCurve(projection, discount) - expected) / std::fabs(expected), 1e-12);
+        EXPECT_GT(ratio, 1.0);
+        EXPECT_GT(s.priceDualCurve(projection, discount), s.price(projection));
+    }
+}
+
+TEST(SwaptionDual, ThrowsWhenTheTenorCoversNoPayments) {
+    auto curve = flatCurve();
+    Swaption none(SwaptionType::Payer, 1e6, 0.05, 1.0, 0.1, 2.0, 0.1, 0.01);
+    EXPECT_THROW(none.priceDualCurve(curve, curve), std::invalid_argument);
+}
