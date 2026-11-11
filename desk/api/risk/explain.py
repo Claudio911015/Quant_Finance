@@ -24,11 +24,12 @@ _CURVE_ORDER = ["TIIE-F"] + sorted(c for c in market.CURVES if c != "TIIE-F")
 CSA_KEY = "curve:%s" % market.CSA_CURVE
 CSA_QUOTES = ("fx_forwards", "xccy_basis")
 
+# El rótulo lleva guion no separable (U+2011): en la columna estrecha de la tabla, «MXN-USD» se partía en «MXN-» y «USD».
 STEPS = (
     [("carry", "Paso del tiempo y liquidaciones")]
     + [("curve:%s" % c, "Tasas %s" % c) for c in _CURVE_ORDER]
     + [
-        (CSA_KEY, "Puntos forward y base (%s)" % market.CSA_CURVE),
+        (CSA_KEY, "Puntos forward y base (%s)" % market.CSA_CURVE.replace("-", "\u2011")),
         ("fx", "Tipo de cambio"),
         ("vol", "Volatilidad"),
         ("new_trades", "Operaciones nuevas"),

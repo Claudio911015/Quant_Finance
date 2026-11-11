@@ -230,7 +230,7 @@ def test_pnl_explain_closes_with_a_xccy_and_usd_collateral_when_the_forward_poin
     # el efecto de los puntos forward y la base está en su rubro, no perdido ni escondido
     csa = body["totals"]["components"]["curve:MXN-USD"]
     assert csa != 0.0 and [s["label"] for s in body["steps"] if s["key"] == "curve:MXN-USD"] == [
-        "Puntos forward y base (MXN-USD)"]
+        "Puntos forward y base (MXN\u2011USD)"]
     assert rows[desk["xccy"]]["components"]["curve:MXN-USD"] != 0.0
     assert rows[desk["bond"]]["components"]["curve:MXN-USD"] != 0.0  # el bono TIIE-F de Alfa descuenta con MXN-USD
     # una contraparte sin colateral USD no siente esos puntos
