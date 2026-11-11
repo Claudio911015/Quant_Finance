@@ -49,9 +49,7 @@
   padding: var(--space-3) var(--space-4) var(--space-1);
   color: var(--text-dim);
   font-size: var(--fs-xs);
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
 .palette__item {
@@ -72,7 +70,6 @@
 
 .palette__hint {
   color: var(--text-dim);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 

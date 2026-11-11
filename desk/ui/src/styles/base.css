@@ -17,6 +17,7 @@ body {
   font-family: var(--font-sans);
   font-size: var(--fs-md);
   line-height: 1.4;
+  font-variant-numeric: lining-nums tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -37,17 +38,24 @@ h3 {
   font-weight: 600;
 }
 
+h1,
+h2 {
+  font-family: var(--font-display);
+}
+
 h1 {
+  font-size: var(--fs-xl);
+}
+
+h2 {
   font-size: var(--fs-lg);
 }
 
-h2,
 h3 {
   font-size: var(--fs-md);
 }
 
 .num {
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }

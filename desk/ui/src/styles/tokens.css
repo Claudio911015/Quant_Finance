@@ -1,22 +1,22 @@
 :root {
   color-scheme: dark;
 
-  --bg: #0e1116;
-  --bg-elev: #161b22;
-  --border: #262d38;
-  --text: #d8dee9;
-  --text-dim: #8b95a5;
+  --bg: #1a1815;
+  --bg-elev: #221f1b;
+  --border: #332f29;
+  --text: #e9e3d8;
+  --text-dim: #a59e90;
   --accent: #4c9aff;
   --pos: #3fb68b;
   --neg: #e5534b;
   --warn: #d9a441;
 
   /* Superficies y estados derivados (U3): todas las pantallas deben reutilizarlos. */
-  --bg-hover: #1c232d;
-  --border-strong: #354050;
+  --bg-hover: #2a2722;
+  --border-strong: #4a453c;
   --accent-soft: rgba(76, 154, 255, 0.14);
   --warn-soft: rgba(217, 164, 65, 0.14);
-  --overlay: rgba(5, 8, 12, 0.66);
+  --overlay: rgba(12, 10, 8, 0.68);
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55);
   --radius: 4px;
 
@@ -27,13 +27,15 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  --font-sans: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  /* Familia Source (Adobe): sans humanista para la interfaz y las cifras, serif para títulos. */
+  --font-sans: 'Source Sans 3', 'Source Sans Pro', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Source Serif 4', 'Source Serif Pro', Georgia, 'Times New Roman', serif;
 
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-md: 13px;
-  --fs-lg: 15px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 22px;
 
   --sidebar-w: 208px;
   --topbar-h: 44px;
