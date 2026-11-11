@@ -31,4 +31,39 @@ describe('MethodologyScreen', () => {
     expect(row('Alta a la par')).toContain('nace a la par');
     expect(row('Alta a la par')).toContain('PV en la fecha de pacto es cero');
   });
+
+  describe('contabilidad de coberturas', () => {
+    /** Texto de la fila `label` dentro de la sección de coberturas (la etiqueta "Cambios de nocional" también existe en ciclo de vida). */
+    function hedgeRow(label: string): string {
+      const section = document.getElementById('meth-coberturas')!.closest('section')!;
+      const term = Array.from(section.querySelectorAll('dt')).find((dt) => dt.textContent === label);
+      return term?.nextElementSibling?.textContent ?? '';
+    }
+
+    it('muestra la revisión contable con el texto exacto de la banda', () => {
+      render(<MethodologyScreen />);
+      expect(hedgeRow('Revisión contable')).toContain(
+        'Asientos sugeridos. Metodología pendiente de revisión por un contador con experiencia en IFRS 9',
+      );
+      expect(hedgeRow('Revisión contable')).toContain('Nadie la ha hecho aún');
+    });
+
+    it('describe la regla del menor, el valor razonable, el reciclaje y las simplificaciones', () => {
+      render(<MethodologyScreen />);
+      expect(hedgeRow('Regla del menor')).toContain('menor');
+      expect(hedgeRow('Valor razonable')).toContain('tasa fija');
+      expect(hedgeRow('Reciclaje')).toContain('liquidaciones');
+      const simp = hedgeRow('Simplificaciones');
+      expect(simp).toContain('costo de cobertura');
+      expect(simp).toContain('riesgo de crédito');
+      expect(simp).toContain('ajuste de base');
+      expect(simp).toContain('reequilibrio');
+    });
+
+    it('incluye las filas de cambios de nocional y derivado hipotético', () => {
+      render(<MethodologyScreen />);
+      expect(hedgeRow('Cambios de nocional')).toContain('nocional vigente');
+      expect(hedgeRow('Derivado hipotético')).toContain('swap a la par');
+    });
+  });
 });

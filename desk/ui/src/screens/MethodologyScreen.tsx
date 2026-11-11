@@ -215,6 +215,67 @@ const GENERAL_SECTIONS: Section[] = [
   },
 ];
 
+const HEDGE_SECTIONS: Section[] = [
+  {
+    id: 'coberturas',
+    title: 'Coberturas',
+    items: [
+      {
+        label: 'Revisión contable',
+        text: 'Asientos sugeridos. Metodología pendiente de revisión por un contador con experiencia en IFRS 9. Nadie la ha hecho aún.',
+      },
+      {
+        label: 'Asientos sugeridos',
+        text: 'El sistema no es el libro mayor ni sustituye al contador. Cuentas fijas; redondeo a centavos con el residuo en resultados por inefectividad.',
+      },
+      {
+        label: 'Derivado hipotético',
+        text: 'La partida se representa con un swap a la par del crédito o con un forward al forward de mercado del flujo, valuados con el mismo motor y en 0 al designar.',
+      },
+      {
+        label: 'Regla del menor',
+        text: 'La reserva ORI es el menor en valor absoluto entre el cambio acumulado del instrumento (por la fracción) y el del hipotético, si tienen el mismo signo; si no, 0. El resto es inefectividad.',
+      },
+      {
+        label: 'Reciclaje',
+        text: 'Las liquidaciones del derivado en el periodo se reconocen en resultados como el flujo cubierto ocurrido. Al vencer, el PV es 0 y la reserva queda en 0.',
+      },
+      {
+        label: 'Valor razonable',
+        text: 'Solo para crédito o deuda a tasa fija cubierto con un swap. El cambio del instrumento, el ajuste de la partida (cambio del hipotético con signo contrario) y lo liquidado van a la cuenta Resultados — cobertura de valor razonable; sin reserva.',
+      },
+      {
+        label: 'Combinaciones admitidas',
+        text: 'Flujo de efectivo: crédito a tasa variable con swap del mismo índice, o flujo pronosticado en USD con forward. Valor razonable: crédito a tasa fija con swap del mismo índice.',
+      },
+      {
+        label: 'Cambios de nocional',
+        text: 'Un cambio de nocional del instrumento después de designar no tiene tratamiento especial: la medición usa el nocional vigente.',
+      },
+      {
+        label: 'Efectividad prospectiva',
+        text: 'Términos críticos y escenarios del escritorio. Hay relación económica si todas las razones son positivas. El rango 80 %–125 % es solo referencia; IFRS 9 no fija umbral.',
+      },
+      {
+        label: 'Jerarquía de valor razonable',
+        text: 'Nivel 2 para todos los instrumentos, con la procedencia del snapshot.',
+      },
+      {
+        label: 'Desdesignación',
+        text: 'Congela la reserva, que se recicla cuando ocurra el flujo cubierto. No admite más cierres.',
+      },
+      {
+        label: 'Simplificaciones',
+        text: 'Sin costo de cobertura ni valor temporal de opciones; sin riesgo de crédito en la medición; sin ajuste de base para partidas no financieras; sin reequilibrio de la razón de cobertura.',
+      },
+      {
+        label: 'Fuera de alcance',
+        text: 'Opciones como instrumento, coberturas de inversión neta, designación de componentes de riesgo, libro mayor y pólizas reales, y revelaciones de IFRS 7.',
+      },
+    ],
+  },
+];
+
 const LIMITS: { label: string; text: string }[] = [
   {
     label: 'Datos',
@@ -280,6 +341,11 @@ export function MethodologyScreen() {
 
       <h2 className="meth-group">Convenciones generales</h2>
       {GENERAL_SECTIONS.map((s) => (
+        <SectionBlock key={s.id} section={s} />
+      ))}
+
+      <h2 className="meth-group">Contabilidad de coberturas (IFRS 9)</h2>
+      {HEDGE_SECTIONS.map((s) => (
         <SectionBlock key={s.id} section={s} />
       ))}
 
