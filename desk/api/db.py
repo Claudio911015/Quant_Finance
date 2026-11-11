@@ -19,6 +19,22 @@ CREATE TABLE IF NOT EXISTS trade_events (id INTEGER PRIMARY KEY AUTOINCREMENT, t
 CREATE TRIGGER IF NOT EXISTS trade_events_no_update BEFORE UPDATE ON trade_events BEGIN SELECT RAISE(ABORT, 'trade_events es solo de inserción'); END;
 CREATE TRIGGER IF NOT EXISTS trade_events_no_delete BEFORE DELETE ON trade_events BEGIN SELECT RAISE(ABORT, 'trade_events es solo de inserción'); END;
 CREATE TABLE IF NOT EXISTS fixings (index_name TEXT NOT NULL, fixing_date TEXT NOT NULL, value REAL NOT NULL, PRIMARY KEY (index_name, fixing_date));
+CREATE TABLE IF NOT EXISTS hedge_relationships (id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trade_id INTEGER NOT NULL REFERENCES trades(id), fraction REAL NOT NULL, hedge_type TEXT NOT NULL,
+  item_kind TEXT NOT NULL, item_terms TEXT NOT NULL, hedge_ratio REAL NOT NULL, designation_date TEXT NOT NULL,
+  designation_snapshot TEXT NOT NULL, documentation TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS hedge_relationships_no_update BEFORE UPDATE ON hedge_relationships BEGIN SELECT RAISE(ABORT, 'hedge_relationships no se modifica'); END;
+CREATE TRIGGER IF NOT EXISTS hedge_relationships_no_delete BEFORE DELETE ON hedge_relationships BEGIN SELECT RAISE(ABORT, 'hedge_relationships no se modifica'); END;
+CREATE TABLE IF NOT EXISTS hedge_events (id INTEGER PRIMARY KEY AUTOINCREMENT,
+  relationship_id INTEGER NOT NULL REFERENCES hedge_relationships(id), type TEXT NOT NULL, event_date TEXT NOT NULL,
+  data TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS hedge_events_no_update BEFORE UPDATE ON hedge_events BEGIN SELECT RAISE(ABORT, 'hedge_events es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS hedge_events_no_delete BEFORE DELETE ON hedge_events BEGIN SELECT RAISE(ABORT, 'hedge_events es solo de inserción'); END;
+CREATE TABLE IF NOT EXISTS hedge_periods (id INTEGER PRIMARY KEY AUTOINCREMENT,
+  relationship_id INTEGER NOT NULL REFERENCES hedge_relationships(id), snapshot_id TEXT NOT NULL, as_of TEXT NOT NULL,
+  result TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (relationship_id, as_of));
+CREATE TRIGGER IF NOT EXISTS hedge_periods_no_update BEFORE UPDATE ON hedge_periods BEGIN SELECT RAISE(ABORT, 'hedge_periods es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS hedge_periods_no_delete BEFORE DELETE ON hedge_periods BEGIN SELECT RAISE(ABORT, 'hedge_periods es solo de inserción'); END;
 """
 
 

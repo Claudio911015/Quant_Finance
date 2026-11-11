@@ -9,7 +9,7 @@ from werkzeug.utils import safe_join
 
 from desk.api import db, fred
 from desk.api.errors import register_error_handlers
-from desk.api.routes import fixings, market, pnl, price, risk, trades
+from desk.api.routes import fixings, hedges, market, pnl, price, risk, trades
 from desk.api.seed_market import seed_market
 from desk.api.seed_trades import seed_trades
 
@@ -48,7 +48,7 @@ def create_app(db_path: Optional[Union[str, Path]] = None, seed: bool = True) ->
 
     register_error_handlers(app)
     app.teardown_appcontext(db.close_conn)
-    for module in (market, price, trades, risk, fixings, pnl):
+    for module in (market, price, trades, risk, fixings, pnl, hedges):
         app.register_blueprint(module.bp)
 
     @app.get("/", defaults={"path": ""})
