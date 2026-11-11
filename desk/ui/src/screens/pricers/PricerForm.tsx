@@ -100,6 +100,10 @@ const GRID_THEME = themeQuartz.withParams({
   wrapperBorderRadius: 4,
 });
 
+// --- corte 3 --- la tabla del cross currency swap tiene seis columnas en ~560 px: menos relleno por celda
+const XCCY_GRID_THEME = GRID_THEME.withParams({ cellHorizontalPadding: 8 });
+// --- fin corte 3 ---
+
 const CASHFLOW_COLUMNS: ColDef<Cashflow>[] = [
   { headerName: 'Fecha', field: 'date', minWidth: 116, flex: 1.2 },
   { headerName: 'Días', field: 'days', minWidth: 64, flex: 0.6, cellClass: 'num', headerClass: 'ag-right-aligned-header' },
@@ -141,13 +145,13 @@ const XCCY_KIND_LABEL: Record<XccyCashflow['kind'], string> = {
 const legOf = (c: Cashflow | undefined) => (c as Partial<XccyCashflow> | undefined)?.leg;
 
 const XCCY_COLUMNS: ColDef<Cashflow>[] = [
-  { headerName: 'Fecha', field: 'date', minWidth: 88, flex: 1 },
+  { headerName: 'Fecha', field: 'date', minWidth: 80, flex: 1 },
   {
     headerName: 'Pata',
     colId: 'leg',
     valueGetter: (p) => legOf(p.data),
     valueFormatter: (p) => (p.value ? LEG_LABEL[p.value as 'USD' | 'MXN'] : '—'),
-    minWidth: 110,
+    minWidth: 94,
     flex: 1.6,
     wrapText: true,
     autoHeight: true,
@@ -157,7 +161,7 @@ const XCCY_COLUMNS: ColDef<Cashflow>[] = [
     colId: 'kind',
     valueGetter: (p) => (p.data as Partial<XccyCashflow> | undefined)?.kind,
     valueFormatter: (p) => XCCY_KIND_LABEL[p.value as XccyCashflow['kind']] ?? '—',
-    minWidth: 84,
+    minWidth: 88,
     flex: 1.2,
     wrapText: true,
     autoHeight: true,
@@ -165,7 +169,7 @@ const XCCY_COLUMNS: ColDef<Cashflow>[] = [
   {
     headerName: 'Monto',
     field: 'amount',
-    minWidth: 96,
+    minWidth: 100,
     flex: 1.2,
     cellClass: 'num',
     headerClass: 'ag-right-aligned-header',
@@ -174,7 +178,7 @@ const XCCY_COLUMNS: ColDef<Cashflow>[] = [
   {
     headerName: 'Factor desc.',
     field: 'df',
-    minWidth: 70,
+    minWidth: 76,
     flex: 0.9,
     cellClass: 'num',
     headerClass: 'ag-right-aligned-header',
@@ -203,7 +207,7 @@ function CashflowGrid({ rows }: { rows: Cashflow[] }) {
     const el = host.current;
     if (!el) return;
     const grid = createGrid<Cashflow>(el, {
-      theme: GRID_THEME,
+      theme: withLegs ? XCCY_GRID_THEME : GRID_THEME,
       columnDefs: columns,
       rowData: rows,
       suppressCellFocus: true,
@@ -223,7 +227,8 @@ function CashflowGrid({ rows }: { rows: Cashflow[] }) {
 
   useEffect(() => {
     api.current?.setGridOption('columnDefs', columns);
-  }, [columns]);
+    api.current?.setGridOption('theme', withLegs ? XCCY_GRID_THEME : GRID_THEME);
+  }, [columns, withLegs]);
 
   return <div ref={host} className="pricer__grid" aria-label="Tabla de flujos" />;
 }

@@ -6,6 +6,7 @@ import pytest
 
 from desk.api import calendars
 from desk.api.tests.conftest import insert_raw_trade
+from desk.api.tests.csa_fixture import set_collateral
 from desk.api.tests.test_valuation_aged import (
     AS_OF, FWD, IRS, _book, _business, _csv, _csv_business, _event, _iso, _roll, _rows,
 )
@@ -194,6 +195,23 @@ def test_bond_projected_flows_add_up_to_the_valuation_pv(client):
     # bono a la fecha del pacto: lo que lista es lo que valúa
     at_pact = _flows(client, tid, "MX-DEMO")
     assert sum(f["pv"] for f in at_pact["flows"]) == pytest.approx(_rows(client, "MX-DEMO")[tid]["pv"], rel=1e-9)
+
+
+@pytest.mark.parametrize("product,params", [
+    ("bond", {"curve": "TIIE-F", "face": 100.0, "coupon_rate": 0.08, "periods": 24, "frequency": 12.0}),
+    ("irs", {"curve": "TIIE-F", "side": "payer", "notional": 1e8, "periods": 13, "fixed_rate": 0.08}),
+])
+def test_projected_flows_discount_with_the_counterparty_collateral(client, product, params):
+    # T10: la ficha descontaba con TIIE-F aunque el PV del portafolio usara MXN-USD (colateral USD)
+    tid = _book(client, product, params)
+    assert set_collateral(client, "Banco T", "USD", AS_OF).status_code == 200
+    body = _flows(client, tid, "MX-DEMO")
+    projected = _split(body)[1]
+    row = _rows(client, "MX-DEMO")[tid]
+    assert row["collateral_currency"] == "USD"
+    assert sum(f["pv"] for f in projected) == pytest.approx(row["pv"], rel=1e-9)
+    if product == "bond":
+        assert body["bond"]["dirty"] == pytest.approx(row["pv"], rel=1e-9)
 
 
 @pytest.mark.parametrize("trade_id", [4, 6, 7])  # forward, opción FX y cap: sin calendario proyectado

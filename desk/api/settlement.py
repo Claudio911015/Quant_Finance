@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from desk.api import fixings as fixing_store
-from desk.api import aging, calendars, lifecycle, market, portfolio, valuation, xccy
+from desk.api import aging, calendars, collateral, lifecycle, market, portfolio, valuation, xccy
 from desk.api.market import CURVES, MarketContext
 from desk.api.qf import qfpy
 
@@ -278,13 +278,16 @@ def trade_flows(conn: sqlite3.Connection, trade_id: int, snapshot_id: str) -> Di
     projection_warnings = []  # type: Warnings
     bond = None
     if st["status"] == "viva":
+        # Con el colateral vigente de la contraparte, igual que `valuation.value_trade`, para que los
+        # `df`/`pv` de la ficha sumen el PV del portafolio (el xccy ya descuenta siempre con USD).
+        vm = mkt.with_collateral(collateral.currency_on(trade, mkt.as_of))
         if trade["product"] == "irs":
-            flows += _projected_irs(trade, st["terms"], mkt, fixings, projection_warnings)
+            flows += _projected_irs(trade, st["terms"], vm, fixings, projection_warnings)
         elif trade["product"] == "xccy_swap":
             flows += xccy.projected(trade, st["terms"], mkt, fixings, projection_warnings)
         elif trade["product"] == "bond":
-            flows += aging.projected_bond(trade, st["terms"], mkt)
-            bond = aging.bond_quote(trade, st["terms"], mkt)
+            flows += aging.projected_bond(trade, st["terms"], vm)
+            bond = aging.bond_quote(trade, st["terms"], vm)
     for f in flows:
         f.setdefault("leg", None)  # solo el cross currency swap distingue la pata
     flows.sort(key=lambda f: f["date"])
