@@ -98,7 +98,7 @@ Ejemplo de cron (respaldo diario a las 02:30):
 
 ## Lo que el corte 8 NO hace
 
-Fuera de alcance del diseño: Login, usuarios y permisos; XVA/CVA en la interfaz; reportes PDF; pruebas de efectividad de coberturas; datos de mercado reales o en vivo; TIIE a 28 días (la tasa vieja); despliegue en ThinkCentre; licencia y precio; borrar o modificar `python_web/`; push o PR.
+Quedan fuera hasta tener un cliente piloto, cuyos requisitos mandan: usuarios, roles y aprobación de dos personas; empresas separadas; contenedores; licencia y términos de uso; importación de archivos de PiP, Valmer o Bloomberg; curvas reales de TIIE-F (siguen sintéticas); y la carga automática programada de fijaciones (hoy se piden con el botón o con `POST /api/fixings/fetch`).
 
 ## Tests
 
