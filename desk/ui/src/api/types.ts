@@ -745,3 +745,35 @@ export interface ValidationReport {
   commit_matches: boolean | null;
 }
 // fin corte 7
+// corte 8
+export interface FixingSource {
+  index: FixingIndex;
+  source: string;
+  available: boolean;
+  reason: string | null;
+  last_date: string | null;
+}
+
+export interface FetchFixingsBody {
+  index: FixingIndex;
+  from: string;
+  to: string;
+}
+
+export interface FixingConflict {
+  date: string;
+  stored: number;
+  source: number;
+}
+
+export interface FetchFixingsResult {
+  index: FixingIndex;
+  source: string;
+  from: string;
+  to: string;
+  fetched: number;
+  inserted: number;
+  unchanged: number;
+  conflicts: FixingConflict[];
+}
+// fin corte 8

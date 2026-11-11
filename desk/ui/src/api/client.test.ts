@@ -4,6 +4,8 @@ import {
   closeHedgePeriod,
   createHedge,
   dedesignateHedge,
+  fetchFixings, // corte 8
+  fixingSources, // corte 8
   getValidationReport,
   deleteTrade,
   hedgeEffectiveness,
@@ -303,3 +305,42 @@ describe('cliente API: validación', () => {
   });
 });
 // fin corte 7
+
+// corte 8
+describe('cliente API: fijaciones desde la fuente', () => {
+  it('un error con code lo conserva en ApiError.code', async () => {
+    mockFetch(409, {
+      error: 'Falta el token de Banxico (variable BANXICO_TOKEN)',
+      field: null,
+      code: 'banxico_token_missing',
+    });
+    const err = await fetchFixings({ index: 'TIIE-F', from: '2026-11-01', to: '2026-11-10' }).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(409);
+    expect(err.field).toBeNull();
+    expect(err.code).toBe('banxico_token_missing');
+  });
+
+  it('un error sin code deja code en null', async () => {
+    mockFetch(400, { error: 'x', field: 'from' });
+    const err = await fetchFixings({ index: 'SOFR', from: '2026-11-10', to: '2026-11-01' }).catch((e) => e);
+    expect(err.code).toBeNull();
+  });
+
+  it('fetchFixings envía index, from y to por POST', async () => {
+    const fn = mockFetch(200, { inserted: 1 });
+    await fetchFixings({ index: 'SOFR', from: '2026-11-01', to: '2026-11-10' });
+    const [url, init] = fn.mock.calls[0];
+    expect(url).toBe('/api/fixings/fetch');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ index: 'SOFR', from: '2026-11-01', to: '2026-11-10' });
+  });
+
+  it('fixingSources devuelve la lista de fuentes', async () => {
+    const sources = [{ index: 'SOFR', source: 'Fed de Nueva York', available: true, reason: null, last_date: null }];
+    const fn = mockFetch(200, { sources });
+    await expect(fixingSources()).resolves.toEqual(sources);
+    expect(fn.mock.calls[0][0]).toBe('/api/fixings/sources');
+  });
+});
+// fin corte 8

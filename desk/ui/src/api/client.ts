@@ -35,16 +35,22 @@ import type { CollateralCurrency, Counterparty, HolidaysResponse } from './types
 // corte 7
 import type { ValidationReport } from './types';
 // fin corte 7
+// corte 8
+import type { FetchFixingsBody, FetchFixingsResult, FixingSource } from './types';
+// fin corte 8
 
 export class ApiError extends Error {
   status: number;
   field: string | null;
+  // corte 8: código estable del error (p. ej. banxico_token_missing); null si el backend no lo manda
+  code: string | null;
 
-  constructor(status: number, message: string, field: string | null = null) {
+  constructor(status: number, message: string, field: string | null = null, code: string | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.field = field;
+    this.code = code;
   }
 }
 
@@ -60,14 +66,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (res.status >= 400) {
     let message = `Error ${res.status}`;
     let field: string | null = null;
+    let code: string | null = null; // corte 8
     try {
       const data = await res.json();
       if (typeof data?.error === 'string') message = data.error;
       if (typeof data?.field === 'string') field = data.field;
+      if (typeof data?.code === 'string') code = data.code; // corte 8
     } catch {
       // cuerpo no JSON: se conserva el mensaje genérico
     }
-    throw new ApiError(res.status, message, field);
+    throw new ApiError(res.status, message, field, code);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -283,3 +291,13 @@ export function getValidationReport(): Promise<ValidationReport> {
   return request('GET', '/validation/report');
 }
 // fin corte 7
+// corte 8
+export async function fixingSources(): Promise<FixingSource[]> {
+  const data = await request<{ sources: FixingSource[] }>('GET', '/fixings/sources');
+  return data.sources;
+}
+
+export function fetchFixings(body: FetchFixingsBody): Promise<FetchFixingsResult> {
+  return request('POST', '/fixings/fetch', body);
+}
+// fin corte 8
