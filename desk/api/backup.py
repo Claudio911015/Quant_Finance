@@ -9,6 +9,7 @@ Las funciones reciben las rutas para poder probarlas con bases temporales.
 """
 import argparse
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -20,6 +21,8 @@ from desk.api import db
 
 PREFIX = "qfdesk-"
 SUFFIX = ".sqlite"
+# Los nombres que crea `backup`: la marca de tiempo y, si hubo otro respaldo en el mismo segundo, `-N` (N >= 2).
+_COPY_NAME = re.compile(r"qfdesk-([0-9]{8}-[0-9]{6})(?:-([0-9]+))?\.sqlite")
 PathLike = Union[str, Path]
 
 
@@ -61,13 +64,35 @@ def _integrity(path: Path) -> str:
         return str(e)
 
 
+def _free_name(dest: Path, stamp: str) -> Path:
+    """Primer `qfdesk-<stamp>[-N].sqlite` que no existe en `dest`: un respaldo nunca pisa a otro del mismo segundo."""
+    n = 1
+    while True:
+        path = dest / "{}{}{}{}".format(PREFIX, stamp, "" if n == 1 else "-{}".format(n), SUFFIX)
+        if not path.exists():
+            return path
+        n += 1
+
+
+def _copies(dest: Path) -> List[Path]:
+    """Respaldos de `dest` que cuadran exactamente con el patrón de `backup`, del más viejo al más reciente."""
+    found = []
+    for path in dest.iterdir():
+        m = _COPY_NAME.fullmatch(path.name)
+        if m and path.is_file():
+            found.append(((m.group(1), int(m.group(2) or 1)), path))
+    return [path for _, path in sorted(found)]
+
+
 def backup(db_path: PathLike, dest_dir: PathLike, keep: Optional[int] = None,
            now: Optional[datetime] = None) -> Path:
     """Respalda `db_path` en `dest_dir/qfdesk-YYYYMMDD-HHMMSS.sqlite` y devuelve la ruta de la copia.
 
+    Si ya hay uno de ese mismo segundo, el nombre lleva `-2`, `-3`... y el anterior no se toca.
     Escribe a un archivo provisional y solo lo renombra si `integrity_check` da `ok`, de modo que
     nunca queda en el directorio una copia dañada con nombre de respaldo. Con `keep`, borra después
-    las `qfdesk-*.sqlite` más viejas (por nombre, que lleva la marca de tiempo) que excedan `keep`.
+    las más viejas que excedan `keep`, pero solo entre los archivos cuyo nombre es exactamente el de
+    un respaldo del desk (`qfdesk-YYYYMMDD-HHMMSS(-N)?.sqlite`); cualquier otro archivo no se toca.
     """
     if keep is not None and keep < 1:
         raise ValueError("keep debe ser >= 1")
@@ -76,7 +101,7 @@ def backup(db_path: PathLike, dest_dir: PathLike, keep: Optional[int] = None,
         raise BackupError("No existe la base a respaldar: {}".format(source))
     dest = Path(dest_dir)
     dest.mkdir(parents=True, exist_ok=True)
-    final = dest / "{}{}{}".format(PREFIX, _stamp(now), SUFFIX)
+    final = _free_name(dest, _stamp(now))
     partial = final.with_name(final.name + ".parcial")
     try:
         _copy(source, partial)
@@ -88,8 +113,7 @@ def backup(db_path: PathLike, dest_dir: PathLike, keep: Optional[int] = None,
         if partial.exists():
             partial.unlink()
     if keep is not None:
-        copies: List[Path] = sorted(dest.glob("{}*{}".format(PREFIX, SUFFIX)))
-        for old in copies[:-keep]:
+        for old in _copies(dest)[:-keep]:
             old.unlink()
     return final
 
@@ -134,7 +158,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("destino_dir", nargs="?", help="directorio donde se crea qfdesk-YYYYMMDD-HHMMSS.sqlite")
     parser.add_argument("--keep", type=int, metavar="N",
-                        help="tras respaldar, conserva solo las N copias qfdesk-*.sqlite más recientes")
+                        help="tras respaldar, conserva solo las N copias qfdesk-YYYYMMDD-HHMMSS(-N).sqlite más recientes")
     parser.add_argument("--restore", metavar="ARCHIVO", help="restaura la base desde este respaldo (servidor apagado)")
     parser.add_argument("--force", action="store_true",
                         help="con --restore: reemplaza una base existente, guardando antes copia de la actual")

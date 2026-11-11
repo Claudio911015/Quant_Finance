@@ -95,6 +95,55 @@ def test_keep_conserva_las_n_mas_recientes(origen, tmp_path):
     assert not list(dest.glob("*.parcial"))
 
 
+def test_dos_respaldos_del_mismo_segundo_no_se_pisan(origen, tmp_path):
+    dest = tmp_path / "respaldos"
+    ahora = datetime(2026, 11, 11, 10, 0, 0)
+    primera = backup.backup(origen, dest, now=ahora)
+    conn = db.connect(origen)
+    try:
+        fixings.add_fixing(conn, {"index": "SOFR", "date": "2026-11-07", "value": 0.0388})
+        conn.commit()
+    finally:
+        conn.close()
+    segunda = backup.backup(origen, dest, now=ahora)
+    tercera = backup.backup(origen, dest, now=ahora)
+    assert [p.name for p in (primera, segunda, tercera)] == [
+        "qfdesk-20261111-100000.sqlite",
+        "qfdesk-20261111-100000-2.sqlite",
+        "qfdesk-20261111-100000-3.sqlite",
+    ]
+    assert _counts(primera)["fixings"] == 3 and _counts(segunda)["fixings"] == 4  # la primera sigue intacta
+    assert not list(dest.glob("*.parcial"))
+
+
+def test_keep_solo_borra_nombres_del_patron_exacto_y_cuenta_los_sufijos_como_mas_recientes(origen, tmp_path):
+    dest = tmp_path / "respaldos"
+    dest.mkdir()
+    ajenos = [
+        "qfdesk-notas.sqlite",
+        "qfdesk-20261111-100000.sqlite.bak",
+        "qfdesk-20260101-000000.sqlite.parcial",
+        "qfdesk-2026111-100000.sqlite",
+        "qfdesk-20261111-100000-x.sqlite",
+        "qfdesk-20261111-100000-.sqlite",
+        "otro-20261111-100000.sqlite",
+        "qfdesk-20260101-000000.sqlite~",
+    ]
+    for name in ajenos:
+        (dest / name).write_text("no lo creó el desk")
+    (dest / "qfdesk-20261111-090000.sqlite").mkdir()  # un directorio con nombre de respaldo tampoco se toca
+    backup.backup(origen, dest, now=datetime(2026, 11, 11, 9, 59, 0))
+    ahora = datetime(2026, 11, 11, 10, 0, 0)
+    backup.backup(origen, dest, now=ahora)
+    backup.backup(origen, dest, now=ahora)  # ...-2, más reciente que la sin sufijo aunque "-" ordene antes que "."
+    backup.backup(origen, dest, keep=2, now=ahora)  # ...-3
+    propias = sorted(p.name for p in dest.iterdir() if p.is_file() and p.name not in ajenos)
+    assert propias == ["qfdesk-20261111-100000-2.sqlite", "qfdesk-20261111-100000-3.sqlite"]
+    for name in ajenos:
+        assert (dest / name).read_text() == "no lo creó el desk"
+    assert (dest / "qfdesk-20261111-090000.sqlite").is_dir()
+
+
 def test_keep_menor_que_uno_es_error_y_no_respalda(origen, tmp_path):
     with pytest.raises(ValueError):
         backup.backup(origen, tmp_path / "respaldos", keep=0)

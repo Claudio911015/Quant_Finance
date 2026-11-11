@@ -67,9 +67,9 @@ Respuesta de ejemplo (200):
 ```
 
 - El CLI siempre actúa sobre `desk/data/desk.db`; no hay flag `--db`.
-- Las copias llevan la hora local en el nombre: `qfdesk-YYYYMMDD-HHMMSS.sqlite`.
+- Las copias llevan la hora local en el nombre: `qfdesk-YYYYMMDD-HHMMSS.sqlite`; si ya hay una de ese segundo, la nueva lleva `-2`, `-3`... y la anterior no se toca.
 - Al restaurar con `--force`, la base actual se guarda antes como `<base>.antes-de-restaurar-YYYYMMDD-HHMMSS` (hora local) y el CLI indica la ruta.
-- `--keep N` borra las copias más viejas y conserva N.
+- `--keep N` borra las copias más viejas y conserva N; solo cuenta y borra archivos cuyo nombre es exactamente `qfdesk-YYYYMMDD-HHMMSS.sqlite` (con `-N` opcional), nunca otros del directorio.
 
 Ejemplo de cron (respaldo diario a las 02:30):
 
