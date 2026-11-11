@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ValuationResponse } from '../api/types';
 import { SnapshotProvider, useSnapshot } from '../state/SnapshotContext';
-import { PortfolioScreen } from './PortfolioScreen';
+import { PortfolioScreen, rowTooltip } from './PortfolioScreen';
 
 const VALUATION: ValuationResponse = {
   snapshot: 'MX-DEMO',
@@ -41,6 +42,45 @@ const VALUATION: ValuationResponse = {
       error: 'No se pudo valuar: vol fuera de superficie',
       warnings: [],
     },
+    {
+      id: 3,
+      product: 'irs',
+      counterparty: 'Banco Gamma',
+      trade_date: '2026-09-01',
+      start_date: '2026-09-01',
+      maturity_date: '2027-09-01',
+      status: 'terminada',
+      notional: 50000000,
+      currency: 'USD',
+      maturity: '2027-09-01',
+      pv: 0,
+      pv_mxn: 0,
+      error: null,
+      warnings: [],
+    },
+    {
+      id: 4,
+      product: 'irs',
+      counterparty: 'Banco Delta',
+      trade_date: '2026-10-01',
+      start_date: '2026-10-01',
+      maturity_date: '2027-10-01',
+      status: 'viva',
+      notional: 20000000,
+      currency: 'MXN',
+      maturity: '2027-10-01',
+      pv: 10,
+      pv_mxn: 10,
+      error: null,
+      warnings: [
+        {
+          code: 'missing_fixing',
+          index: 'TIIE-F',
+          dates: ['2026-11-09'],
+          message: 'Falta la fijación TIIE-F del 2026-11-09',
+        },
+      ],
+    },
   ],
 };
 
@@ -52,7 +92,6 @@ function mockApi() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith('/api/portfolio/valuation')) return json(VALUATION);
-    if (init?.method === 'DELETE') return new Response(null, { status: 204 });
     if (url === '/api/market/snapshots') return json({ snapshots: [] });
     return json({ error: 'Snapshot inexistente', field: 'snapshot' }, 404);
   });
@@ -70,10 +109,15 @@ function SwitchSnapshot() {
 
 function renderScreen() {
   return render(
-    <SnapshotProvider>
-      <SwitchSnapshot />
-      <PortfolioScreen />
-    </SnapshotProvider>,
+    <MemoryRouter initialEntries={['/portafolio']}>
+      <SnapshotProvider>
+        <SwitchSnapshot />
+        <Routes>
+          <Route path="/portafolio" element={<PortfolioScreen />} />
+          <Route path="/portafolio/:id" element={<p>ficha abierta</p>} />
+        </Routes>
+      </SnapshotProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -126,28 +170,95 @@ describe('PortfolioScreen', () => {
     );
   });
 
-  it('borra una operación tras confirmar y recarga la valuación', async () => {
-    const fetchMock = mockApi();
-    vi.stubGlobal('confirm', vi.fn(() => true));
-    renderScreen();
+  it('filtrar por estado deja solo esas filas y el total sigue siendo el del backend', async () => {
+    mockApi();
+    const { container } = renderScreen();
     await screen.findByText('Banco Alfa');
+    expect(container.querySelectorAll('.ag-row:not(.ag-row-pinned)')).toHaveLength(4);
 
-    fireEvent.click(await screen.findByLabelText('Borrar operación 1'));
+    fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'terminada' } });
 
-    await waitFor(() => expect(valuationCalls(fetchMock)).toHaveLength(2));
-    const deletes = fetchMock.mock.calls.filter((c) => c[1]?.method === 'DELETE');
-    expect(deletes.map((c) => String(c[0]))).toEqual(['/api/trades/1']);
+    await waitFor(() => expect(container.querySelectorAll('.ag-row:not(.ag-row-pinned)')).toHaveLength(1));
+    const row = container.querySelector('.ag-row:not(.ag-row-pinned)');
+    expect(row?.textContent).toContain('Banco Gamma');
+    expect(row?.textContent).toContain('Terminada');
+    expect(container.querySelector('.ag-row-pinned')?.textContent).toContain('1,234,567.89');
+
+    // Sin coincidencias, el vacío no sugiere agregar operaciones (las hay, solo están filtradas).
+    fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'ejercida' } });
+    await waitFor(() =>
+      expect(container.querySelector('.ag-overlay-no-rows-center')?.textContent).toBe(
+        'Ninguna operación con ese estado.',
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'all' } });
+    await waitFor(() => expect(container.querySelectorAll('.ag-row:not(.ag-row-pinned)')).toHaveLength(4));
   });
 
-  it('no borra si se cancela la confirmación', async () => {
-    const fetchMock = mockApi();
-    vi.stubGlobal('confirm', vi.fn(() => false));
+  it('el selector de estado ofrece los cinco estados y "Todas"', async () => {
+    mockApi();
     renderScreen();
     await screen.findByText('Banco Alfa');
+    const options = Array.from(screen.getByLabelText('Estado').querySelectorAll('option')).map(
+      (o) => o.textContent,
+    );
+    expect(options).toEqual(['Todas', 'No pactada', 'Viva', 'Vencida', 'Terminada', 'Ejercida']);
+  });
 
-    fireEvent.click(await screen.findByLabelText('Borrar operación 1'));
+  it('muestra Pacto, Vencimiento y Estado', async () => {
+    mockApi();
+    const { container } = renderScreen();
+    await screen.findByText('Banco Alfa');
+    const headers = Array.from(container.querySelectorAll('.ag-header-cell-text')).map((h) => h.textContent);
+    expect(headers).toEqual(expect.arrayContaining(['Pacto', 'Vencimiento', 'Estado']));
+    const row = container.querySelector('.ag-row[row-id="1"]');
+    expect(row?.textContent).toContain('2026-11-10');
+    expect(row?.textContent).toContain('2027-11-09');
+    expect(row?.textContent).toContain('Viva');
+  });
 
+  it('la columna PV lleva la moneda de pv: MXN para FX y la de la curva para tasas', async () => {
+    mockApi();
+    const { container } = renderScreen();
+    await screen.findByText('Banco Alfa');
+    const pv = (id: number) => container.querySelector(`.ag-row[row-id="${id}"] [col-id="pv"]`)?.textContent;
+    expect(pv(1)).toBe('MXN 1,500,000.50');
+    expect(pv(3)).toBe('USD 0.00');
+    expect(pv(2)).toBe('Error');
+  });
+
+  it('el id es un enlace a la ficha y el clic navega sin recargar', async () => {
+    mockApi();
+    renderScreen();
+    await screen.findByText('Banco Alfa');
+    const link = await screen.findByRole('link', { name: '1' });
+    expect(link.getAttribute('href')).toBe('/portafolio/1');
+
+    // fireEvent devuelve false si el manejador canceló la acción por defecto (recarga completa).
+    expect(fireEvent.click(link)).toBe(false);
+
+    expect(await screen.findByText('ficha abierta')).toBeTruthy();
+  });
+
+  it('no hay botón de borrar: las operaciones se terminan desde la ficha', async () => {
+    const fetchMock = mockApi();
+    renderScreen();
+    await screen.findByText('Banco Alfa');
+    expect(screen.queryByText('Borrar')).toBeNull();
+    expect(screen.queryByLabelText(/Borrar operación/)).toBeNull();
     expect(fetchMock.mock.calls.filter((c) => c[1]?.method === 'DELETE')).toHaveLength(0);
-    expect(valuationCalls(fetchMock)).toHaveLength(1);
+  });
+
+  it('marca las filas con avisos y el tooltip lleva su texto', async () => {
+    mockApi();
+    const { container } = renderScreen();
+    await screen.findByText('Banco Delta');
+    const warn = container.querySelectorAll('.ag-row.row-warn');
+    expect(warn).toHaveLength(1);
+    expect(warn[0].textContent).toContain('Banco Delta');
+    expect(rowTooltip(VALUATION.rows[3])).toBe('Falta la fijación TIIE-F del 2026-11-09');
+    expect(rowTooltip(VALUATION.rows[1])).toBe('No se pudo valuar: vol fuera de superficie');
+    expect(rowTooltip(VALUATION.rows[0])).toBeUndefined();
   });
 });

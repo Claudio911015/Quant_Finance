@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AllCommunityModule,
   ModuleRegistry,
@@ -9,9 +10,9 @@ import {
   type GridApi,
   type ICellRendererParams,
 } from 'ag-grid-community';
-import { ApiError, deleteTrade, valuation } from '../api/client';
-import type { ValuationResponse, ValuationRow } from '../api/types';
-import { fmtDate, fmtNumber } from '../lib/format';
+import { ApiError, valuation } from '../api/client';
+import type { TradeStatus, ValuationResponse, ValuationRow } from '../api/types';
+import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import PnlPanel from './PnlPanel';
 import './PortfolioScreen.css';
@@ -66,12 +67,70 @@ const LOCALE_TEXT: Record<string, string> = {
   searchOoo: 'Buscar...',
 };
 
-const EXPORT_COLUMNS = ['id', 'product', 'counterparty', 'notional', 'currency', 'maturity', 'pv_mxn'];
+const EXPORT_COLUMNS = [
+  'id',
+  'product',
+  'counterparty',
+  'notional',
+  'currency',
+  'trade_date',
+  'maturity_date',
+  'status',
+  'pv_mxn',
+];
+
+const STATUS_LABEL: Record<TradeStatus, string> = {
+  no_pactada: 'No pactada',
+  viva: 'Viva',
+  vencida: 'Vencida',
+  terminada: 'Terminada',
+  ejercida: 'Ejercida',
+};
+const STATUS_ORDER: TradeStatus[] = ['no_pactada', 'viva', 'vencida', 'terminada', 'ejercida'];
+
+type StatusFilter = 'all' | TradeStatus;
+
+/** `pv` viaja en la moneda de /api/price: MXN para FX y renta variable, la de la curva en el resto. */
+const PV_IN_MXN = new Set(['fx_forward', 'fx_option', 'equity_option']);
+
+function pvCurrency(row: GridRow): string {
+  return row.product && PV_IN_MXN.has(row.product) ? 'MXN' : (row.currency ?? 'MXN');
+}
+
+/** Tooltip de una fila: el error de valuación, o los avisos de la valuación. */
+export function rowTooltip(row: GridRow | undefined): string | undefined {
+  if (!row) return undefined;
+  if (row.error) return row.error;
+  const messages = (row.warnings ?? []).map((w) => w.message);
+  return messages.length > 0 ? messages.join(' · ') : undefined;
+}
+
+/** Destino del clic en un id; lo fija PortfolioScreen con su `navigate`. */
+const openTrade: { current: (path: string) => void } = { current: () => {} };
 
 const numberCell = { type: 'rightAligned', cellClass: 'num', filter: 'agNumberColumnFilter' } as const;
 
 const columnDefs: ColDef<GridRow>[] = [
-  { colId: 'id', field: 'id', headerName: 'ID', width: 72, ...numberCell },
+  {
+    colId: 'id',
+    field: 'id',
+    headerName: 'ID',
+    width: 72,
+    // El id es un enlace real (clic derecho, nueva pestaña); el clic simple navega sin recargar.
+    cellRenderer: (p: ICellRendererParams<GridRow>) => {
+      if (p.data?.id == null) return '';
+      const a = document.createElement('a');
+      a.href = `/portafolio/${p.data.id}`;
+      a.textContent = String(p.data.id);
+      a.addEventListener('click', (ev) => {
+        if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+        ev.preventDefault();
+        openTrade.current(a.getAttribute('href') ?? '');
+      });
+      return a;
+    },
+    ...numberCell,
+  },
   { colId: 'product', field: 'product', headerName: 'Producto', width: 140 },
   { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 160 },
   {
@@ -84,12 +143,41 @@ const columnDefs: ColDef<GridRow>[] = [
   },
   { colId: 'currency', field: 'currency', headerName: 'Moneda', width: 90 },
   {
-    colId: 'maturity',
-    field: 'maturity',
+    colId: 'trade_date',
+    field: 'trade_date',
+    headerName: 'Pacto',
+    width: 110,
+    cellClass: 'num',
+    valueFormatter: (p) => (p.value == null ? '' : fmtDate(p.value)),
+  },
+  {
+    colId: 'maturity_date',
+    field: 'maturity_date',
     headerName: 'Vencimiento',
     width: 120,
     cellClass: 'num',
     valueFormatter: (p) => (p.value == null ? '' : fmtDate(p.value)),
+  },
+  {
+    colId: 'status',
+    field: 'status',
+    headerName: 'Estado',
+    width: 110,
+    filter: false, // el selector de arriba filtra por estado
+    valueFormatter: (p) => (p.value == null ? '' : (STATUS_LABEL[p.value as TradeStatus] ?? p.value)),
+  },
+  {
+    colId: 'pv',
+    field: 'pv',
+    headerName: 'PV',
+    width: 170,
+    valueFormatter: (p) =>
+      p.data?.error ? 'Error' : p.value == null || !p.data ? '' : fmtMoney(p.value, pvCurrency(p.data)),
+    cellClassRules: {
+      'portfolio__neg': (p) => typeof p.value === 'number' && p.value < 0,
+      'portfolio__cell-error': (p) => !!p.data?.error,
+    },
+    ...numberCell,
   },
   {
     colId: 'pv_mxn',
@@ -103,23 +191,6 @@ const columnDefs: ColDef<GridRow>[] = [
     },
     ...numberCell,
   },
-  {
-    colId: 'actions',
-    headerName: '',
-    width: 84,
-    sortable: false,
-    filter: false,
-    resizable: false,
-    cellRenderer: (p: ICellRendererParams<GridRow>) => {
-      if (p.data?.id == null) return '';
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'portfolio__del';
-      b.textContent = 'Borrar';
-      b.setAttribute('aria-label', `Borrar operación ${p.data.id}`);
-      return b;
-    },
-  },
 ];
 
 function describe(e: unknown): string {
@@ -132,9 +203,10 @@ export function PortfolioScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'blotter' | 'pnl'>('blotter');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const navigate = useNavigate();
   const gridEl = useRef<HTMLDivElement>(null);
   const gridApi = useRef<GridApi<GridRow> | null>(null);
-  const onDelete = useRef<(row: GridRow) => void>(() => {});
   // Cada carga toma un número; solo la última escribe estado (una respuesta lenta de un
   // snapshot anterior no debe pisar la del que el usuario eligió después).
   const latest = useRef(0);
@@ -160,16 +232,7 @@ export function PortfolioScreen() {
     void load();
   }, [load]);
 
-  onDelete.current = async (row) => {
-    if (row.id == null) return;
-    if (!window.confirm(`¿Borrar la operación ${row.id} (${row.product}, ${row.counterparty})?`)) return;
-    try {
-      await deleteTrade(row.id);
-      await load();
-    } catch (e) {
-      setError(describe(e));
-    }
-  };
+  openTrade.current = navigate;
 
   useEffect(() => {
     const api = createGrid<GridRow>(gridEl.current!, {
@@ -180,18 +243,21 @@ export function PortfolioScreen() {
         sortable: true,
         filter: true,
         useValueFormatterForExport: false,
-        tooltipValueGetter: (p) => p.data?.error ?? undefined,
+        tooltipValueGetter: (p) => rowTooltip(p.data),
       },
       rowData: [],
       pinnedBottomRowData: [],
       getRowId: (p) => (p.data.total ? 'total' : String(p.data.id)),
-      getRowClass: (p) => (p.data?.total ? 'row-total' : p.data?.error ? 'row-error' : undefined),
+      getRowClass: (p) =>
+        p.data?.total
+          ? 'row-total'
+          : p.data?.error
+            ? 'row-error'
+            : p.data?.warnings?.length
+              ? 'row-warn'
+              : undefined,
       tooltipShowDelay: 300,
       suppressColumnVirtualisation: true,
-      onCellClicked: (e) => {
-        const target = e.event?.target as HTMLElement | null | undefined;
-        if (e.data && target?.closest('.portfolio__del')) onDelete.current(e.data);
-      },
     });
     gridApi.current = api;
     return () => {
@@ -200,17 +266,27 @@ export function PortfolioScreen() {
     };
   }, []);
 
+  const rows = data?.rows ?? [];
+  const shown = statusFilter === 'all' ? rows : rows.filter((r) => r.status === statusFilter);
+
   useEffect(() => {
     const api = gridApi.current;
     if (!api) return;
-    api.setGridOption('rowData', data?.rows ?? []);
+    // Si el filtro oculta todo, "agrega una desde Pricers" sería falso.
+    api.setGridOption(
+      'overlayNoRowsTemplate',
+      rows.length > 0 && shown.length === 0
+        ? '<span class="ag-overlay-no-rows-center">Ninguna operación con ese estado.</span>'
+        : undefined,
+    );
+    api.setGridOption('rowData', shown);
+    // El total sigue siendo el del backend (todo el portafolio), no el de las filas visibles.
     api.setGridOption(
       'pinnedBottomRowData',
       data ? [{ total: true, product: 'Total', pv_mxn: data.total_mxn }] : [],
     );
-  }, [data]);
+  }, [data, statusFilter]);
 
-  const rows = data?.rows ?? [];
   const failed = rows.filter((r) => r.error).length;
 
   return (
@@ -253,10 +329,25 @@ export function PortfolioScreen() {
             {loading
               ? 'Cargando…'
               : data
-                ? `${rows.length} operaciones · al ${fmtDate(data.as_of)}`
+                ? `${shown.length === rows.length ? rows.length : `${shown.length} de ${rows.length}`} operaciones · al ${fmtDate(data.as_of)}`
                 : ''}
             {failed > 0 && <span className="portfolio__warn"> · {failed} con error</span>}
           </span>
+          <label className="portfolio__filter">
+            Estado
+            <select
+              className="portfolio__select"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            >
+              <option value="all">Todas</option>
+              {STATUS_ORDER.map((st) => (
+                <option key={st} value={st}>
+                  {STATUS_LABEL[st]}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             className="portfolio__btn"
