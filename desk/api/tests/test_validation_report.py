@@ -275,18 +275,23 @@ def test_el_reporte_coincide_con_sus_fuentes(report, sources):
 
 
 def _reescribir_a_mano(report: dict, case_id: str, delta: float) -> dict:
-    """Copia del reporte con `pv_desk` de un caso movido `delta` y sus diferencias recalculadas a mano (veredicto,
-    totales y resumen intactos mientras el caso siga dentro de tolerancia y por debajo de la peor del producto)."""
+    """Copia del reporte con `pv_desk` de un caso movido `delta` y todo lo derivado recalculado a mano (diferencias del
+    caso y peor caso del resumen de su producto; veredicto y totales intactos mientras siga dentro de tolerancia)."""
     altered = copy.deepcopy(report)
     case = next(c for c in altered["cases"] if c["id"] == case_id)
     case["pv_desk"] += delta
     case["abs_diff"], case["rel_diff"] = common.diffs(case["pv_desk"], case["pv_ref"], case["notional"])
+    row = next(s for s in altered["summary"] if s["product"] == case["product"])
+    measured = [c for c in altered["cases"] if c["product"] == case["product"] and c["rel_diff"] is not None]
+    worst = max(measured, key=lambda c: c["rel_diff"])
+    row["worst_rel_diff"], row["worst_case"] = worst["rel_diff"], worst["id"]
+    row["worst_abs_diff"] = max(c["abs_diff"] for c in measured)
     return altered
 
 
 def test_un_pv_editado_dentro_de_tolerancia_con_diferencias_recalculadas_falla_el_cruce(report, known, sources):
-    # swaption-01 mueve su PV 1e-5 del nocional (tolerancia 5e-4, y su diferencia sigue por debajo de la peor del
-    # producto, swaption-04): el reporte queda coherente consigo mismo, así que _problems no lo ve...
+    # swaption-01 mueve su PV 1e-5 del nocional (tolerancia 5e-4, sigue dentro) y el resumen de swaption se recalcula
+    # con ese caso como el peor: el reporte queda coherente consigo mismo, así que _problems no lo ve...
     case = next(c for c in report["cases"] if c["id"] == "swaption-01")
     altered = _reescribir_a_mano(report, "swaption-01", 1e-5 * case["notional"])
     assert _problems(altered, known) == []

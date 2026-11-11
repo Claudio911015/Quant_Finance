@@ -1,12 +1,1 @@
-{
-  "differences": [
-    {
-      "case_id": "swaption-04",
-      "kind": "defect",
-      "convention": "Jamshidian del desk sin el factor completo de Hull-White y con bracket que deja fuera la raíz en expiraciones cortas",
-      "cause": "Defecto del desk en C++ (src/instruments/swaption.cpp, Swaption::price), abierto: este corte no compila C++. Al calcular P_HW(T_exp,T_i|r) el desk omite del A(T_exp,T_i) de Hull-White el factor exp(B_i·f(0,T_exp) − σ²/(4a)·B_i²·(1−e^(−2a·T_exp))), que su propio comentario sí lista; por eso la raíz r* queda en coordenadas de desviación (cerca de 0) mientras la bisección busca en [f0 − 10σ_r, f0 + 10σ_r] con f0 = f(0,T_exp) ≈ 6.8 %. Con expiración de 182 días σ_r ≈ 0.7 %, el borde inferior queda en ≈ −0.15 %, la raíz cae por debajo, NPV(lo) < 0 y el desk devuelve 0.0 («deep OTM») para una opción que vale ≈ 0.18 % del nocional (QuantLib: 92,158.63 MXN). Procedimiento reproducible: réplica en Python de la fórmula de Jamshidian con los DF de cases.json y esa misma bisección da 0.0, igual que el desk; la misma réplica con el A completo y bisección en [−1, 1] da 92,158.63, a 2e-11 del nocional de QuantLib. Magnitud esperada = |0 − 92,158.63| / 50,000,000 = 1.843e-3, contra 1.843e-3 observada. Las otras siete swaptions arrastran la omisión de A pero quedan entre 3e-9 y 2.6e-7 del nocional, dentro de la tolerancia de 5e-4, y por eso no llevan entrada.",
-      "expected_rel_diff": 1.843e-3,
-      "max_rel_diff": 2.0e-3
-    }
-  ]
-}
+{"differences": []}

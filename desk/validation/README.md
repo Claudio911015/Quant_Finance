@@ -79,11 +79,12 @@ el procedimiento para reproducirlo), `expected_rel_diff` (calculado con ese proc
 diferencia observada) y `max_rel_diff` (cota con la que se clasifica el caso). `defect` es un defecto del desk que sigue
 abierto.
 
-Hoy hay una: **`swaption-04`** (receptora TIIE-F, expira en 182 días), defecto de `Swaption::price` en C++
-(`src/instruments/swaption.cpp`). El desk omite parte del factor A de Hull-White en la descomposición de Jamshidian y,
-con expiraciones cortas, la raíz queda fuera de su intervalo de búsqueda y devuelve 0.0 donde QuantLib da 92,158.63.
-La omisión de A afecta a todas las swaptions, pero en las otras siete la diferencia es de 3e-9 a 2.6e-7 del nocional,
-dentro de la tolerancia. Se corrige en C++, fuera de este corte; al corregirlo, la entrada deja de hacer falta y se borra.
+Hoy no hay ninguna: `known_differences.json` está vacío y los 62 casos quedan dentro de su tolerancia. La última que hubo
+fue **`swaption-04`** (receptora TIIE-F, expira en 182 días), un defecto de `Swaption::price` en C++: la raíz de Jamshidian
+quedaba fuera del intervalo de bisección y el desk devolvía 0.0 donde QuantLib da 92,158.63 MXN, y además omitía el
+término de varianza del factor A de Hull-White. Se corrigió en C++ (commit `2f5b733`, con pruebas en
+`tests/test_swaption.cpp`) y la entrada se borró; desde entonces las ocho swaptions coinciden con QuantLib a 3e-9 del
+nocional o menos.
 
 ## Agregar un caso
 

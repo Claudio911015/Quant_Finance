@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-11-11T18:00:55+00:00",
+  "generated_at": "2026-11-11T19:05:41+00:00",
   "snapshot": {
     "id": "MX-DEMO",
     "as_of": "2026-11-10",
     "spot": 18.6
   },
-  "desk_commit": "78e098d2f272bb472765a7bf487627b5422cfbab",
+  "desk_commit": "2f5b733cc98ebc254e7e1f9c71a8e7266732b8ac",
   "desk_dirty": false,
   "reference": {
     "library": "QuantLib",
@@ -34,8 +34,8 @@
   },
   "totals": {
     "cases": 62,
-    "within": 61,
-    "explained": 1,
+    "within": 62,
+    "explained": 0,
     "failed": 0
   },
   "summary": [
@@ -113,7 +113,7 @@
       "within": 8,
       "explained": 0,
       "failed": 0,
-      "worst_abs_diff": 2.7910573408007622e-08,
+      "worst_abs_diff": 3.259629011154175e-08,
       "worst_rel_diff": 2.791057340800762e-16,
       "worst_case": "cap_floor-02"
     },
@@ -123,12 +123,12 @@
       "method": "ql.Swaption europea (ejercicio en today + round(expiry_years·365) días) sobre un ql.VanillaSwap (fija y flotante con fechas expiración + i·period_days, NullCalendar, ACT/360, spread 0) con ql.JamshidianSwaptionEngine y ql.HullWhite(a, sigma) ajustado a la curva del desk.",
       "tolerance": 0.0005,
       "cases": 8,
-      "within": 7,
-      "explained": 1,
+      "within": 8,
+      "explained": 0,
       "failed": 0,
-      "worst_abs_diff": 92158.6331759701,
-      "worst_rel_diff": 0.0018431726635194019,
-      "worst_case": "swaption-04"
+      "worst_abs_diff": 0.5957110328599811,
+      "worst_rel_diff": 2.9785551642999053e-09,
+      "worst_case": "swaption-03"
     }
   ],
   "curves": [
@@ -902,10 +902,10 @@
       "trade_id": 7,
       "currency": "MXN",
       "notional": 300000000.0,
-      "pv_desk": 1257727.3902222966,
+      "pv_desk": 1257727.3902223469,
       "pv_ref": 1257727.3902223143,
-      "abs_diff": 1.7695128917694092e-08,
-      "rel_diff": 5.89837630589803e-17,
+      "abs_diff": 3.259629011154175e-08,
+      "rel_diff": 1.0865430037180583e-16,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -950,10 +950,10 @@
       "trade_id": null,
       "currency": "MXN",
       "notional": 50000000.0,
-      "pv_desk": 196995.63873876174,
+      "pv_desk": 196995.63873876177,
       "pv_ref": 196995.638738752,
-      "abs_diff": 9.74978320300579e-09,
-      "rel_diff": 1.9499566406011582e-16,
+      "abs_diff": 9.778887033462524e-09,
+      "rel_diff": 1.955777406692505e-16,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -966,10 +966,10 @@
       "trade_id": null,
       "currency": "MXN",
       "notional": 200000000.0,
-      "pv_desk": 3149903.7437113626,
+      "pv_desk": 3149903.743711361,
       "pv_ref": 3149903.7437113672,
-      "abs_diff": 4.6566128730773926e-09,
-      "rel_diff": 2.3283064365386962e-17,
+      "abs_diff": 6.05359673500061e-09,
+      "rel_diff": 3.026798367500305e-17,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -1014,10 +1014,10 @@
       "trade_id": null,
       "currency": "USD",
       "notional": 10000000.0,
-      "pv_desk": 884927.645448326,
+      "pv_desk": 884927.6454483259,
       "pv_ref": 884927.6454483259,
-      "abs_diff": 1.1641532182693481e-10,
-      "rel_diff": 1.1641532182693481e-17,
+      "abs_diff": 0.0,
+      "rel_diff": 0.0,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -1030,10 +1030,10 @@
       "trade_id": null,
       "currency": "MXN",
       "notional": 100000000.0,
-      "pv_desk": 419948.79856297723,
+      "pv_desk": 419948.50031943165,
       "pv_ref": 419948.5001329944,
-      "abs_diff": 0.29842998285312206,
-      "rel_diff": 2.9842998285312205e-09,
+      "abs_diff": 0.00018643727526068687,
+      "rel_diff": 1.8643727526068686e-12,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -1046,10 +1046,10 @@
       "trade_id": null,
       "currency": "MXN",
       "notional": 100000000.0,
-      "pv_desk": 942340.8075836931,
+      "pv_desk": 942340.5151388142,
       "pv_ref": 942340.5154467019,
-      "abs_diff": 0.2921369911637157,
-      "rel_diff": 2.921369911637157e-09,
+      "abs_diff": 0.00030788767617195845,
+      "rel_diff": 3.0788767617195846e-12,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -1062,10 +1062,10 @@
       "trade_id": null,
       "currency": "MXN",
       "notional": 200000000.0,
-      "pv_desk": 4322916.1619172115,
+      "pv_desk": 4322877.090940928,
       "pv_ref": 4322877.686651961,
-      "abs_diff": 38.47526525054127,
-      "rel_diff": 1.9237632625270634e-07,
+      "abs_diff": 0.5957110328599811,
+      "rel_diff": 2.9785551642999053e-09,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -1078,12 +1078,12 @@
       "trade_id": null,
       "currency": "MXN",
       "notional": 50000000.0,
-      "pv_desk": 0.0,
+      "pv_desk": 92158.63410577262,
       "pv_ref": 92158.6331759701,
-      "abs_diff": 92158.6331759701,
-      "rel_diff": 0.0018431726635194019,
+      "abs_diff": 0.000929802525206469,
+      "rel_diff": 1.859605050412938e-11,
       "tolerance": 0.0005,
-      "verdict": "explained",
+      "verdict": "ok",
       "error": null
     },
     {
@@ -1094,10 +1094,10 @@
       "trade_id": null,
       "currency": "MXN",
       "notional": 100000000.0,
-      "pv_desk": 825700.420610354,
+      "pv_desk": 825695.642755462,
       "pv_ref": 825695.6430399076,
-      "abs_diff": 4.777570446487516,
-      "rel_diff": 4.777570446487516e-08,
+      "abs_diff": 0.0002844455884769559,
+      "rel_diff": 2.844455884769559e-12,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -1110,10 +1110,10 @@
       "trade_id": null,
       "currency": "USD",
       "notional": 20000000.0,
-      "pv_desk": 253389.1010521421,
+      "pv_desk": 253388.50780976645,
       "pv_ref": 253388.50780963528,
-      "abs_diff": 0.5932425068167504,
-      "rel_diff": 2.966212534083752e-08,
+      "abs_diff": 1.311709638684988e-07,
+      "rel_diff": 6.55854819342494e-15,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -1126,10 +1126,10 @@
       "trade_id": null,
       "currency": "USD",
       "notional": 20000000.0,
-      "pv_desk": 213315.00503834707,
+      "pv_desk": 213314.79598892987,
       "pv_ref": 213314.79598886293,
-      "abs_diff": 0.20904948413954116,
-      "rel_diff": 1.0452474206977059e-08,
+      "abs_diff": 6.693881005048752e-08,
+      "rel_diff": 3.346940502524376e-15,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
@@ -1142,28 +1142,14 @@
       "trade_id": null,
       "currency": "USD",
       "notional": 10000000.0,
-      "pv_desk": 258446.1806637691,
+      "pv_desk": 258443.5428750648,
       "pv_ref": 258443.5428750828,
-      "abs_diff": 2.6377886862901505,
-      "rel_diff": 2.6377886862901505e-07,
+      "abs_diff": 1.8015271052718163e-08,
+      "rel_diff": 1.8015271052718163e-15,
       "tolerance": 0.0005,
       "verdict": "ok",
       "error": null
     }
   ],
-  "known_differences": [
-    {
-      "case_id": "swaption-04",
-      "product": "swaption",
-      "label": "Receptora TIIE-F · expira en 182 días · swap de 1 año · strike 6.50 %",
-      "kind": "defect",
-      "convention": "Jamshidian del desk sin el factor completo de Hull-White y con bracket que deja fuera la raíz en expiraciones cortas",
-      "cause": "Defecto del desk en C++ (src/instruments/swaption.cpp, Swaption::price), abierto: este corte no compila C++. Al calcular P_HW(T_exp,T_i|r) el desk omite del A(T_exp,T_i) de Hull-White el factor exp(B_i·f(0,T_exp) − σ²/(4a)·B_i²·(1−e^(−2a·T_exp))), que su propio comentario sí lista; por eso la raíz r* queda en coordenadas de desviación (cerca de 0) mientras la bisección busca en [f0 − 10σ_r, f0 + 10σ_r] con f0 = f(0,T_exp) ≈ 6.8 %. Con expiración de 182 días σ_r ≈ 0.7 %, el borde inferior queda en ≈ −0.15 %, la raíz cae por debajo, NPV(lo) < 0 y el desk devuelve 0.0 («deep OTM») para una opción que vale ≈ 0.18 % del nocional (QuantLib: 92,158.63 MXN). Procedimiento reproducible: réplica en Python de la fórmula de Jamshidian con los DF de cases.json y esa misma bisección da 0.0, igual que el desk; la misma réplica con el A completo y bisección en [−1, 1] da 92,158.63, a 2e-11 del nocional de QuantLib. Magnitud esperada = |0 − 92,158.63| / 50,000,000 = 1.843e-3, contra 1.843e-3 observada. Las otras siete swaptions arrastran la omisión de A pero quedan entre 3e-9 y 2.6e-7 del nocional, dentro de la tolerancia de 5e-4, y por eso no llevan entrada.",
-      "expected_rel_diff": 0.001843,
-      "max_rel_diff": 0.002,
-      "observed_rel_diff": 0.0018431726635194019,
-      "tolerance": 0.0005,
-      "verdict": "explained"
-    }
-  ]
+  "known_differences": []
 }

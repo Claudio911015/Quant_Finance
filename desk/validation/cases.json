@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-11-11T18:00:55+00:00",
+  "generated_at": "2026-11-11T19:05:41+00:00",
   "snapshot": {
     "id": "MX-DEMO",
     "as_of": "2026-11-10",
     "spot": 18.6
   },
-  "desk_commit": "78e098d2f272bb472765a7bf487627b5422cfbab",
+  "desk_commit": "2f5b733cc98ebc254e7e1f9c71a8e7266732b8ac",
   "desk_dirty": false,
   "hw": {
     "TIIE-F": {
@@ -1754,7 +1754,7 @@
       },
       "currency": "MXN",
       "notional": 300000000.0,
-      "pv_desk": 1257727.3902222966
+      "pv_desk": 1257727.3902223469
     },
     {
       "id": "cap_floor-02",
@@ -1820,7 +1820,7 @@
       },
       "currency": "MXN",
       "notional": 50000000.0,
-      "pv_desk": 196995.63873876174
+      "pv_desk": 196995.63873876177
     },
     {
       "id": "cap_floor-05",
@@ -1842,7 +1842,7 @@
       },
       "currency": "MXN",
       "notional": 200000000.0,
-      "pv_desk": 3149903.7437113626
+      "pv_desk": 3149903.743711361
     },
     {
       "id": "cap_floor-06",
@@ -1908,7 +1908,7 @@
       },
       "currency": "USD",
       "notional": 10000000.0,
-      "pv_desk": 884927.645448326
+      "pv_desk": 884927.6454483259
     },
     {
       "id": "swaption-01",
@@ -1932,7 +1932,7 @@
       },
       "currency": "MXN",
       "notional": 100000000.0,
-      "pv_desk": 419948.79856297723
+      "pv_desk": 419948.50031943165
     },
     {
       "id": "swaption-02",
@@ -1956,7 +1956,7 @@
       },
       "currency": "MXN",
       "notional": 100000000.0,
-      "pv_desk": 942340.8075836931
+      "pv_desk": 942340.5151388142
     },
     {
       "id": "swaption-03",
@@ -1980,7 +1980,7 @@
       },
       "currency": "MXN",
       "notional": 200000000.0,
-      "pv_desk": 4322916.1619172115
+      "pv_desk": 4322877.090940928
     },
     {
       "id": "swaption-04",
@@ -2004,7 +2004,7 @@
       },
       "currency": "MXN",
       "notional": 50000000.0,
-      "pv_desk": 0.0
+      "pv_desk": 92158.63410577262
     },
     {
       "id": "swaption-05",
@@ -2028,7 +2028,7 @@
       },
       "currency": "MXN",
       "notional": 100000000.0,
-      "pv_desk": 825700.420610354
+      "pv_desk": 825695.642755462
     },
     {
       "id": "swaption-06",
@@ -2052,7 +2052,7 @@
       },
       "currency": "USD",
       "notional": 20000000.0,
-      "pv_desk": 253389.1010521421
+      "pv_desk": 253388.50780976645
     },
     {
       "id": "swaption-07",
@@ -2076,7 +2076,7 @@
       },
       "currency": "USD",
       "notional": 20000000.0,
-      "pv_desk": 213315.00503834707
+      "pv_desk": 213314.79598892987
     },
     {
       "id": "swaption-08",
@@ -2100,7 +2100,7 @@
       },
       "currency": "USD",
       "notional": 10000000.0,
-      "pv_desk": 258446.1806637691
+      "pv_desk": 258443.5428750648
     }
   ]
 }
