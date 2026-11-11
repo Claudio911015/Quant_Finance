@@ -42,6 +42,14 @@ function shockText(s: Shock | ScenarioSpec): string {
   return `${s.curve} ${signed(s.bp)} pb`;
 }
 
+/** Compara el nombre de un escenario con su choque sin distinguir el signo menos tipográfico (−) del guion
+ * (-), el "+" ni los espacios: los nombres de fábrica ("TIIE-F -50 pb", "SOFR steepener 25 pb") y el texto
+ * generado ("TIIE-F −50 pb", "SOFR steepener +25 pb") dicen lo mismo y no deben mostrarse dos veces. */
+function sameShock(a: string, b: string): boolean {
+  const norm = (t: string) => t.replace(/\u2212/g, '-').replace(/\+/g, '').replace(/\s+/g, '');
+  return norm(a) === norm(b);
+}
+
 /** Un escenario combinado une sus choques con " · ". */
 function scenarioText(sc: LibraryScenario): string {
   return sc.type === 'combined' ? sc.shocks.map(shockText).join(' · ') : shockText(sc);
@@ -91,7 +99,7 @@ function SetItem({
           // Si el nombre ya es el choque ("TIIE-F +50 pb") no se repite.
           return (
             <li key={`${i}-${sc.name}`}>
-              {text === sc.name ? (
+              {sameShock(text, sc.name) ? (
                 <span className="scn-detail__shock scn-detail__solo">{text}</span>
               ) : (
                 <>

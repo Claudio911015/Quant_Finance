@@ -179,6 +179,17 @@ describe('ScenarioLibraryTab: lista', () => {
     expect(within(setItem('Choque Banxico')).getByText('TIIE-F +100 pb')).toBeTruthy();
   });
 
+  it('no repite el choque cuando el nombre solo difiere en el signo menos, el "+" o los espacios', async () => {
+    renderTab();
+    await within(listCard()).findByRole('heading', { name: 'Marzo 2020' });
+
+    const def = setItem('Por omisión');
+    expect(within(def).queryByText('USDMXN -10 %')).toBeNull(); // el nombre con guion ASCII no se duplica
+    expect(within(def).getAllByText('USDMXN −10 %')).toHaveLength(1);
+    expect(within(def).queryByText('SOFR steepener 25 pb')).toBeNull(); // el nombre sin "+" tampoco
+    expect(within(def).getAllByText('SOFR steepener +25 pb')).toHaveLength(1);
+  });
+
   it('un error al cargar la lista se muestra', async () => {
     mocks.listScenarioSets.mockRejectedValue(new ApiError(500, 'Falla del servidor'));
     renderTab();
