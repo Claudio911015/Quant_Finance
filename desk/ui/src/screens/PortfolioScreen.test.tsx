@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ValuationResponse } from '../api/types';
+import type { Counterparty, ValuationResponse } from '../api/types';
 import { SnapshotProvider, useSnapshot } from '../state/SnapshotContext';
 import { PortfolioScreen, columnDefs, rowTooltip } from './PortfolioScreen';
 
@@ -23,6 +23,7 @@ const VALUATION: ValuationResponse = {
       maturity: '2027-11-09',
       pv: 1500000.5,
       pv_mxn: 1500000.5,
+      collateral_currency: 'MXN',
       error: null,
       warnings: [],
     },
@@ -55,6 +56,7 @@ const VALUATION: ValuationResponse = {
       maturity: '2027-09-01',
       pv: 0,
       pv_mxn: 0,
+      collateral_currency: 'USD',
       error: null,
       warnings: [],
     },
@@ -84,6 +86,17 @@ const VALUATION: ValuationResponse = {
   ],
 };
 
+const COUNTERPARTIES: Counterparty[] = [
+  {
+    id: 7,
+    name: 'Banco Épsilon (sintético)',
+    collateral_currency: 'MXN',
+    effective_date: null,
+    trades: 2,
+    history: [],
+  },
+];
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
 }
@@ -92,6 +105,8 @@ function mockApi() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith('/api/portfolio/valuation')) return json(VALUATION);
+    if (url === '/api/counterparties') return json({ counterparties: COUNTERPARTIES });
+    if (url === '/api/counterparties/7' && init?.method === 'PUT') return json(COUNTERPARTIES[0]);
     if (url === '/api/market/snapshots') return json({ snapshots: [] });
     return json({ error: 'Snapshot inexistente', field: 'snapshot' }, 404);
   });
@@ -271,6 +286,48 @@ describe('PortfolioScreen', () => {
     expect(fireEvent.click(link)).toBe(false);
 
     expect(await screen.findByText('ficha abierta')).toBeTruthy();
+  });
+
+  it('el blotter trae la columna Colateral con la moneda del colateral de cada fila', async () => {
+    mockApi();
+    const { container } = renderScreen();
+    await screen.findByText('Banco Alfa');
+    const headers = Array.from(container.querySelectorAll('.ag-header-cell-text')).map((h) => h.textContent);
+    expect(headers).toContain('Colateral');
+    const collateral = (id: number) =>
+      container.querySelector(`.ag-row[row-id="${id}"] [col-id="collateral_currency"]`)?.textContent;
+    expect(collateral(1)).toBe('MXN');
+    expect(collateral(3)).toBe('USD');
+    // Una valuación sin el dato (backend anterior) deja la celda vacía, sin romper la fila.
+    expect(collateral(2)).toBe('');
+  });
+
+  it('la pestaña Contrapartes lista el colateral y cambiarlo recarga la valuación', async () => {
+    const fetchMock = mockApi();
+    renderScreen();
+    await screen.findByText('Banco Alfa');
+    // La lista de contrapartes no se pide hasta abrir la pestaña.
+    expect(fetchMock.mock.calls.some((c) => String(c[0]) === '/api/counterparties')).toBe(false);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Contrapartes' }));
+    const panel = await screen.findByRole('tabpanel', { name: 'Contrapartes' });
+    expect(await within(panel).findByText('Banco Épsilon (sintético)')).toBeTruthy();
+    expect(within(panel).getByText('Colateral en MXN')).toBeTruthy();
+    expect(valuationCalls(fetchMock)).toHaveLength(1);
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Cambiar colateral de Banco Épsilon (sintético)' }));
+    // Con el snapshot completo sin cargar (el simulado responde 404), la fecha propuesta es el as_of de la valuación.
+    expect((within(panel).getByLabelText('Fecha efectiva') as HTMLInputElement).value).toBe('2026-11-10');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Aplicar' }));
+
+    const put = await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) => c[1]?.method === 'PUT');
+      expect(call).toBeTruthy();
+      return call!;
+    });
+    expect(JSON.parse(String(put[1]?.body))).toEqual({ collateral_currency: 'USD', effective_date: '2026-11-10' });
+    // El cambio mueve valuaciones: el blotter se recarga.
+    await waitFor(() => expect(valuationCalls(fetchMock)).toHaveLength(2));
   });
 
   it('no hay botón de borrar: las operaciones se terminan desde la ficha', async () => {

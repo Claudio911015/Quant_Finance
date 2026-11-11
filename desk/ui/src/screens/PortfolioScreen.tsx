@@ -14,6 +14,7 @@ import { ApiError, valuation } from '../api/client';
 import type { TradeStatus, ValuationResponse, ValuationRow } from '../api/types';
 import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
+import CounterpartiesPanel from './CounterpartiesPanel';
 import PnlPanel from './PnlPanel';
 import { productTitle } from './pricers/registry';
 import './PortfolioScreen.css';
@@ -139,10 +140,13 @@ export const columnDefs: ColDef<GridRow>[] = [
     colId: 'product',
     field: 'product',
     headerName: 'Producto',
-    width: 132,
+    width: 122,
     valueFormatter: (p) => (p.value == null ? '' : productTitle(p.value)),
   },
-  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 130 },
+  { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 92 },
+  // Moneda del colateral de la contraparte en la fecha de valuación (corte 3); filas viejas sin dato quedan vacías.
+  // Sin filtro: son dos valores y el icono del filtro se comería el rótulo en 76 px.
+  { colId: 'collateral_currency', field: 'collateral_currency', headerName: 'Colateral', width: 76, filter: false },
   {
     colId: 'notional',
     field: 'notional',
@@ -156,7 +160,7 @@ export const columnDefs: ColDef<GridRow>[] = [
     colId: 'trade_date',
     field: 'trade_date',
     headerName: 'Pacto',
-    width: 92,
+    width: 84,
     cellClass: 'num',
     valueFormatter: (p) => (p.value == null ? '' : fmtDate(p.value)),
   },
@@ -193,7 +197,7 @@ export const columnDefs: ColDef<GridRow>[] = [
     colId: 'pv_mxn',
     field: 'pv_mxn',
     headerName: 'PV MXN',
-    width: 108,
+    width: 100,
     valueFormatter: (p) => (p.data?.error ? 'Error' : p.value == null ? '' : fmtNumber(p.value, 2)),
     cellClassRules: {
       'portfolio__neg': (p) => typeof p.value === 'number' && p.value < 0,
@@ -208,11 +212,11 @@ function describe(e: unknown): string {
 }
 
 export function PortfolioScreen() {
-  const { snapshotId } = useSnapshot();
+  const { snapshotId, snapshot } = useSnapshot();
   const [data, setData] = useState<ValuationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'blotter' | 'pnl'>('blotter');
+  const [tab, setTab] = useState<'blotter' | 'pnl' | 'counterparties'>('blotter');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const navigate = useNavigate();
   const gridEl = useRef<HTMLDivElement>(null);
@@ -333,6 +337,17 @@ export function PortfolioScreen() {
         >
           P&L
         </button>
+        <button
+          type="button"
+          role="tab"
+          id="portfolio-tab-counterparties"
+          aria-selected={tab === 'counterparties'}
+          aria-controls="portfolio-panel-counterparties"
+          className="portfolio__tab"
+          onClick={() => setTab('counterparties')}
+        >
+          Contrapartes
+        </button>
       </div>
       {/* El blotter sigue montado al cambiar de pestaña: AG Grid se crea una sola vez. */}
       <div
@@ -393,6 +408,20 @@ export function PortfolioScreen() {
           className="portfolio__panel"
         >
           <PnlPanel />
+        </div>
+      )}
+      {tab === 'counterparties' && (
+        <div
+          role="tabpanel"
+          id="portfolio-panel-counterparties"
+          aria-labelledby="portfolio-tab-counterparties"
+          className="portfolio__panel"
+        >
+          {/* La fecha efectiva propuesta es el as_of del snapshot activo; mientras llega el snapshot completo, el de la valuación. */}
+          <CounterpartiesPanel
+            asOf={snapshot && snapshot.id === snapshotId ? snapshot.as_of : (data?.as_of ?? null)}
+            onChanged={() => void load()}
+          />
         </div>
       )}
     </section>
