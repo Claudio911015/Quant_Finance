@@ -3,7 +3,7 @@ from flask import Blueprint, jsonify, request
 from desk.api import portfolio
 from desk.api.db import get_conn
 from desk.api.errors import ApiError
-from desk.api.validation import body_object
+from desk.api.validation import body_object, ensure_finite
 
 bp = Blueprint("trades", __name__)
 
@@ -41,4 +41,4 @@ def valuation():
     snapshot_id = request.args.get("snapshot", "").strip()
     if not snapshot_id:
         raise ApiError(400, "Falta el parámetro 'snapshot'", "snapshot")
-    return jsonify(portfolio.valuation(get_conn(), snapshot_id))
+    return jsonify(ensure_finite(portfolio.valuation(get_conn(), snapshot_id)))

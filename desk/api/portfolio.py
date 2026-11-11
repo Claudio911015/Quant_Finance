@@ -15,7 +15,7 @@ from desk.api.market import MarketContext
 from desk.api.pricing import PRODUCTS
 from desk.api.pricing.base import Product
 from desk.api.seed_market import SNAPSHOT_ID
-from desk.api.validation import choice, text
+from desk.api.validation import NON_FINITE_MESSAGE, choice, has_non_finite, text
 
 _NO_DESCRIPTION = {"notional": None, "currency": None, "maturity": None}
 
@@ -142,7 +142,10 @@ def valuation(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
         try:
             pv_mxn = trade_pv_mxn(trade, mkt)
             # `pv` va en la moneda de la fila (USD = PV en MXN ÷ spot, inverso de la conversión).
-            row["pv"] = pv_mxn / mkt.spot if row["currency"] == "USD" else pv_mxn
+            pv = pv_mxn / mkt.spot if row["currency"] == "USD" else pv_mxn
+            if has_non_finite((pv, pv_mxn)):
+                raise ValueError(NON_FINITE_MESSAGE)
+            row["pv"] = pv
             row["pv_mxn"] = pv_mxn
             total += pv_mxn
         except Exception as e:  # nunca propaga: la fila lleva el error

@@ -4,7 +4,7 @@ from desk.api.db import get_conn
 from desk.api.errors import ApiError
 from desk.api.market import load_context
 from desk.api.pricing import PRODUCTS
-from desk.api.validation import body_object, text
+from desk.api.validation import body_object, ensure_finite, text
 
 bp = Blueprint("price", __name__, url_prefix="/api/price")
 
@@ -19,4 +19,4 @@ def price(product):
         {k: v for k, v in body.items() if k != "snapshot"}
     )
     mkt = load_context(get_conn(), snapshot_id)
-    return jsonify(PRODUCTS[product].price(params, mkt))
+    return jsonify(ensure_finite(PRODUCTS[product].price(params, mkt)))
