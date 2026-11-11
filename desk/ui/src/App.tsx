@@ -1,44 +1,56 @@
+import { Suspense, lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { ScreenLoading } from './components/ScreenLoading';
 import { Shell } from './components/Shell';
-import HedgeReportScreen from './screens/HedgeReportScreen';
-import HedgeScreen from './screens/HedgeScreen';
-import HedgesScreen from './screens/HedgesScreen';
-import { MarketScreen } from './screens/MarketScreen';
-import { MethodologyScreen } from './screens/MethodologyScreen';
-import { PortfolioScreen } from './screens/PortfolioScreen';
-import { RiskScreen } from './screens/RiskScreen';
-import TradeScreen from './screens/TradeScreen';
-import { PricersScreen } from './screens/pricers/PricersScreen';
+
+// Cada pantalla es su propio trozo: el de entrada solo lleva el menú y el enrutador.
+const HedgeReportScreen = lazy(() => import('./screens/HedgeReportScreen'));
+const HedgeScreen = lazy(() => import('./screens/HedgeScreen'));
+const HedgesScreen = lazy(() => import('./screens/HedgesScreen'));
+const MarketScreen = lazy(() => import('./screens/MarketScreen').then((m) => ({ default: m.MarketScreen })));
+const MethodologyScreen = lazy(() =>
+  import('./screens/MethodologyScreen').then((m) => ({ default: m.MethodologyScreen })),
+);
+const PortfolioScreen = lazy(() =>
+  import('./screens/PortfolioScreen').then((m) => ({ default: m.PortfolioScreen })),
+);
+const RiskScreen = lazy(() => import('./screens/RiskScreen').then((m) => ({ default: m.RiskScreen })));
+const TradeScreen = lazy(() => import('./screens/TradeScreen'));
+const PricersScreen = lazy(() =>
+  import('./screens/pricers/PricersScreen').then((m) => ({ default: m.PricersScreen })),
+);
 // --- corte 5 ---
-import ConfirmationScreen from './screens/ops/ConfirmationScreen';
-import OpsScreen from './screens/ops/OpsScreen';
+const ConfirmationScreen = lazy(() => import('./screens/ops/ConfirmationScreen'));
+const OpsScreen = lazy(() => import('./screens/ops/OpsScreen'));
 // --- fin corte 5 ---
 // corte 7
-import ValidationScreen from './screens/ValidationScreen';
+const ValidationScreen = lazy(() => import('./screens/ValidationScreen'));
 // fin corte 7
 
 export default function App() {
   return (
     <Shell>
-      <Routes>
-        <Route path="/" element={<Navigate to="/mercado" replace />} />
-        <Route path="/mercado" element={<MarketScreen />} />
-        <Route path="/pricers" element={<Navigate to="/pricers/irs" replace />} />
-        <Route path="/pricers/:product" element={<PricersScreen />} />
-        <Route path="/portafolio" element={<PortfolioScreen />} />
-        <Route path="/portafolio/:id" element={<TradeScreen />} />
-        <Route path="/riesgo" element={<RiskScreen />} />
-        <Route path="/coberturas" element={<HedgesScreen />} />
-        <Route path="/coberturas/:id" element={<HedgeScreen />} />
-        <Route path="/coberturas/:id/reporte" element={<HedgeReportScreen />} />
-        <Route path="/metodologia" element={<MethodologyScreen />} />
-        {/* corte 5 */}
-        <Route path="/operaciones" element={<OpsScreen />} />
-        <Route path="/portafolio/:id/confirmacion" element={<ConfirmationScreen />} />
-        {/* corte 7 */}
-        <Route path="/validacion" element={<ValidationScreen />} />
-        {/* fin corte 7 */}
-      </Routes>
+      <Suspense fallback={<ScreenLoading />}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/mercado" replace />} />
+          <Route path="/mercado" element={<MarketScreen />} />
+          <Route path="/pricers" element={<Navigate to="/pricers/irs" replace />} />
+          <Route path="/pricers/:product" element={<PricersScreen />} />
+          <Route path="/portafolio" element={<PortfolioScreen />} />
+          <Route path="/portafolio/:id" element={<TradeScreen />} />
+          <Route path="/riesgo" element={<RiskScreen />} />
+          <Route path="/coberturas" element={<HedgesScreen />} />
+          <Route path="/coberturas/:id" element={<HedgeScreen />} />
+          <Route path="/coberturas/:id/reporte" element={<HedgeReportScreen />} />
+          <Route path="/metodologia" element={<MethodologyScreen />} />
+          {/* corte 5 */}
+          <Route path="/operaciones" element={<OpsScreen />} />
+          <Route path="/portafolio/:id/confirmacion" element={<ConfirmationScreen />} />
+          {/* corte 7 */}
+          <Route path="/validacion" element={<ValidationScreen />} />
+          {/* fin corte 7 */}
+        </Routes>
+      </Suspense>
     </Shell>
   );
 }
