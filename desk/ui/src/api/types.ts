@@ -273,3 +273,242 @@ export interface VarResponse {
   }[];
   errors: TradeError[];
 }
+
+// --- Contabilidad de coberturas (corte 4) ---
+
+export type HedgeType = 'cash_flow' | 'fair_value';
+export type ItemKind = 'floating_loan' | 'fixed_loan' | 'forecast_fx';
+export type HedgeStatus = 'activa' | 'desdesignada';
+
+export interface FloatingLoanTerms {
+  index: 'TIIE-F' | 'SOFR';
+  notional: number;
+  start_date: string;
+  maturity_date: string;
+  side: 'pays_floating' | 'receives_floating';
+}
+
+export interface FixedLoanTerms {
+  index: 'TIIE-F' | 'SOFR';
+  notional: number;
+  start_date: string;
+  maturity_date: string;
+  side: 'pays_fixed' | 'receives_fixed';
+}
+
+export interface ForecastFxTerms {
+  amount_usd: number;
+  date: string;
+  side: 'buy_usd' | 'sell_usd';
+}
+
+export type ItemTerms = FloatingLoanTerms | FixedLoanTerms | ForecastFxTerms;
+
+export interface HedgeDocumentation {
+  risk_management_objective: string;
+  hedged_risk: string;
+  effectiveness_method: string;
+  ineffectiveness_sources: string;
+}
+
+export interface HedgeEvent {
+  id: number;
+  relationship_id: number;
+  type: 'designation' | 'period_close' | 'dedesignation';
+  event_date: string;
+  data: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface JournalEntry {
+  account: string;
+  debit: number;
+  credit: number;
+  memo: string;
+}
+
+export interface HedgePeriodFlow {
+  date: string;
+  kind: FlowKind;
+  amount: number;
+  currency: string;
+  amount_mxn: number;
+}
+
+export interface HedgePeriod {
+  id: number;
+  snapshot: string;
+  as_of: string;
+  created_at: string;
+  prev_snapshot: string;
+  prev_as_of: string;
+  data_quality: DataQuality;
+  trade_status: TradeStatus;
+  hedge_type: HedgeType;
+  fraction: number;
+  pv_inst: number;
+  pv_hypo: number;
+  inst_cum: number;
+  hypo_cum: number;
+  d_inst_cum: number;
+  d_hypo_cum: number;
+  settled_period: number;
+  settled_flows: HedgePeriodFlow[];
+  oci: number;
+  d_oci: number;
+  ineffectiveness: number;
+  recycled: number;
+  item_adjustment: number;
+  fv_result: number;
+  instrument_pnl: number;
+  identity_residual: number;
+  entries: JournalEntry[];
+  warnings: Warning[];
+}
+
+export interface HedgeSummary {
+  id: number;
+  trade_id: number;
+  product: ProductId;
+  counterparty: string;
+  hedge_type: HedgeType;
+  item_kind: ItemKind;
+  fraction: number;
+  hedge_ratio: number;
+  designation_date: string;
+  status: HedgeStatus;
+  oci_balance: number;
+  last_close: string | null;
+  periods_count: number;
+}
+
+export interface HedgeDetail {
+  id: number;
+  trade_id: number;
+  product: ProductId;
+  counterparty: string;
+  fraction: number;
+  hedge_type: HedgeType;
+  item_kind: ItemKind;
+  item_terms: ItemTerms;
+  hedge_ratio: number;
+  designation_date: string;
+  designation_snapshot: string;
+  documentation: HedgeDocumentation;
+  hypothetical: {
+    product: ProductId;
+    trade_date: string;
+    start_date: string;
+    maturity_date: string;
+    params: Record<string, unknown>;
+  };
+  designation: {
+    snapshot: string;
+    as_of: string;
+    data_quality: DataQuality;
+    pv_inst: number;
+    pv_hypo: number;
+  };
+  status: HedgeStatus;
+  dedesignation: { date: string; reason: string; frozen_oci: number } | null;
+  oci_balance: number;
+  last_close: string | null;
+  events: HedgeEvent[];
+  periods: HedgePeriod[];
+  created_at: string;
+}
+
+export interface CriticalTerm {
+  term: 'notional' | 'index' | 'currency' | 'start_date' | 'maturity_date' | 'side';
+  label: string;
+  instrument: string | number;
+  item: string | number;
+  result: 'match' | 'mismatch';
+}
+
+export interface ScenarioRatio {
+  name: string;
+  d_inst: number;
+  d_hypo: number;
+  ratio: number | null;
+}
+
+export interface EffectivenessResponse {
+  id: number;
+  snapshot: string;
+  as_of: string;
+  critical_terms: CriticalTerm[];
+  scenarios: ScenarioRatio[];
+  economic_relationship: boolean;
+  in_reference_range: number;
+  scenarios_counted: number;
+  reference_note: string;
+  warnings: Warning[];
+}
+
+export interface HedgeReport {
+  id: number;
+  generated_at: string;
+  notice: string;
+  relationship: Omit<HedgeDetail, 'events' | 'periods'>;
+  documentation: {
+    risk_management_objective: string;
+    hedged_risk: string;
+    hedged_item: { item_kind: ItemKind; item_terms: ItemTerms };
+    hedging_instrument: {
+      trade_id: number;
+      product: ProductId;
+      counterparty: string;
+      fraction: number;
+      notional: number;
+      currency: string;
+      start_date: string;
+      maturity_date: string;
+    };
+    hedge_ratio: number;
+    effectiveness_method: string;
+    ineffectiveness_sources: string;
+  };
+  /** Respuesta de la prueba prospectiva, o `{error}` si la operación ya no está viva en ese snapshot. */
+  prospective: EffectivenessResponse | { error: string };
+  periods: {
+    id: number;
+    snapshot: string;
+    as_of: string;
+    data_quality: DataQuality;
+    inst_cum: number;
+    hypo_cum: number;
+    oci: number;
+    d_oci: number;
+    ineffectiveness: number;
+    recycled: number;
+    item_adjustment: number;
+    fv_result: number;
+    settled_period: number;
+  }[];
+  entries_by_period: { period_id: number; as_of: string; entries: JournalEntry[] }[];
+  entries_total: { account: string; debit: number; credit: number }[];
+  fair_value_hierarchy: {
+    level: number;
+    basis: string;
+    snapshots: {
+      role: 'designation' | 'period';
+      snapshot: string;
+      as_of: string;
+      data_quality: DataQuality;
+    }[];
+  };
+  reserve: { balance: number; frozen: boolean; note: string | null };
+}
+
+export interface CreateHedgeBody {
+  trade_id: number;
+  snapshot: string;
+  designation_date?: string;
+  hedge_type: HedgeType;
+  item_kind: ItemKind;
+  item_terms: ItemTerms;
+  fraction: number;
+  hedge_ratio?: number;
+  documentation: HedgeDocumentation;
+}

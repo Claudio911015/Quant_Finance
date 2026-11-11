@@ -67,6 +67,16 @@ const NAV_ITEMS = [
     ),
   },
   {
+    to: '/coberturas',
+    label: 'Coberturas',
+    icon: (
+      <Icon>
+        <circle cx="6" cy="8" r="3.5" />
+        <circle cx="10" cy="8" r="3.5" />
+      </Icon>
+    ),
+  },
+  {
     to: '/metodologia',
     label: 'Metodología',
     icon: (

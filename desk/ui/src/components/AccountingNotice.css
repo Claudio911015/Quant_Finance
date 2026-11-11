@@ -1,0 +1,19 @@
+.accounting-notice {
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+/* Debe verse en la impresión: se fuerzan los fondos y se usan colores con contraste sobre blanco. */
+@media print {
+  .accounting-notice {
+    background: #fff4d6;
+    border-color: #8a6414;
+    color: #5c4210;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

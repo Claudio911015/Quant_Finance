@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
+  closeHedgePeriod,
+  createHedge,
+  dedesignateHedge,
   deleteTrade,
+  hedgeEffectiveness,
+  hedgeReportCsvUrl,
   importFixingsCsv,
+  listHedges,
   listSnapshots,
   pnl,
   postEvent,
@@ -11,6 +17,7 @@ import {
   riskVar,
   valuation,
 } from './client';
+import type { CreateHedgeBody } from './types';
 
 function mockFetch(status: number, body?: unknown) {
   const fn = vi.fn().mockResolvedValue({
@@ -125,5 +132,81 @@ describe('cliente API', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(409);
     expect(err.field).toBe('id');
+  });
+});
+
+describe('cliente API: coberturas', () => {
+  it('listHedges con trade_id lo pasa en la consulta y desenvuelve la lista', async () => {
+    const fn = mockFetch(200, { hedges: [{ id: 1 }] });
+    await expect(listHedges({ trade_id: 3 })).resolves.toEqual([{ id: 1 }]);
+    expect(fn.mock.calls[0][0]).toBe('/api/hedges?trade_id=3');
+  });
+
+  it('listHedges sin filtro llama a /api/hedges', async () => {
+    const fn = mockFetch(200, { hedges: [] });
+    await expect(listHedges()).resolves.toEqual([]);
+    expect(fn.mock.calls[0][0]).toBe('/api/hedges');
+  });
+
+  it('createHedge hace POST a /api/hedges con el cuerpo', async () => {
+    const fn = mockFetch(201, { id: 1 });
+    const body: CreateHedgeBody = {
+      trade_id: 8,
+      snapshot: 'MX-DEMO',
+      hedge_type: 'cash_flow',
+      item_kind: 'forecast_fx',
+      item_terms: { amount_usd: 10000000, date: '2027-05-11', side: 'buy_usd' },
+      fraction: 1,
+      documentation: {
+        risk_management_objective: 'a',
+        hedged_risk: 'b',
+        effectiveness_method: 'c',
+        ineffectiveness_sources: 'd',
+      },
+    };
+    await createHedge(body);
+    const [url, init] = fn.mock.calls[0];
+    expect(url).toBe('/api/hedges');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual(body);
+  });
+
+  it('closeHedgePeriod envía {"snapshot"} a /api/hedges/1/periods', async () => {
+    const fn = mockFetch(201, { id: 1 });
+    await closeHedgePeriod(1, 'D1');
+    const [url, init] = fn.mock.calls[0];
+    expect(url).toBe('/api/hedges/1/periods');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe('{"snapshot":"D1"}');
+  });
+
+  it('dedesignateHedge hace POST a /api/hedges/1/dedesignate con fecha y motivo', async () => {
+    const fn = mockFetch(201, { id: 1 });
+    const body = { date: '2027-01-10', reason: 'Prepago del crédito' };
+    await dedesignateHedge(1, body);
+    const [url, init] = fn.mock.calls[0];
+    expect(url).toBe('/api/hedges/1/dedesignate');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual(body);
+  });
+
+  it('hedgeEffectiveness pasa el snapshot en la consulta', async () => {
+    const fn = mockFetch(200, {});
+    await hedgeEffectiveness(1, 'MX-DEMO');
+    expect(fn.mock.calls[0][0]).toBe('/api/hedges/1/effectiveness?snapshot=MX-DEMO');
+  });
+
+  it('hedgeReportCsvUrl es la URL del CSV, sin llamar a la red', () => {
+    const fn = mockFetch(200, {});
+    expect(hedgeReportCsvUrl(2)).toBe('/api/hedges/2/report?format=csv');
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('un 409 al cerrar un periodo se convierte en ApiError con status 409 y field', async () => {
+    mockFetch(409, { error: 'El periodo ya está cerrado', field: 'snapshot' });
+    const err = await closeHedgePeriod(1, 'D1').catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(409);
+    expect(err.field).toBe('snapshot');
   });
 });

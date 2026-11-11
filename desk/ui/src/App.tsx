@@ -1,5 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Shell } from './components/Shell';
+import HedgeReportScreen from './screens/HedgeReportScreen';
+import HedgeScreen from './screens/HedgeScreen';
+import HedgesScreen from './screens/HedgesScreen';
 import { MarketScreen } from './screens/MarketScreen';
 import { MethodologyScreen } from './screens/MethodologyScreen';
 import { PortfolioScreen } from './screens/PortfolioScreen';
@@ -18,6 +21,9 @@ export default function App() {
         <Route path="/portafolio" element={<PortfolioScreen />} />
         <Route path="/portafolio/:id" element={<TradeScreen />} />
         <Route path="/riesgo" element={<RiskScreen />} />
+        <Route path="/coberturas" element={<HedgesScreen />} />
+        <Route path="/coberturas/:id" element={<HedgeScreen />} />
+        <Route path="/coberturas/:id/reporte" element={<HedgeReportScreen />} />
         <Route path="/metodologia" element={<MethodologyScreen />} />
       </Routes>
     </Shell>

@@ -1,11 +1,17 @@
 import type {
   AddFixingResponse,
+  CreateHedgeBody,
   Dv01Response,
+  EffectivenessResponse,
   EventType,
   Fixing,
   FixingIndex,
   FixingsCsvResult,
   FlowsResponse,
+  HedgeDetail,
+  HedgePeriod,
+  HedgeReport,
+  HedgeSummary,
   PnlResponse,
   PriceResponse,
   ProductId,
@@ -188,4 +194,43 @@ export function riskVar(
     horizon_days: horizonDays,
     confidence,
   });
+}
+
+export async function listHedges(q?: { trade_id?: number }): Promise<HedgeSummary[]> {
+  const query = q?.trade_id !== undefined ? `?trade_id=${q.trade_id}` : '';
+  const data = await request<{ hedges: HedgeSummary[] }>('GET', `/hedges${query}`);
+  return data.hedges;
+}
+
+export function getHedge(id: number): Promise<HedgeDetail> {
+  return request('GET', `/hedges/${id}`);
+}
+
+export function createHedge(body: CreateHedgeBody): Promise<HedgeDetail> {
+  return request('POST', '/hedges', body);
+}
+
+export function closeHedgePeriod(id: number, snapshot: string): Promise<HedgePeriod> {
+  return request('POST', `/hedges/${id}/periods`, { snapshot });
+}
+
+export function dedesignateHedge(
+  id: number,
+  body: { date: string; reason: string },
+): Promise<HedgeDetail> {
+  return request('POST', `/hedges/${id}/dedesignate`, body);
+}
+
+export function hedgeEffectiveness(id: number, snapshot: string): Promise<EffectivenessResponse> {
+  return request('GET', `/hedges/${id}/effectiveness?snapshot=${encodeURIComponent(snapshot)}`);
+}
+
+export function hedgeReport(id: number, snapshot?: string): Promise<HedgeReport> {
+  const query = snapshot ? `?snapshot=${encodeURIComponent(snapshot)}` : '';
+  return request('GET', `/hedges/${id}/report${query}`);
+}
+
+/** URL del CSV de asientos, para un `<a download>`; no pasa por `request`. */
+export function hedgeReportCsvUrl(id: number): string {
+  return `${BASE}/hedges/${id}/report?format=csv`;
 }
