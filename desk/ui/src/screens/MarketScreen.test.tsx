@@ -502,3 +502,108 @@ describe('MarketScreen · Rodar', () => {
     expect((screen.getByLabelText('Id nuevo') as HTMLInputElement).value).toBe('MX-DEMO');
   });
 });
+
+// --- corte 3 ---
+// Curva MXN-USD y panel «Descuento MXN con colateral en USD».
+
+const CSA_NO_CURVE =
+  'El snapshot no trae puntos forward ni base de cross currency swaps: la curva MXN-USD no existe y todo se descuenta con TIIE-F';
+
+const CSA_SNAPSHOT: Snapshot = {
+  ...SNAPSHOT,
+  curves: {
+    ...SNAPSHOT.curves,
+    'MXN-USD': {
+      currency: 'MXN',
+      period_days: 28,
+      dependent: true,
+      points: [point('1M', 28, 0.0701, 0.0701), point('2Y', 728, 0.0652, 0.0649)],
+    },
+  },
+  fx_forwards: [{ days: 28, points: 0.0438, label: '1M' }],
+  xccy_basis: [{ days: 728, spread: -0.001, label: '2Y' }],
+  csa: {
+    available: true,
+    curve: 'MXN-USD',
+    source: { kind: 'synthetic', label: 'Sintético (inventado para demostración)', as_of: null },
+    message: null,
+    implied_vs_quoted: [
+      {
+        label: '1M',
+        days: 28,
+        quoted_points: 0.0438,
+        quoted_forward: 18.6438,
+        implied_forward: 18.6438,
+        parity_forward: 18.645095,
+        diff: 0,
+      },
+    ],
+  },
+};
+
+const CSA_UNAVAILABLE: Snapshot = {
+  ...SNAPSHOT,
+  fx_forwards: null,
+  xccy_basis: null,
+  csa: { available: false, curve: 'MXN-USD', source: null, message: CSA_NO_CURVE, implied_vs_quoted: [] },
+};
+
+function mockSnapshot(snapshot: Snapshot) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const path = String(input).replace(/^\/api/, '');
+    const body = path === '/market/snapshots' ? { snapshots: [snapshot] } : snapshot;
+    return new Response(JSON.stringify(body), { status: 200 });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+describe('MarketScreen · colateral y MXN-USD', () => {
+  it('con csa.available muestra las tres tablas, el rótulo sintético y MXN-USD entre las curvas', async () => {
+    mockSnapshot(CSA_SNAPSHOT);
+    renderScreen();
+
+    const csa = await screen.findByRole('region', { name: 'Descuento MXN con colateral en USD' });
+    expect(within(csa).getByText('Sintético (inventado para demostración)')).toBeTruthy();
+    expect(within(csa).getByRole('table', { name: 'Puntos forward USDMXN' })).toBeTruthy();
+    expect(within(csa).getByRole('table', { name: 'Base de cross currency swaps' })).toBeTruthy();
+    expect(within(csa).getByRole('table', { name: 'Forward implícito vs cotizado' })).toBeTruthy();
+
+    // La curva dependiente entra en la gráfica de curvas, con su nota y su procedencia, y sin tabla editable.
+    const curve = screen.getByRole('region', { name: 'MXN-USD' });
+    expect(within(curve).getByRole('img', { name: 'Curva MXN-USD: cero y forward' })).toBeTruthy();
+    expect(
+      within(curve).getByText(
+        'Curva dependiente: se recalibra con los puntos forward y la base fijos cuando se mueven SOFR, TIIE-F o el spot',
+      ),
+    ).toBeTruthy();
+    expect(within(curve).getByText('Sintético (inventado para demostración)')).toBeTruthy();
+    expect(curve.querySelector('.market__grid')).toBeNull();
+    const names = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+    expect(names.indexOf('MXN-USD')).toBeGreaterThan(names.indexOf('SOFR'));
+    // TIIE-F y SOFR conservan su tabla de cotizaciones editable.
+    expect(screen.getByRole('region', { name: 'TIIE-F' }).querySelector('.market__grid')).toBeTruthy();
+  });
+
+  it('sin curva muestra el mensaje y no las tablas ni la curva MXN-USD', async () => {
+    mockSnapshot(CSA_UNAVAILABLE);
+    renderScreen();
+
+    const csa = await screen.findByRole('region', { name: 'Descuento MXN con colateral en USD' });
+    expect(within(csa).getByText(CSA_NO_CURVE)).toBeTruthy();
+    expect(screen.queryByRole('table', { name: 'Puntos forward USDMXN' })).toBeNull();
+    expect(screen.queryByRole('table', { name: 'Base de cross currency swaps' })).toBeNull();
+    expect(screen.queryByRole('table', { name: 'Forward implícito vs cotizado' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'MXN-USD' })).toBeNull();
+  });
+
+  it('un snapshot viejo sin csa no rompe ni pinta el panel', async () => {
+    mockSnapshot(SNAPSHOT);
+    renderScreen();
+
+    await screen.findByRole('region', { name: 'TIIE-F' });
+    expect(screen.queryByRole('region', { name: 'Descuento MXN con colateral en USD' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'MXN-USD' })).toBeNull();
+  });
+});
+// --- fin corte 3 ---

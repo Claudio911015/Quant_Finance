@@ -1,0 +1,124 @@
+.csa {
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.csa__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.csa__meta {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+/* Procedencia: tipo + rótulo + fecha (misma lectura que en las curvas). */
+.csa__source {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.csa__kind {
+  padding: 0 var(--space-2);
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.csa__kind--live {
+  color: var(--pos);
+}
+
+.csa__kind--proxy {
+  color: var(--accent);
+}
+
+.csa__kind--synthetic,
+.csa__kind--mixed {
+  color: var(--warn);
+}
+
+.csa__source-date {
+  white-space: nowrap;
+}
+
+.csa__source-date::before {
+  content: '· ';
+}
+
+.csa__banner {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+
+.csa__tables {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.csa__block {
+  min-width: 0;
+}
+
+.csa__block--wide {
+  grid-column: 1 / -1;
+}
+
+.csa__block h3 {
+  margin: 0 0 var(--space-2);
+}
+
+/* Si la tabla no cabe, desplaza ella sola: la página nunca desborda. */
+.csa__scroll {
+  overflow-x: auto;
+}
+
+.csa__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.csa__table th,
+.csa__table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.csa__table thead th {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.csa__table th.num,
+.csa__table td.num {
+  text-align: right;
+}
+
+.csa__table tbody th {
+  font-weight: 500;
+}

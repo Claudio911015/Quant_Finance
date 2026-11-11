@@ -12,9 +12,11 @@ import type { EChartsCoreOption } from 'echarts/core';
 import { ApiError, refreshMarket, rollSnapshot, updateSnapshot } from '../api/client';
 import type { CurvePoint, Quote, Snapshot, Source, SourceKey } from '../api/types';
 import { EChart, cssColor } from '../components/EChart';
+import { CSA_CURVE_NOTE } from '../lib/csaLabels';
 import { fmtNumber } from '../lib/format';
 import { asOfText, kindText } from '../lib/provenance';
 import { useSnapshot } from '../state/SnapshotContext';
+import CsaPanel from './CsaPanel';
 import FixingsPanel from './FixingsPanel';
 import './MarketScreen.css';
 
@@ -281,8 +283,11 @@ function CurvePanel({
   error: string | null;
   onCommit: CommitQuote;
 }) {
-  const source = snapshot.sources[`curve:${name}` as SourceKey];
   const curve = snapshot.curves[name];
+  // Una curva dependiente (MXN-USD) no tiene cotizaciones propias ni entrada en `sources`: su
+  // procedencia es la de los puntos forward y la base (`csa.source`).
+  const dependent = curve.dependent === true;
+  const source = dependent ? snapshot.csa?.source : snapshot.sources[`curve:${name}` as SourceKey];
   const quotes = useMemo(() => snapshot.quotes.filter((q) => q.curve === name), [snapshot, name]);
   const option = useMemo(() => curveOption(curve.points), [curve]);
   return (
@@ -297,7 +302,11 @@ function CurvePanel({
       <div className="market__split">
         <EChart option={option} ariaLabel={`Curva ${name}: cero y forward`} />
         <div className="market__table">
-          <QuotesGrid quotes={quotes} readOnly={snapshot.read_only} onCommit={onCommit} />
+          {dependent ? (
+            <p className="market__note">{CSA_CURVE_NOTE}</p>
+          ) : (
+            <QuotesGrid quotes={quotes} readOnly={snapshot.read_only} onCommit={onCommit} />
+          )}
           {error && (
             <p role="alert" className="market__error">
               {error}
@@ -561,6 +570,8 @@ export function MarketScreen() {
           onCommit={commitQuote(name)}
         />
       ))}
+
+      <CsaPanel snapshot={snapshot} />
 
       <div className="market__split">
         <section className="market__panel" aria-labelledby="surface-title">
