@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Counterparty, ValuationResponse } from '../api/types';
 import { SnapshotProvider, useSnapshot } from '../state/SnapshotContext';
-import { PortfolioScreen, columnDefs, rowTooltip } from './PortfolioScreen';
+import { PortfolioScreen, columnDefs, pvCurrency, rowTooltip } from './PortfolioScreen';
 
 const VALUATION: ValuationResponse = {
   snapshot: 'MX-DEMO',
@@ -273,6 +273,13 @@ describe('PortfolioScreen', () => {
     expect(pv(1)).toBe('MXN 1,500,000.50');
     expect(pv(3)).toBe('USD 0.00');
     expect(pv(2)).toBe('Error');
+  });
+
+  it('el PV del cross currency swap viaja en MXN aunque su nocional sea USD (como en el backend)', () => {
+    const row = (product: string, currency: string) => ({ product, currency }) as Parameters<typeof pvCurrency>[0];
+    expect(pvCurrency(row('xccy_swap', 'USD'))).toBe('MXN');
+    expect(pvCurrency(row('fx_forward', 'USD'))).toBe('MXN');
+    expect(pvCurrency(row('irs', 'USD'))).toBe('USD'); // un irs SOFR sí vale en la moneda de su curva
   });
 
   it('el id es un enlace a la ficha y el clic navega sin recargar', async () => {

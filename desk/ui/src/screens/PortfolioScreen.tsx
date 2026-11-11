@@ -95,10 +95,11 @@ const STATUS_ORDER: TradeStatus[] = ['no_pactada', 'viva', 'vencida', 'terminada
 
 type StatusFilter = 'all' | TradeStatus;
 
-/** `pv` viaja en la moneda de /api/price: MXN para FX y renta variable, la de la curva en el resto. */
-const PV_IN_MXN = new Set(['fx_forward', 'fx_option', 'equity_option']);
+/** `pv` viaja en la moneda de /api/price: MXN para FX, renta variable y cross currency swap (espejo de `_PV_IN_MXN`
+ *  del backend), la de la curva en el resto. */
+const PV_IN_MXN = new Set(['fx_forward', 'fx_option', 'equity_option', 'xccy_swap']);
 
-function pvCurrency(row: GridRow): string {
+export function pvCurrency(row: GridRow): string {
   return row.product && PV_IN_MXN.has(row.product) ? 'MXN' : (row.currency ?? 'MXN');
 }
 
@@ -143,6 +144,7 @@ export const columnDefs: ColDef<GridRow>[] = [
     headerName: 'Producto',
     width: 122,
     valueFormatter: (p) => (p.value == null ? '' : productTitle(p.value)),
+    tooltipValueGetter: (p) => (p.value == null ? undefined : productTitle(p.value)), // «Cross currency swap USDMXN» no cabe
   },
   { colId: 'counterparty', field: 'counterparty', headerName: 'Contraparte', flex: 1, minWidth: 92 },
   // Moneda del colateral de la contraparte en la fecha de valuación (corte 3); filas viejas sin dato quedan vacías.
