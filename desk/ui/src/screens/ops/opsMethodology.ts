@@ -14,7 +14,7 @@ export const OPS_SECTIONS: {
       },
       {
         label: 'Liquidación confirmada',
-        text: 'Registra el pago real como evento de tipo transfer (settlement_confirmed), una vez por flujo. No cambia la valuación ni el P&L: el flujo derivado es el que cuenta, y la diferencia entre ambos se reporta aparte.',
+        text: 'Registra el pago real como evento de tipo transfer (settlement_confirmed), una vez por flujo. No cambia la valuación ni el P&L: el flujo derivado es el que cuenta, y la diferencia entre ambos se reporta aparte. Solo se confirman cupones y liquidaciones, cada uno por fecha y moneda; los intercambios de nocional y las amortizaciones no se confirman, así que un neto de cupón y nocional al vencimiento de un cross currency swap no puede confirmarse como un solo pago: se confirma el cupón de cada pierna y el intercambio queda sin confirmar.',
       },
       {
         label: 'Confirmación',

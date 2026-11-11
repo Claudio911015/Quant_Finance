@@ -79,4 +79,16 @@ describe('Metodología de operaciones', () => {
     );
     expect(row('Confirmación')).toContain('pierna fija');
   });
+
+  it('Liquidación confirmada declara que intercambios de nocional y amortizaciones no se confirman, ni siquiera netos con el cupón del cross currency swap', () => {
+    render(
+      <MemoryRouter>
+        <MethodologyScreen />
+      </MemoryRouter>,
+    );
+    const text = row('Liquidación confirmada');
+    expect(text).toContain('Solo se confirman cupones y liquidaciones');
+    expect(text).toContain('intercambios de nocional y las amortizaciones no se confirman');
+    expect(text).toContain('neto de cupón y nocional al vencimiento de un cross currency swap no puede confirmarse como un solo pago');
+  });
 });
