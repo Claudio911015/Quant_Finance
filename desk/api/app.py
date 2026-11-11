@@ -7,7 +7,7 @@ from flask import Flask, Response, send_from_directory
 from werkzeug.exceptions import NotFound
 from werkzeug.utils import safe_join
 
-from desk.api import db
+from desk.api import db, fred
 from desk.api.errors import register_error_handlers
 from desk.api.routes import market, price, risk, trades
 from desk.api.seed_market import seed_market
@@ -30,6 +30,13 @@ def create_app(db_path: Optional[Union[str, Path]] = None, seed: bool = True) ->
     app = Flask(__name__, static_folder=None)
     path = Path(db_path) if db_path is not None else db.DEFAULT_DB_PATH
     app.config["DESK_DB"] = str(path)
+    app.config["MDF_DB"] = os.environ.get("MDF_DB") or str(
+        Path.home() / "Git" / "MarketDataFeed" / "build" / "sofr.db"
+    )
+    app.config["MDF_FETCH"] = os.environ.get("MDF_FETCH") or str(
+        Path(app.config["MDF_DB"]).parent / "examples" / "fetch_sofr"
+    )
+    app.config["FRED_DEXMXUS_URL"] = fred.DEXMXUS_URL
 
     conn = db.connect(path)
     try:

@@ -12,7 +12,12 @@ if str(ROOT) not in sys.path:
 def app(tmp_path):
     from desk.api.app import create_app
 
-    return create_app(db_path=tmp_path / "t.db")
+    app = create_app(db_path=tmp_path / "t.db")
+    # Ninguna prueba toca la base ni el ejecutable reales de MarketDataFeed, ni sale a internet.
+    app.config["MDF_DB"] = str(tmp_path / "no-existe" / "sofr.db")
+    app.config["MDF_FETCH"] = str(tmp_path / "no-existe" / "fetch_sofr")
+    app.config["FRED_DEXMXUS_URL"] = (tmp_path / "no-existe" / "fred.csv").as_uri()
+    return app
 
 
 @pytest.fixture

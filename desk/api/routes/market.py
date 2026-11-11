@@ -1,8 +1,8 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, current_app, jsonify
 
-from desk.api import market
+from desk.api import market, refresh
 from desk.api.db import get_conn
-from desk.api.validation import body_object
+from desk.api.validation import body_object, ensure_finite
 
 bp = Blueprint("market", __name__, url_prefix="/api/market")
 
@@ -19,8 +19,14 @@ def snapshot(snapshot_id):
 
 @bp.put("/snapshots/<snapshot_id>")
 def update_snapshot(snapshot_id):
-    body = body_object()
     conn = get_conn()
+    # MKT-LIVE nunca se edita: su 409 (o el 404 si no existe) sale antes de mirar el cuerpo.
+    body = {} if snapshot_id == market.LIVE_ID else body_object()
     payload = market.update_snapshot(conn, snapshot_id, body)
     conn.commit()
     return jsonify(payload)
+
+
+@bp.post("/refresh")
+def refresh_market():
+    return jsonify(ensure_finite(refresh.run_refresh(get_conn(), current_app.config)))
