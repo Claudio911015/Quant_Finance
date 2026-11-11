@@ -20,6 +20,17 @@ struct OisCashFlow {
     double presentValue;     ///< netAmount * discountFactor.
 };
 
+/// @brief Accrual factor of a daily-compounded overnight rate: product of (1 + r_i * d_i / dayBase).
+///
+/// @param rates    Overnight rates (decimal), one per fixing.
+/// @param days     Days each rate applies for (> 0), same length as @p rates.
+/// @param dayBase  Day-count base of the rates (> 0); 360 for ACT/360 (default).
+/// @return         The compounded factor; 1 when there are no fixings.
+/// @throws std::invalid_argument if the sizes differ, any day is not positive, @p dayBase is not
+///         positive, or any single factor (1 + r_i * d_i / dayBase) is not positive.
+double compoundOvernight(const std::vector<double>& rates, const std::vector<int>& days,
+                         double dayBase = 360.0);
+
 /// @brief Overnight-index swap (TIIE de Fondeo 28-day, SOFR annual) with a day-based schedule.
 ///
 /// The floating leg is the daily-compounded overnight rate, priced by replication:
@@ -30,6 +41,10 @@ struct OisCashFlow {
 /// same conventions as termstructure::bootstrapOis, so a swap struck at a bootstrapped
 /// quote prices to zero on the bootstrapped curve. Discounting and projection use the
 /// single curve stored under @c curveKey.
+///
+/// A swap can also be valued mid-life or before it starts (second constructor): days are
+/// then relative to the valuation date, the current period may have started in the past
+/// (its fixings already compounded into an accrued factor) or lie in the future.
 class OisSwap : public Instrument {
 public:
     /// @param notional      Notional principal (> 0).
@@ -45,6 +60,30 @@ public:
             std::string curveKey,
             math::DayCountConvention dcc = math::DayCountConvention::ACT_360);
 
+    /// @brief Swap valued on a date other than its start: current period already running
+    ///        (@p startDays < 0, fixings compounded into @p accruedFactor) or starting later.
+    ///
+    /// Days are relative to the valuation date. Period 1 runs from @p startDays to
+    /// @p payDays[0] with accrual tau = yearFraction(payDays[0] - startDays, dcc) and floating
+    /// coupon N * (accruedFactor * DF(max(startDays, 0)) / DF(payDays[0]) - 1); later periods
+    /// are the replication coupons of the first constructor.
+    ///
+    /// @param notional       Notional principal (> 0).
+    /// @param fixedRate      Fixed rate (decimal).
+    /// @param startDays      Start of the first period in days from valuation (negative if already started).
+    /// @param payDays        Remaining payment days, strictly increasing, all > 0.
+    /// @param accruedFactor  Compounded overnight factor of the days of period 1 already elapsed (> 0);
+    ///                       must be exactly 1 when @p startDays >= 0.
+    /// @param type           Payer (pays fixed, receives floating) or Receiver.
+    /// @param curveKey       Name of the curve in the MarketEnvironment used to project and discount.
+    /// @param dcc            Accrual convention; ACT/360 (default), ACT/365 or ACT/ACT (not 30/360).
+    /// @throws std::invalid_argument if notional <= 0, @p payDays is empty, not strictly increasing
+    ///         or starts at <= 0, @p startDays >= payDays[0], @p accruedFactor <= 0, @p accruedFactor != 1
+    ///         with @p startDays >= 0, or @p dcc is THIRTY_360.
+    OisSwap(double notional, double fixedRate, int startDays, std::vector<int> payDays,
+            double accruedFactor, SwapType type, std::string curveKey,
+            math::DayCountConvention dcc = math::DayCountConvention::ACT_360);
+
     /// @brief Net present value: the sum of the presentValue column of cashFlows().
     /// @param env  Market environment holding the curve @c curveKey().
     /// @return     NPV in the curve's currency, from the holder's side (Payer or Receiver).
@@ -53,7 +92,8 @@ public:
     /// @brief Routes Instrument::pv() to npv() so the swap flows through ScenarioEngine.
     double calculatePV(const core::MarketEnvironment& env) const override { return npv(env); }
 
-    /// @brief Fixed rate that makes npv() zero: (1 - DF(T)) / sum(tau_i * DF(t_i)).
+    /// @brief Fixed rate that makes npv() zero: sum(floatAmount_i * DF(t_i)) / annuity.
+    ///        For a swap starting today this is N * (1 - DF(T)) / annuity.
     /// @param env  Market environment holding the curve @c curveKey().
     /// @return     Par rate (decimal).
     double parRate(const core::MarketEnvironment& env) const;
@@ -70,19 +110,22 @@ public:
 
     double      notional()     const { return notional_; }
     double      fixedRate()    const { return fixedRate_; }
-    int         maturityDays() const { return maturityDays_; }
-    int         periodDays()   const { return periodDays_; }
+    int         maturityDays() const { return maturityDays_; }   ///< Last payment day.
+    int         periodDays()   const { return periodDays_; }     ///< Coupon period; for the second constructor, the length of period 1.
     SwapType    type()         const { return type_; }
     const std::string& curveKey() const { return curveKey_; }
 
 private:
     double                   notional_;
     double                   fixedRate_;
-    int                      maturityDays_;
-    int                      periodDays_;
+    int                      maturityDays_ = 0;
+    int                      periodDays_   = 0;
     SwapType                 type_;
     std::string              curveKey_;
     math::DayCountConvention dcc_;
+    int                      startDays_;
+    std::vector<int>         payDays_;
+    double                   accruedFactor_;
 };
 
 } // namespace qf::instruments

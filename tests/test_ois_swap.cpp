@@ -4,6 +4,8 @@
 #include <qf/core/market_environment.hpp>
 #include <qf/risk/scenario.hpp>
 #include <cmath>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 using namespace qf::instruments;
@@ -158,4 +160,178 @@ TEST(OisSwap, InvalidInputsThrow) {
     EXPECT_THROW(OisSwap(kNotional, 0.07, 364, 0,  SwapType::Payer, "TIIE-F"), std::invalid_argument);
     EXPECT_THROW(OisSwap(kNotional, 0.07, 364, 28, SwapType::Payer, "TIIE-F",
                          DayCountConvention::THIRTY_360), std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// Aged / forward-starting swap and compoundOvernight
+// ---------------------------------------------------------------------------
+
+namespace {
+    using qf::termstructure::oisPaymentDays;
+
+    // Two flat-ish curves: TIIE-F (28-day) up to 1820 days and SOFR (annual) up to 5 years.
+    MarketEnvironment twoCurveEnv() {
+        MarketEnvironment env;
+        env.addCurve("TIIE-F", bootstrapOis(quotes(), kPeriod));
+        env.addCurve("SOFR", bootstrapOis({{365,  0.0400, OisQuote::Ois},
+                                           {730,  0.0420, OisQuote::Ois},
+                                           {1825, 0.0440, OisQuote::Ois}}, 365));
+        return env;
+    }
+
+    // DF on a curve at an integer day; the valuation date has DF = 1.
+    double dfDay(const YieldCurve& c, int day) {
+        return day == 0 ? 1.0 : c.discountFactor(day / 365.0);
+    }
+
+    // 26 TIIE-F quotes, one every 28 days from 28 to 728 (deposit first, then par OIS).
+    YieldCurve tiiefCurve26() {
+        std::vector<OisQuote> q;
+        for (int k = 1; k <= 26; ++k)
+            q.push_back({28 * k, 0.0700 + 0.0004 * k,
+                         k == 1 ? OisQuote::Deposit : OisQuote::Ois});
+        return bootstrapOis(q, kPeriod);
+    }
+}
+
+TEST(OisSwapAged, NewConstructorAtStartZeroMatchesTheOldOne) {
+    const MarketEnvironment env = twoCurveEnv();
+    struct Case { int maturity, period; const char* key; };
+    for (const Case& c : {Case{364, 28, "TIIE-F"}, Case{1825, 365, "SOFR"}}) {
+        for (SwapType side : {SwapType::Payer, SwapType::Receiver}) {
+            const OisSwap oldSwap(kNotional, 0.0690, c.maturity, c.period, side, c.key);
+            const OisSwap newSwap(kNotional, 0.0690, 0, oisPaymentDays(c.maturity, c.period), 1.0,
+                                  side, c.key);
+            const auto rel = [](double a, double b) { return std::abs(a - b) <= 1e-12 * std::abs(b); };
+            EXPECT_TRUE(rel(newSwap.npv(env),     oldSwap.npv(env)))     << c.key;
+            EXPECT_TRUE(rel(newSwap.parRate(env), oldSwap.parRate(env))) << c.key;
+            EXPECT_TRUE(rel(newSwap.annuity(env), oldSwap.annuity(env))) << c.key;
+            const auto a = oldSwap.cashFlows(env);
+            const auto b = newSwap.cashFlows(env);
+            ASSERT_EQ(a.size(), b.size());
+            for (std::size_t i = 0; i < a.size(); ++i) {
+                EXPECT_EQ(a[i].payDays, b[i].payDays);
+                EXPECT_TRUE(rel(b[i].accrual,        a[i].accrual));
+                EXPECT_TRUE(rel(b[i].fixedAmount,    a[i].fixedAmount));
+                EXPECT_TRUE(rel(b[i].floatAmount,    a[i].floatAmount));
+                EXPECT_TRUE(rel(b[i].netAmount,      a[i].netAmount));
+                EXPECT_TRUE(rel(b[i].discountFactor, a[i].discountFactor));
+                EXPECT_TRUE(rel(b[i].presentValue,   a[i].presentValue));
+            }
+            EXPECT_EQ(newSwap.maturityDays(), oldSwap.maturityDays());
+            EXPECT_DOUBLE_EQ(newSwap.maturity(), oldSwap.maturity());
+        }
+    }
+}
+
+TEST(OisSwapAged, ParRateEqualsTelescopedClosedForm) {
+    // Old constructor: sum(float * DF) / annuity must still be N * (1 - DF(T)) / annuity.
+    const MarketEnvironment env = twoCurveEnv();
+    const OisSwap swap(kNotional, 0.0, 364, kPeriod, SwapType::Payer, "TIIE-F");
+    const double dfT = env.curve("TIIE-F").discountFactor(364.0 / 365.0);
+    const double expected = kNotional * (1.0 - dfT) / swap.annuity(env);
+    EXPECT_NEAR(swap.parRate(env), expected, 1e-12 * expected);
+}
+
+TEST(OisSwapAged, CompoundOvernight) {
+    EXPECT_DOUBLE_EQ(compoundOvernight({}, {}), 1.0);
+    EXPECT_DOUBLE_EQ(compoundOvernight({0.07}, {1}), 1.0 + 0.07 / 360.0);
+    EXPECT_DOUBLE_EQ(compoundOvernight({0.07, 0.08}, {1, 2}),
+                     (1.0 + 0.07 / 360.0) * (1.0 + 0.08 * 2.0 / 360.0));
+    EXPECT_DOUBLE_EQ(compoundOvernight({0.07}, {1}, 365.0), 1.0 + 0.07 / 365.0);
+    EXPECT_THROW(compoundOvernight({0.07, 0.07}, {1}), std::invalid_argument);
+    EXPECT_THROW(compoundOvernight({0.07}, {0}),       std::invalid_argument);
+    EXPECT_THROW(compoundOvernight({0.07}, {-1}),      std::invalid_argument);
+    EXPECT_THROW(compoundOvernight({0.07}, {1}, 0.0),  std::invalid_argument);
+    EXPECT_THROW(compoundOvernight({0.07}, {1}, -360.0), std::invalid_argument);
+    EXPECT_THROW(compoundOvernight({-361.0}, {1}),     std::invalid_argument);   // factor <= 0
+}
+
+TEST(OisSwapAged, RolledSwapMatchesOriginalValueRebasedToTheNewDate) {
+    // R3. Value at D0 a 364/28 payer struck at par on a 26-pillar TIIE-F curve; age it tau days.
+    // Daily fixings are the D0 forwards, so the aged swap on the shifted curve must be worth
+    // (npv_D0 - PV_D0 of the flows already paid) / DF0(tau).
+    const YieldCurve c0 = tiiefCurve26();
+    MarketEnvironment env0;
+    env0.addCurve("TIIE-F", c0);
+
+    const OisSwap probe(kNotional, 0.0, 364, kPeriod, SwapType::Payer, "TIIE-F");
+    const double par = probe.parRate(env0);
+    const OisSwap swap0(kNotional, par + 0.0010, 364, kPeriod, SwapType::Payer, "TIIE-F");
+    const std::vector<int> pay0 = oisPaymentDays(364, kPeriod);
+    const auto rows0 = swap0.cashFlows(env0);
+    const double npv0 = swap0.npv(env0);
+
+    for (int tau : {28, 14}) {
+        // Period in course at tau: first payment strictly after tau; it starts at the previous one.
+        std::size_t first = 0;
+        while (pay0[first] <= tau) ++first;
+        const int periodStart = first == 0 ? 0 : pay0[first - 1];
+
+        std::vector<double> fixings;
+        for (int k = periodStart; k < tau; ++k)
+            fixings.push_back((dfDay(c0, k) / dfDay(c0, k + 1) - 1.0) * 360.0);
+        const double accrued = compoundOvernight(fixings, std::vector<int>(fixings.size(), 1));
+
+        double settledPv = 0.0;
+        for (std::size_t i = 0; i < first; ++i) settledPv += rows0[i].presentValue;
+
+        // D1 curve with pillars exactly at the remaining payments, shifted by tau.
+        std::vector<double> mats, zeros;
+        std::vector<int> pay1;
+        for (std::size_t i = first; i < pay0.size(); ++i) {
+            const double d = pay0[i] / 365.0, t1 = (pay0[i] - tau) / 365.0;
+            mats.push_back(t1);
+            zeros.push_back((c0.zeroRate(d) * d - c0.zeroRate(tau / 365.0) * (tau / 365.0)) / t1);
+            pay1.push_back(pay0[i] - tau);
+        }
+        MarketEnvironment env1;
+        env1.addCurve("TIIE-F", YieldCurve(mats, zeros, qf::math::InterpolationMethod::Linear));
+
+        const OisSwap aged(kNotional, par + 0.0010, periodStart - tau, pay1, accrued,
+                           SwapType::Payer, "TIIE-F");
+        const double expected = (npv0 - settledPv) / dfDay(c0, tau);
+        EXPECT_NEAR(aged.npv(env1), expected, 1e-6 * kNotional) << "tau=" << tau;
+        EXPECT_EQ(aged.maturityDays(), 364 - tau);
+        EXPECT_EQ(aged.periodDays(), pay1.front() - (periodStart - tau));
+    }
+}
+
+TEST(OisSwapAged, ForwardStartingSwapDiscountsPeriodOneFromItsStart) {
+    const MarketEnvironment env = twoCurveEnv();
+    const YieldCurve& c = env.curve("TIIE-F");
+    const OisSwap swap(kNotional, 0.0690, 28, {56, 84, 112}, 1.0, SwapType::Payer, "TIIE-F");
+    const auto rows = swap.cashFlows(env);
+    ASSERT_EQ(rows.size(), 3u);
+    EXPECT_EQ(rows[0].payDays, 56);
+    EXPECT_DOUBLE_EQ(rows[0].accrual, 28.0 / 360.0);
+    EXPECT_NEAR(rows[0].floatAmount, kNotional * (dfDay(c, 28) / dfDay(c, 56) - 1.0), 1e-6);
+    EXPECT_NEAR(rows[1].floatAmount, kNotional * (dfDay(c, 56) / dfDay(c, 84) - 1.0), 1e-6);
+    EXPECT_EQ(swap.periodDays(), 28);
+    EXPECT_EQ(swap.maturityDays(), 112);
+}
+
+TEST(OisSwapAged, NewConstructorValidates) {
+    const auto make = [](double n, int start, std::vector<int> pay, double acc,
+                         DayCountConvention dcc = DayCountConvention::ACT_360) {
+        return OisSwap(n, 0.07, start, std::move(pay), acc, SwapType::Payer, "TIIE-F", dcc);
+    };
+    EXPECT_NO_THROW(make(kNotional, -14, {14, 42}, 1.0007));
+    EXPECT_NO_THROW(make(kNotional, 0, {28}, 1.0));
+    EXPECT_NO_THROW(make(kNotional, 28, {56}, 1.0));
+    EXPECT_THROW(make(0.0, 0, {28}, 1.0),                   std::invalid_argument);   // notional
+    EXPECT_THROW(make(-1.0, 0, {28}, 1.0),                  std::invalid_argument);
+    EXPECT_THROW(make(kNotional, 0, {}, 1.0),               std::invalid_argument);   // no payments
+    EXPECT_THROW(make(kNotional, -30, {0, 28}, 1.0),        std::invalid_argument);   // payDays > 0
+    EXPECT_THROW(make(kNotional, -30, {-5, 28}, 1.0),       std::invalid_argument);
+    EXPECT_THROW(make(kNotional, 0, {28, 28}, 1.0),         std::invalid_argument);   // strictly increasing
+    EXPECT_THROW(make(kNotional, 0, {56, 28}, 1.0),         std::invalid_argument);
+    EXPECT_THROW(make(kNotional, 28, {28}, 1.0),            std::invalid_argument);   // startDays < payDays[0]
+    EXPECT_THROW(make(kNotional, 40, {28}, 1.0),            std::invalid_argument);
+    EXPECT_THROW(make(kNotional, -14, {14}, 0.0),           std::invalid_argument);   // accruedFactor > 0
+    EXPECT_THROW(make(kNotional, -14, {14}, -1.0),          std::invalid_argument);
+    EXPECT_THROW(make(kNotional, -14, {14}, std::nan("")),  std::invalid_argument);
+    EXPECT_THROW(make(kNotional, 0, {28}, 1.0001),          std::invalid_argument);   // == 1 if startDays >= 0
+    EXPECT_THROW(make(kNotional, 7, {28}, 1.0001),          std::invalid_argument);
+    EXPECT_THROW(make(kNotional, 0, {28}, 1.0, DayCountConvention::THIRTY_360), std::invalid_argument);
 }

@@ -628,6 +628,9 @@ PYBIND11_MODULE(qfpy, m) {
     m.def("ois_payment_days", &qf::termstructure::oisPaymentDays,
           py::arg("maturity_days"), py::arg("period_days"),
           "Payment days k*period_days up to maturity_days, which is always the last one.");
+    m.def("compound_overnight", &qf::instruments::compoundOvernight,
+          py::arg("rates"), py::arg("days"), py::arg("day_base") = 360.0,
+          "Product of (1 + r_i * d_i / day_base) over the overnight fixings; 1 when empty.");
 
     py::class_<qf::instruments::OisCashFlow>(m, "OisCashFlow")
         .def_readonly("pay_days",        &qf::instruments::OisCashFlow::payDays)
@@ -647,6 +650,14 @@ PYBIND11_MODULE(qfpy, m) {
              py::arg("dcc") = qf::math::DayCountConvention::ACT_360,
              "Overnight-index swap with a day-based schedule, projected and discounted "
              "off the curve named curve_key.")
+        .def(py::init<double, double, int, std::vector<int>, double, qf::instruments::SwapType,
+                      std::string, qf::math::DayCountConvention>(),
+             py::arg("notional"), py::arg("fixed_rate"), py::arg("start_days"),
+             py::arg("pay_days"), py::arg("accrued_factor"), py::arg("swap_type"),
+             py::arg("curve_key"), py::arg("dcc") = qf::math::DayCountConvention::ACT_360,
+             "Swap valued mid-life or before it starts: days are relative to the valuation date, "
+             "period 1 runs from start_days (negative if already started, with the compounded "
+             "fixings in accrued_factor) to pay_days[0].")
         .def("npv", &qf::instruments::OisSwap::npv, py::arg("env"),
              "Net present value from the swap_type perspective.")
         .def("par_rate", &qf::instruments::OisSwap::parRate, py::arg("env"),
