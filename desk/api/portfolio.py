@@ -11,10 +11,11 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from desk.api import db, events, market
+from desk.api import fixings as fixing_store
+from desk.api import valuation as trade_valuation
 from desk.api.errors import ApiError
 from desk.api.market import CURVES, MarketContext
 from desk.api.pricing import PRODUCTS
-from desk.api.pricing.base import Product
 from desk.api.seed_market import SNAPSHOT_ID
 from desk.api.validation import NON_FINITE_MESSAGE, choice, has_non_finite, iso_date, text
 
@@ -112,20 +113,10 @@ def _decode(row: sqlite3.Row, trade_events: List[Dict[str, Any]]) -> Dict[str, A
     }
 
 
-def _normalized(trade: Dict[str, Any]) -> Tuple[Product, Dict[str, Any]]:
-    """Producto y `params` revalidados; lanza si la operación guardada no es valuable."""
-    product = PRODUCTS.get(trade["product"])
-    if product is None:
-        raise ValueError("Producto desconocido: %s" % trade["product"])
-    if not isinstance(trade["params"], dict):
-        raise ValueError("Los parámetros guardados de la operación son ilegibles")
-    return product, product.validate(trade["params"])
-
-
 def _describe(trade: Dict[str, Any], as_of: date) -> Dict[str, Any]:
     """`notional`/`currency`/`maturity` de la operación; todo `None` si está corrupta."""
     try:
-        product, params = _normalized(trade)
+        product, params = trade_valuation.normalized(trade)
         return product.describe(params, as_of)
     except Exception:
         return dict(_NO_DESCRIPTION)
@@ -165,14 +156,18 @@ def get_trade(conn: sqlite3.Connection, trade_id: int) -> Dict[str, Any]:
     return _decode(row, events.load_events(conn, trade_id))
 
 
-def trade_pv_mxn(trade: Dict[str, Any], mkt: MarketContext) -> float:
-    """PV en MXN de una operación de `load_trades` contra un contexto de mercado.
+def trade_pv_mxn(
+    trade: Dict[str, Any],
+    mkt: MarketContext,
+    fixings: Optional[Dict[str, Dict[date, float]]] = None,
+) -> float:
+    """PV en MXN de una operación de `load_trades` en `mkt.as_of` (0.0 si no está `viva`).
 
     Lanza (`ValueError`, `ApiError`, error de `qfpy`...) si la operación no se puede valuar;
     quien recorre el portafolio debe atrapar y reportar esa operación sin detener el resto.
+    Sin `fixings` no hay fijaciones publicadas (ver `valuation.value_trade`).
     """
-    product, params = _normalized(trade)
-    return float(product.pv_mxn(params, mkt))
+    return float(trade_valuation.value_trade(trade, mkt, fixings)["pv_mxn"])
 
 
 def list_trades(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
@@ -275,6 +270,7 @@ def create_trade(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
 def valuation(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
     """Valuación del portafolio contra el snapshot; una operación que falla no detiene el resto."""
     mkt = market.load_context(conn, snapshot_id)
+    fixings = fixing_store.load_all(conn)
     rows = []
     total = 0.0
     for trade in load_trades(conn):
@@ -282,20 +278,31 @@ def valuation(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
             "id": trade["id"],
             "product": trade["product"],
             "counterparty": trade["counterparty"],
-            **_describe(trade, mkt.as_of),
+            "trade_date": trade["trade_date"].isoformat(),
+            "start_date": trade["start_date"].isoformat(),
+            "maturity_date": trade["maturity_date"].isoformat(),
+            "status": None,
+            "notional": None,
+            "currency": None,
+            "maturity": trade["maturity_date"].isoformat(),
             "pv": None,
             "pv_mxn": None,
+            "warnings": [],
             "error": None,
         }
         try:
-            pv_mxn = trade_pv_mxn(trade, mkt)
-            # `pv` va en la moneda de la fila (USD = PV en MXN ÷ spot, inverso de la conversión).
-            pv = pv_mxn / mkt.spot if row["currency"] == "USD" else pv_mxn
-            if has_non_finite((pv, pv_mxn)):
+            v = trade_valuation.value_trade(trade, mkt, fixings)
+            if has_non_finite((v["pv"], v["pv_mxn"])):
                 raise ValueError(NON_FINITE_MESSAGE)
-            row["pv"] = pv
-            row["pv_mxn"] = pv_mxn
-            total += pv_mxn
+            row.update(
+                status=v["status"],
+                notional=v["notional"],
+                currency=v["currency"],
+                pv=v["pv"],
+                pv_mxn=v["pv_mxn"],
+                warnings=v["warnings"],
+            )
+            total += v["pv_mxn"]
         except Exception as e:  # nunca propaga: la fila lleva el error
             row["error"] = str(e)
         rows.append(row)

@@ -36,9 +36,12 @@ def test_seed_creates_seven_trades_and_values_without_errors(client):
     # las tasas fijas de la semilla no son par: el PV de los swaps no es trivial
     assert all(abs(r["pv_mxn"]) > 1e3 for r in v["rows"][:3])
     assert set(v["rows"][0]) == {
-        "id", "product", "counterparty", "notional", "currency", "maturity",
-        "pv", "pv_mxn", "error",
+        "id", "product", "counterparty", "trade_date", "start_date", "maturity_date", "status",
+        "notional", "currency", "maturity", "pv", "pv_mxn", "warnings", "error",
     }
+    assert all(r["status"] == "viva" and r["warnings"] == [] for r in v["rows"])
+    assert all(r["trade_date"] == r["start_date"] == "2026-11-10" for r in v["rows"])
+    assert all(r["maturity"] == r["maturity_date"] > "2026-11-10" for r in v["rows"])
 
 
 def test_valuation_pv_is_in_row_currency(client):
