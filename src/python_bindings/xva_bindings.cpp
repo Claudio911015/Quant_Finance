@@ -4,6 +4,7 @@
 #include <qf/xva/netting_set.hpp>
 #include <qf/xva/cva_result.hpp>
 #include <qf/xva/cva_calculator.hpp>
+#include <qf/xva/exposure_profile.hpp>
 #include <qf/models/hullwhite.hpp>
 #include <qf/core/market_environment.hpp>
 #include <qf/instruments/swap.hpp>
@@ -37,9 +38,17 @@ PYBIND11_MODULE(qfxva, m) {
         .def("survival_probability", &FlatHazardRate::survivalProbability, py::arg("t"));
 
     // ── SwapType enum ─────────────────────────────────────────────
-    py::enum_<SwapType>(m, "SwapType")
-        .value("Payer",    SwapType::Payer)
-        .value("Receiver", SwapType::Receiver);
+    // qfpy registers the same C++ enum; registering it twice makes `import qfxva` fail with
+    // "type SwapType is already registered". When qfpy was imported first, reuse its Python
+    // type so both modules coexist in one process (import qfpy BEFORE qfxva).
+    if (auto* known = py::detail::get_type_info(std::type_index(typeid(SwapType)))) {
+        m.attr("SwapType") =
+            py::reinterpret_borrow<py::object>(reinterpret_cast<PyObject*>(known->type));
+    } else {
+        py::enum_<SwapType>(m, "SwapType")
+            .value("Payer",    SwapType::Payer)
+            .value("Receiver", SwapType::Receiver);
+    }
 
     // ── NettingSet ────────────────────────────────────────────────
     py::class_<NettingSet>(m, "NettingSet")
@@ -135,4 +144,22 @@ PYBIND11_MODULE(qfxva, m) {
         .def("compute", &CVACalculator::compute,
              py::arg("netting_set"), py::arg("env"),
              "Run the exposure simulation. Returns CVAResult with cva, dva, fva, bcva.");
+
+    // ── ExposurePoint / simulate_exposure ─────────────────────────
+    py::class_<ExposurePoint>(m, "ExposurePoint")
+        .def_readonly("t",   &ExposurePoint::t)
+        .def_readonly("epe", &ExposurePoint::epe)
+        .def_readonly("ene", &ExposurePoint::ene)
+        .def_readonly("pfe", &ExposurePoint::pfe);
+
+    m.def("simulate_exposure",
+          [](const qf::models::HullWhite& hw, const NettingSet& ns,
+             const SimParams& params, double pfeQuantile) {
+              return simulateExposure(hw, ns, params, pfeQuantile);
+          },
+          py::arg("hw"), py::arg("netting_set"), py::arg("params"),
+          py::arg("pfe_quantile") = 0.95,
+          "Simulate EPE, ENE and PFE per monitor date on the same paths as CVACalculator. "
+          "PFE is the empirical pfe_quantile (in (0,1)) of max(V,0). "
+          "Returns a list of ExposurePoint(t, epe, ene, pfe).");
 }
