@@ -2,7 +2,8 @@
 
 `settled` son los flujos liquidados en `(from.as_of, to.as_of]` (ver `settlement.settled_flows`),
 incluidos los `transfer` de terminación y ejercicio. No se modela prima ni pago inicial: una
-operación pactada dentro de la ventana entra con `pv_from = 0` (`no_pactada`).
+operación pactada dentro de la ventana entra con `pv_from = 0` (`no_pactada`). Única excepción, el
+intercambio inicial de nocional del `xccy_swap`, que se liquida al salir del PV (ver `xccy.settled`).
 """
 import sqlite3
 from typing import Any, Dict

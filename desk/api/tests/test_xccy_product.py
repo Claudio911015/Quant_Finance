@@ -301,14 +301,18 @@ def test_rolled_snapshot_settles_both_legs_with_fixings_and_values_the_aged_swap
     first, paid = AS_OF, AS_OF + timedelta(days=28)
     usd = -N * (_compound(0.04, first, paid) - 1.0)
     mxn = NOTIONAL_MXN * (_compound(0.07, first, paid) - 1.0) + NOTIONAL_MXN * spread * 28 / 360.0
+    # el intercambio inicial salió del PV al pasar `start_date` y se liquida (D1 de la auditoría)
     assert [(f["date"], f["kind"], f["leg"], f["currency"]) for f in settled] == [
+        (AS_OF.isoformat(), "exchange", "USD", "USD"), (AS_OF.isoformat(), "exchange", "MXN", "MXN"),
         (paid.isoformat(), "coupon", "USD", "USD"), (paid.isoformat(), "coupon", "MXN", "MXN"),
     ]
-    assert settled[0]["amount"] == pytest.approx(usd, rel=1e-12)
-    assert settled[1]["amount"] == pytest.approx(mxn, rel=1e-12)
-    assert settled[0]["df"] is None and settled[0]["pv"] is None
+    assert settled[0]["amount"] == N and settled[1]["amount"] == pytest.approx(-NOTIONAL_MXN)
+    assert settled[2]["amount"] == pytest.approx(usd, rel=1e-12)
+    assert settled[3]["amount"] == pytest.approx(mxn, rel=1e-12)
+    assert settled[2]["df"] is None and settled[2]["pv"] is None
     assert len(projected) == 2 * 25 + 2 and projected[0]["date"] == (AS_OF + timedelta(days=56)).isoformat()
-    assert not any(f["kind"] == "exchange" and f["date"] == AS_OF.isoformat() for f in body["flows"])
+    # de los proyectados solo queda el intercambio final (el inicial ya está liquidado)
+    assert [f["date"] for f in projected if f["kind"] == "exchange"] == [(AS_OF + timedelta(days=728)).isoformat()] * 2
 
     # el PV es el del instrumento envejecido armado aparte: periodo en curso desde el día 28 con el factor de 7 días
     mkt = _context(app, "D1")
@@ -347,7 +351,8 @@ def test_pnl_identity_holds_and_settled_is_both_coupons_at_the_fix(client):
     paid = AS_OF + timedelta(days=28)
     usd = -N * (_compound(0.04, AS_OF, paid) - 1.0)
     mxn = NOTIONAL_MXN * (_compound(0.07, AS_OF, paid) - 1.0) + NOTIONAL_MXN * spread * 28 / 360.0
-    assert row["settled"] == pytest.approx(usd * 18.90 + mxn, rel=1e-10)
+    initial = N * 18.90 - NOTIONAL_MXN  # intercambio inicial al FIX del día de inicio (FIX 18.90 contra 18.60 de fx_rate)
+    assert row["settled"] == pytest.approx(usd * 18.90 + mxn + initial, rel=1e-10)
     assert row["pnl"] == pytest.approx(row["pv_to"] - row["pv_from"] + row["settled"], abs=1e-6)
     assert row["pv_to"] == pytest.approx(_rows(client, "D1")[trade["id"]]["pv_mxn"], rel=1e-12)
     assert abs(row["pv_from"]) <= 1e-6 * NOTIONAL_MXN
@@ -362,7 +367,8 @@ def test_usd_flows_without_a_fix_fall_back_to_the_spot_with_a_warning(client):
     body = client.get("/api/pnl?from=MX-DEMO&to=D1").get_json()
     row = {x["id"]: x for x in body["rows"]}[trade["id"]]
     assert [w["code"] for w in row["warnings"]] == ["fx_fallback"]
-    assert row["warnings"][0]["dates"] == [(AS_OF + timedelta(days=28)).isoformat()]
+    # el intercambio inicial (día de inicio) y el primer cupón (día 28) son los dos flujos USD de la ventana
+    assert row["warnings"][0]["dates"] == [AS_OF.isoformat(), (AS_OF + timedelta(days=28)).isoformat()]
 
 
 def test_maturity_settles_the_last_coupons_and_the_final_exchange_and_the_swap_expires(client):
@@ -371,10 +377,12 @@ def test_maturity_settles_the_last_coupons_and_the_final_exchange_and_the_swap_e
     roll(client, "MX-DEMO", "DUE", 28)
     roll(client, "MX-DEMO", "EARLY", 27)
     _load_market_fixings(client, date(2026, 12, 16))
-    assert [f["kind"] for f in _flows(client, trade["id"], "EARLY")["flows"] if f["status"] == "settled"] == []
+    early = [f for f in _flows(client, trade["id"], "EARLY")["flows"] if f["status"] == "settled"]
+    assert [(f["date"], f["kind"]) for f in early] == [(AS_OF.isoformat(), "exchange")] * 2  # solo el inicial
     body = _flows(client, trade["id"], "DUE")
-    settled = body["flows"]
-    assert all(f["status"] == "settled" for f in settled) and body["warnings"] == []
+    assert all(f["status"] == "settled" for f in body["flows"]) and body["warnings"] == []
+    assert [(f["date"], f["kind"]) for f in body["flows"][:2]] == [(AS_OF.isoformat(), "exchange")] * 2
+    settled = body["flows"][2:]  # lo que se liquida al vencer, tras el intercambio inicial
     assert [(f["kind"], f["leg"]) for f in settled] == [
         ("coupon", "USD"), ("coupon", "MXN"), ("exchange", "USD"), ("exchange", "MXN"),
     ]
@@ -383,9 +391,115 @@ def test_maturity_settles_the_last_coupons_and_the_final_exchange_and_the_swap_e
     row = _rows(client, "DUE")[trade["id"]]
     assert row["status"] == "vencida" and row["pv_mxn"] == 0.0
     pnl = {x["id"]: x for x in client.get("/api/pnl?from=MX-DEMO&to=DUE").get_json()["rows"]}[trade["id"]]
-    expected = sum(f["amount"] * (18.90 if f["leg"] == "USD" else 1.0) for f in settled)
+    expected = sum(f["amount"] * (18.90 if f["leg"] == "USD" else 1.0) for f in body["flows"])
     assert pnl["settled"] == pytest.approx(expected, rel=1e-10)
     assert pnl["pnl"] == pytest.approx(pnl["pv_to"] - pnl["pv_from"] + pnl["settled"], abs=1e-6)
+
+
+# ------------------------------------------------------------------------ intercambio inicial (D1 de la auditoría)
+# El intercambio inicial sigue en el PV hasta el día de inicio incluido (así el pricer lo valúa al pacto y el
+# diferencial par lo cuenta); por eso se liquida en la ventana `d0 <= start < d1` en que sale del PV. Sin ello,
+# un `fx_rate` distinto del spot da un salto fantasma de N·(spot − fx_rate) en el P&L.
+
+OFF = {"fx_rate": 19.5, "spread": -0.001}  # fuera de mercado: el spot de MX-DEMO es 18.6
+GAP = N * (FX - OFF["fx_rate"])  # lo que vale el intercambio inicial al spot (−9 M para quien paga USD)
+
+
+def _pnl(client, a, b):
+    r = client.get("/api/pnl?from=%s&to=%s" % (a, b))
+    assert r.status_code == 200, r.get_json()
+    return {x["id"]: x for x in r.get_json()["rows"]}
+
+
+def _fix_at_spot(client, end):
+    """Las tres fijaciones de `[AS_OF, end)`, con el FIX igual al spot de MX-DEMO (el intercambio inicial no gana ni pierde por FX)."""
+    load_fixings(client, "TIIE-F", AS_OF, end, 0.07)
+    load_fixings(client, "SOFR", AS_OF, end, 0.04)
+    load_fixings(client, "USDMXN", AS_OF, end, FX)
+
+
+def test_d1_off_market_initial_exchange_is_settled_when_it_leaves_the_pv(client):
+    trade = _book(client, OFF)
+    roll(client, "MX-DEMO", "D1", 1)
+    _fix_at_spot(client, date(2026, 11, 12))
+    # con los dos intercambios y el diferencial par, el PV al pacto es 0 cualquiera que sea `fx_rate`; al salir el
+    # intercambio inicial del PV queda −GAP (el valor del resto) y solo la liquidación lo compensa
+    assert _rows(client)[trade["id"]]["pv_mxn"] == pytest.approx(0.0, abs=1e-3)
+    assert _rows(client, "D1")[trade["id"]]["pv_mxn"] == pytest.approx(-GAP, rel=0.02)
+    row = _pnl(client, "MX-DEMO", "D1")[trade["id"]]
+    assert row["error"] is None and row["warnings"] == []
+    assert row["settled"] == pytest.approx(GAP, rel=1e-12)  # N·FIX − N·fx_rate, con FIX = spot
+    assert row["pnl"] == pytest.approx(row["pv_to"] - row["pv_from"] + row["settled"], abs=1e-6)
+    # sin liquidarlo el P&L de un día daba −GAP (9 M); ahora solo queda el devengo de un día
+    assert abs(row["pnl"]) < 0.02 * abs(GAP)
+    flows = [f for f in _flows(client, trade["id"], "D1")["flows"] if f["status"] == "settled"]
+    assert [(f["date"], f["kind"], f["leg"]) for f in flows] == [
+        (AS_OF.isoformat(), "exchange", "USD"), (AS_OF.isoformat(), "exchange", "MXN"),
+    ]
+    assert flows[0]["amount"] == N and flows[1]["amount"] == pytest.approx(-N * OFF["fx_rate"])
+
+
+def test_d1_the_initial_exchange_is_settled_in_exactly_one_window(client):
+    trade = _book(client, OFF)
+    roll(client, "MX-DEMO", "D1", 1)
+    roll(client, "MX-DEMO", "D2", 4)
+    _fix_at_spot(client, date(2026, 11, 15))
+    first, second = _pnl(client, "MX-DEMO", "D1")[trade["id"]], _pnl(client, "D1", "D2")[trade["id"]]
+    whole = _pnl(client, "MX-DEMO", "D2")[trade["id"]]
+    assert first["settled"] != 0 and second["settled"] == 0
+    assert whole["settled"] == pytest.approx(first["settled"] + second["settled"], abs=1e-6)
+    assert whole["pnl"] == pytest.approx(first["pnl"] + second["pnl"], abs=1e-6)
+    assert abs(whole["pnl"]) < 0.02 * abs(GAP)
+
+
+def test_d1_a_trade_booked_inside_the_window_settles_it_and_one_booked_on_its_end_does_not(client):
+    roll(client, "MX-DEMO", "D1", 1)
+    roll(client, "MX-DEMO", "D2", 4)
+    _fix_at_spot(client, date(2026, 11, 15))
+    trade = trade_with(client, "xccy_swap", CP, {**BASE, **OFF}, snapshot="D1")  # pacto e inicio el 2026-11-11
+    booked_on_the_end = _pnl(client, "MX-DEMO", "D1")[trade["id"]]
+    assert booked_on_the_end["pv_from"] == 0 and booked_on_the_end["settled"] == 0  # aún en el PV de D1
+    inside = _pnl(client, "MX-DEMO", "D2")[trade["id"]]
+    assert inside["pv_from"] == 0 and inside["settled"] != 0
+    assert abs(inside["pnl"]) < 0.02 * abs(GAP)  # sin el intercambio daría el valor del resto, ~9 M
+    after = _pnl(client, "D1", "D2")[trade["id"]]
+    assert after["settled"] == inside["settled"]
+    assert inside["pnl"] == pytest.approx(booked_on_the_end["pnl"] + after["pnl"], abs=1e-6)
+
+
+def test_d1_a_forward_starting_swap_settles_the_exchange_when_it_passes_its_start(client):
+    start = AS_OF + timedelta(days=10)
+    trade = _book(client, OFF, start=start)
+    roll(client, "MX-DEMO", "MID", 5)
+    roll(client, "MX-DEMO", "ON", 10)  # el snapshot cae justo en `start_date`
+    roll(client, "MX-DEMO", "LATE", 15)
+    _fix_at_spot(client, date(2026, 11, 26))
+    rows = [_pnl(client, a, b)[trade["id"]] for a, b in (("MX-DEMO", "MID"), ("MID", "ON"), ("ON", "LATE"))]
+    # sale del PV al pasar `start_date`, así que se liquida en la ventana que empieza en él (no en la que termina en él)
+    assert [r["settled"] != 0 for r in rows] == [False, False, True]
+    assert abs(sum(r["pnl"] for r in rows)) < 0.02 * abs(GAP)
+    projected = [f for f in _flows(client, trade["id"], "ON")["flows"] if f["kind"] == "exchange"]
+    assert projected[0]["date"] == start.isoformat() and projected[0]["status"] == "projected"
+    listed = [f for f in _flows(client, trade["id"], "LATE")["flows"] if f["kind"] == "exchange"]
+    assert [(f["date"], f["status"]) for f in listed][:2] == [(start.isoformat(), "settled")] * 2
+
+
+def test_d1_a_swap_terminated_before_its_start_never_settles_the_initial_exchange(client):
+    start = AS_OF + timedelta(days=10)
+    trade = _book(client, OFF, start=start)
+    _event(client, trade["id"], "termination", AS_OF + timedelta(days=3), {"amount": 0.0})
+    roll(client, "MX-DEMO", "LATE", 15)
+    _fix_at_spot(client, date(2026, 11, 26))
+    assert _pnl(client, "MX-DEMO", "LATE")[trade["id"]]["settled"] == 0
+
+
+def test_d1_exchange_none_and_final_settle_no_initial_exchange(client):
+    off = _book(client, {**OFF, "exchange": "none"})
+    final = _book(client, {**OFF, "exchange": "final"})
+    roll(client, "MX-DEMO", "D1", 1)
+    _fix_at_spot(client, date(2026, 11, 12))
+    rows = _pnl(client, "MX-DEMO", "D1")
+    assert rows[off["id"]]["settled"] == 0 and rows[final["id"]]["settled"] == 0
 
 
 # ------------------------------------------------------------------------ ciclo de vida

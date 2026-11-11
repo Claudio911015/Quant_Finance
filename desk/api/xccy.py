@@ -8,7 +8,8 @@ mercado); sin esa curva en el snapshot se usa `TIIE-F` y se avisa `no_csa_curve`
 
 * `aged_xccy`: el instrumento a `mkt.as_of`, con el periodo en curso y los factores acumulados de las
   fijaciones diarias de SOFR y TIIE-F (`valuation.accrued_factor`).
-* `settled`: cupones de ambas patas e intercambios de nocional liquidados en `(d0, d1]`.
+* `settled`: cupones de ambas patas e intercambios de nocional liquidados en `(d0, d1]` (el intercambio
+  inicial, en `d0 <= start < d1`: ver `settled`).
 * `projected`: flujos futuros de la ficha, los de `cash_flows` del instrumento envejecido.
 * `resolve`/`at_par`: completan `fx_rate` (spot) y `spread` (diferencial par) cuando faltan.
 
@@ -122,9 +123,12 @@ def settled(
     (compuesto con las fijaciones diarias como un `irs`) y los intercambios de nocional (`kind: "exchange"`
     en `start_date` y `maturity_date` según `exchange`). Cada flujo lleva `leg` ("USD" o "MXN"); los USD se
     convierten a MXN con el FIX de su fecha o, si falta, con `fallback_spot` (aviso `fx_fallback`). Como en
-    los demás productos, un flujo cuenta si la operación seguía `viva` el día anterior a su fecha (el
-    intercambio inicial de una operación pactada el mismo día de `start_date` no cuenta: el P&L no
-    modela el pago inicial).
+    los demás productos, un flujo cuenta si la operación seguía `viva` el día anterior a su fecha.
+
+    Excepción, el intercambio inicial: sigue en el PV hasta `start_date` incluido, así que se liquida en la
+    ventana en que sale del PV, `d0 <= start_date < d1`, si la operación está `viva` en `start_date` (también
+    la pactada ese mismo día). Cada ventana consecutiva lo cuenta una sola vez y el P&L no da un salto de
+    N·(spot − fx_rate) cuando el tipo de cambio inicial no es el spot.
 
     @raise ValueError si falta `fx_rate`/`spread` o `mkt`.
     """
@@ -154,7 +158,16 @@ def settled(
         add(day, "exchange", "USD", -sign * direction * n_usd)
         add(day, "exchange", "MXN", sign * direction * n_usd * terms["fx_rate"])
 
-    if params["exchange"] in ("both", "initial") and counts(start):
+    # El intercambio inicial sigue en el PV hasta `start_date` incluido (`aged_xccy`: `start >= as_of`, así el
+    # pricer lo valúa al pacto y el diferencial par lo cuenta). Sale del PV en el primer snapshot posterior a
+    # `start_date`, y ahí debe liquidarse para que `pnl = pv_to − pv_from + settled` no pierda N·(spot − fx_rate):
+    # ventana `d0 <= start < d1` (no `(d0, d1]` como los demás flujos), y se exige que la operación viva el día
+    # de inicio mismo (no el anterior: una operación pactada ese día no existía la víspera).
+    if (
+        params["exchange"] in ("both", "initial")
+        and d0 <= start < d1
+        and lifecycle.state(trade, events, start)["status"] == "viva"
+    ):
         exchange(start, -1.0)
     pay = qfpy.ois_payment_days((maturity - start).days, CSA_PERIOD_DAYS)
     previous = 0
