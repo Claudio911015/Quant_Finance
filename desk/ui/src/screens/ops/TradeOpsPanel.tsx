@@ -61,15 +61,16 @@ export function TradeOpsPanel({ tradeId, product }: { tradeId: number; product: 
             Referencia del banco
             <input
               type="text"
+              className="ops-trade__input"
               maxLength={REF_MAX}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
             />
           </label>
-          <button type="button" onClick={save}>
+          <button type="button" className="ops-trade__btn" onClick={save}>
             Guardar
           </button>
-          <button type="button" onClick={() => setEditing(false)}>
+          <button type="button" className="ops-trade__btn" onClick={() => setEditing(false)}>
             Cancelar
           </button>
           {error && (
@@ -81,7 +82,7 @@ export function TradeOpsPanel({ tradeId, product }: { tradeId: number; product: 
       ) : (
         <span className="ops-trade__ref">
           Referencia del banco: <strong>{ref ?? '—'}</strong>
-          <button type="button" onClick={startEdit}>
+          <button type="button" className="ops-trade__btn" onClick={startEdit}>
             Editar
           </button>
         </span>

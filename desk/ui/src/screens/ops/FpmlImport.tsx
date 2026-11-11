@@ -45,47 +45,51 @@ export function FpmlImport() {
     }
   }
 
-  if (!open) {
-    return (
-      <button type="button" onClick={() => setOpen(true)}>
+  return (
+    <div className="ops-fpml-host">
+      <button
+        type="button"
+        className="ops-trade__btn"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
         Importar FpML
       </button>
-    );
-  }
-
-  return (
-    <div className="ops-fpml" data-testid="fpml-import">
-      <input
-        type="file"
-        accept=".xml,.fpml,application/xml"
-        aria-label="Archivo FpML"
-        onChange={(e) => void onFile(e.target.files?.[0])}
-      />
-      <textarea
-        aria-label="XML FpML"
-        value={xml}
-        onChange={(e) => setXml(e.target.value)}
-        placeholder="Pega aquí el documento FpML"
-      />
-      <div>
-        <button type="button" onClick={submit} disabled={busy || xml.trim() === ''}>
-          Importar
-        </button>{' '}
-        <button type="button" onClick={() => setOpen(false)}>
-          Cerrar
-        </button>
-      </div>
-      {error && <p role="alert">{error}</p>}
-      {result && (
-        <div role="status">
-          <p>Operación importada</p>
-          <Link to={`/portafolio/${result.trade.id}`}>Ver operación</Link>
-          {result.warnings.length > 0 && (
-            <ul className="ops-fpml__warnings">
-              {result.warnings.map((w, i) => (
-                <li key={`${w.code}-${i}`}>{w.message}</li>
-              ))}
-            </ul>
+      {open && (
+        <div className="ops-fpml" data-testid="fpml-import">
+          <input
+            type="file"
+            accept=".xml,.fpml,application/xml"
+            aria-label="Archivo FpML"
+            onChange={(e) => void onFile(e.target.files?.[0])}
+          />
+          <textarea
+            aria-label="XML FpML"
+            value={xml}
+            onChange={(e) => setXml(e.target.value)}
+            placeholder="Pega aquí el documento FpML"
+          />
+          <div className="ops-fpml__actions">
+            <button type="button" className="ops-trade__btn" onClick={submit} disabled={busy || xml.trim() === ''}>
+              Importar
+            </button>
+            <button type="button" className="ops-trade__btn" onClick={() => setOpen(false)}>
+              Cerrar
+            </button>
+          </div>
+          {error && <p role="alert">{error}</p>}
+          {result && (
+            <div role="status">
+              <p>Operación importada</p>
+              <Link to={`/portafolio/${result.trade.id}`}>Ver operación</Link>
+              {result.warnings.length > 0 && (
+                <ul className="ops-fpml__warnings">
+                  {result.warnings.map((w, i) => (
+                    <li key={`${w.code}-${i}`}>{w.message}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </div>
       )}

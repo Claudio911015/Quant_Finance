@@ -151,6 +151,19 @@ def test_pv_one_business_day_later_is_attributed_to_the_date(app, client):
     assert r["status"] == "explicable"
 
 
+def test_a_day_when_the_trade_is_not_alive_does_not_widen_the_date_range(app, client):
+    # Operación pactada en el `as_of`: el día hábil anterior aún no existe y su PV es 0 por definición, no
+    # por mercado. Si entrara al rango, cualquier PV del banco entre 0 y el propio sería "atribuible a la fecha".
+    tid = _off_market(client)["id"]
+    own = own_pv(app, tid)
+    run = _run(client, _csv((tid, own * 0.5)))
+    r = run["rows"][0]
+    date = r["decomposition"]["date"]
+    assert date["pv_prev"] == 0.0 and date["attributed"] is False
+    assert abs(r["decomposition"]["curve"]["bp"]) > ops_recon.EXPLAIN_CURVE_BP
+    assert r["status"] == "revisar"
+
+
 # -------------------------------------------------------------------------- (d) nocional
 
 def test_notional_times_one_and_a_half_is_revisar_with_terms_flag(app, client):

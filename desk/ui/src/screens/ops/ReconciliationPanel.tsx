@@ -240,9 +240,10 @@ export function ReconciliationPanel() {
                   <span className="ops-recon__history-date">{fmtDateTime(h.created_at)}</span>
                   <span>{h.snapshot}</span>
                   <span className="ops-recon__muted">
-                    {h.summary.conciliada} conciliadas · {h.summary.explicable} explicables ·{' '}
-                    {h.summary.revisar} por revisar · {h.summary.bank_only} solo banco ·{' '}
-                    {h.summary.own_only} solo propias
+                    {h.summary.conciliada} {h.summary.conciliada === 1 ? 'conciliada' : 'conciliadas'} ·{' '}
+                    {h.summary.explicable} {h.summary.explicable === 1 ? 'explicable' : 'explicables'} ·{' '}
+                    {h.summary.revisar} por revisar · {h.summary.bank_only} solo en el banco ·{' '}
+                    {h.summary.own_only} solo en QF Desk
                   </span>
                 </button>
               </li>

@@ -22,6 +22,17 @@ function openPanel() {
 }
 
 describe('FpmlImport', () => {
+  it('el botón sigue visible con el panel abierto y lo cierra al pulsarlo otra vez', () => {
+    renderImport();
+    const toggle = screen.getByRole('button', { name: 'Importar FpML' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(screen.getByRole('textbox', { name: 'XML FpML' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Importar FpML' }).getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Importar FpML' }));
+    expect(screen.queryByRole('textbox', { name: 'XML FpML' })).toBeNull();
+  });
+
   it('pegar y enviar llama importFpml con el texto', async () => {
     vi.mocked(importFpml).mockResolvedValue({
       trade: { id: 9 } as never,

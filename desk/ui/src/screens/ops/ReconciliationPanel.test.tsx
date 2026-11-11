@@ -367,8 +367,10 @@ describe('ReconciliationPanel', () => {
     expect(items).toHaveLength(2);
     expect(items[0].textContent).toContain('2026-11-11 18:00 UTC');
     expect(items[0].textContent).toContain('MX-DEMO');
-    expect(items[0].textContent).toContain('1 conciliadas');
+    expect(items[0].textContent).toContain('1 conciliada ·');
     expect(items[1].textContent).toContain('OTRO');
+    expect(items[1].textContent).toContain('3 conciliadas ·');
+    expect(items[1].textContent).toContain('0 explicables ·');
 
     fireEvent.click(items[1]);
     await screen.findByRole('region', { name: 'Resultado de la conciliación' });

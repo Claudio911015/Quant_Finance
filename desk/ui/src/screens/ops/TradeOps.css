@@ -21,7 +21,7 @@
 }
 
 .ops-trade__error {
-  color: var(--color-negative, #b42318);
+  color: var(--neg);
   font-size: 0.9em;
   width: 100%;
 }
@@ -43,4 +43,81 @@
 .ops-fpml__warnings {
   margin: 0;
   padding-left: 1.2em;
+}
+
+/* corte 5 (T7): los botones, campos y el panel de FpML llevaban el estilo por omisión del navegador (gris
+   claro, sin borde del tema, el panel desplazaba el encabezado de Portafolio). Mismo patrón que .portfolio__btn. */
+.ops-trade__btn {
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ops-trade__btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.ops-trade__btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ops-trade__input,
+.ops-fpml textarea {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.ops-trade__input {
+  height: 28px;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+}
+
+.ops-fpml textarea {
+  padding: var(--space-2);
+  resize: vertical;
+}
+
+.ops-fpml-host {
+  position: relative;
+  display: inline-block;
+}
+
+/* Flota bajo el botón: no mueve el título ni el resto del encabezado de Portafolio. */
+.ops-fpml-host .ops-fpml {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 20;
+  width: min(520px, 70vw);
+  max-width: none; /* el 100 % del .ops-fpml base sería el ancho del botón */
+  padding: var(--space-3);
+  margin-top: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+}
+
+.ops-fpml__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ops-fpml [role='alert'] {
+  margin: 0;
+  color: var(--neg);
+  font-size: var(--fs-sm);
 }

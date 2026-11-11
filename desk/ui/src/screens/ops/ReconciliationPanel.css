@@ -184,7 +184,9 @@
 
 .ops-recon__table th,
 .ops-recon__table td {
-  padding: var(--space-2) var(--space-3);
+  /* corte 5 (T7): con 12 columnas y 12 px laterales la tabla medía 1160 px en un contenedor de 1038 (1280 px de
+     ventana) y las columnas de Curva y Tipo de cambio quedaban cortadas; con 6 px cabe. */
+  padding: var(--space-2) 6px;
   border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: top;

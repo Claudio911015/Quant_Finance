@@ -115,11 +115,16 @@ def _date_factor(
     prev_date = business_day(mkt.as_of, -1)
     next_date = business_day(mkt.as_of, 1)
     try:
-        pv_prev = valuation.value_trade(trade, context_at(mkt, prev_date), fixings)["pv_mxn"]
-        pv_next = valuation.value_trade(trade, context_at(mkt, next_date), fixings)["pv_mxn"]
+        val_prev = valuation.value_trade(trade, context_at(mkt, prev_date), fixings)
+        val_next = valuation.value_trade(trade, context_at(mkt, next_date), fixings)
     except Exception:
         return None
-    low, high = min(own, pv_prev, pv_next), max(own, pv_prev, pv_next)
+    pv_prev, pv_next = val_prev["pv_mxn"], val_next["pv_mxn"]
+    # corte 5 (T7): un día vecino en que la operación no está viva (aún no pactada o ya vencida) vale 0 por
+    # definición, no por mercado; meterlo en el rango lo ensancharía hasta 0 y casi cualquier PV del banco de una
+    # operación nueva saldría "atribuible a la fecha". Se muestra su PV, pero no cuenta para el rango.
+    comparable = [own] + [v["pv_mxn"] for v in (val_prev, val_next) if v.get("status") == "viva"]
+    low, high = min(comparable), max(comparable)
     return {
         "prev_date": prev_date.isoformat(),
         "next_date": next_date.isoformat(),
