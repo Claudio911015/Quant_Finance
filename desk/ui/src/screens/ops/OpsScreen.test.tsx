@@ -1,7 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import OpsScreen from './OpsScreen';
+
+// El panel real de Flujos tiene su propia prueba; aquí solo importa que la pestaña monte su panel.
+vi.mock('./CashflowsPanel', () => ({ CashflowsPanel: () => <section data-testid="cashflows-stub" /> }));
+// Ídem para Conciliación (su prueba propia está en ReconciliationPanel.test.tsx).
+vi.mock('./ReconciliationPanel', () => ({
+  ReconciliationPanel: () => <section data-testid="reconciliation-stub" />,
+}));
 
 function Where() {
   return <div data-testid="search">{useLocation().search}</div>;
