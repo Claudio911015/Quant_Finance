@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link } from 'react-router-dom';
 import { ApiError, createTrade, price } from '../../api/client';
 import type { Cashflow, PriceResponse, Trade } from '../../api/types';
-import { fmtMoney, fmtNumber, fmtRate } from '../../lib/format';
+import { fmtDate, fmtMoney, fmtNumber, fmtRate } from '../../lib/format';
 import { useSnapshot } from '../../state/SnapshotContext';
 import { PricerChart, payoffText, type ChartData } from './PricerChart';
 import type { FieldSpec, ProductSpec } from './types';
@@ -287,18 +287,70 @@ function Field({
   );
 }
 
+function DateField({
+  id,
+  label,
+  value,
+  error,
+  help,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  error?: string;
+  help?: string;
+  onChange: (v: string) => void;
+}) {
+  const noteId = `${id}-note`;
+  const note = error ?? help;
+  return (
+    <div className="pricer__field">
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        type="date"
+        className="pricer__input"
+        value={value}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={note ? noteId : undefined}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {note &&
+        (error ? (
+          <div id={noteId} className="pricer__error" role="alert">
+            {error}
+          </div>
+        ) : (
+          <div id={noteId} className="pricer__help">
+            {note}
+          </div>
+        ))}
+    </div>
+  );
+}
+
+const DATE_FIELDS = ['trade_date', 'start_date', 'maturity_date'];
+
 export function PricerForm({ spec }: { spec: ProductSpec }) {
-  const { snapshotId } = useSnapshot();
+  const { snapshotId, snapshots, snapshot } = useSnapshot();
+  // Pacto e inicio siguen al `as_of` del snapshot activo mientras el usuario no los edite.
+  const asOf = snapshots.find((s) => s.id === snapshotId)?.as_of ?? snapshot?.as_of ?? '';
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(spec.fields.map((f) => [f.name, initialText(f)])),
   );
   const [counterparty, setCounterparty] = useState('');
+  const [tradeEdit, setTradeEdit] = useState<string | null>(null);
+  const [startEdit, setStartEdit] = useState<string | null>(null);
+  const [maturity, setMaturity] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [adding, setAdding] = useState(false);
-  const [added, setAdded] = useState<Trade | null>(null);
+  const [added, setAdded] = useState<{ trade: Trade; requestedMaturity: string } | null>(null);
+  const tradeDate = tradeEdit ?? asOf;
+  const startDate = startEdit ?? asOf;
   // Cada valuación toma un número; solo la última puede escribir estado.
   const ticket = useRef(0);
   const resultRef = useRef<Result | null>(null);
@@ -306,7 +358,9 @@ export function PricerForm({ spec }: { spec: ProductSpec }) {
   const report = useCallback(
     (e: unknown) => {
       if (e instanceof ApiError) {
-        const known = e.field !== null && (e.field === 'counterparty' || spec.fields.some((f) => f.name === e.field));
+        const known =
+          e.field !== null &&
+          (e.field === 'counterparty' || DATE_FIELDS.includes(e.field) || spec.fields.some((f) => f.name === e.field));
         if (known) setFieldErrors({ [e.field as string]: e.message });
         else setBanner(e.message);
       } else {
@@ -381,12 +435,25 @@ export function PricerForm({ spec }: { spec: ProductSpec }) {
     setFieldErrors({});
     setAdding(true);
     try {
-      setAdded(await createTrade({ product: spec.product, counterparty: counterparty.trim(), params }));
+      const trade = await createTrade({
+        product: spec.product,
+        counterparty: counterparty.trim(),
+        params,
+        ...(tradeDate ? { trade_date: tradeDate } : {}),
+        ...(startDate ? { start_date: startDate } : {}),
+        ...(maturity ? { maturity_date: maturity } : {}),
+      });
+      setAdded({ trade, requestedMaturity: maturity });
     } catch (err) {
       report(err);
     } finally {
       setAdding(false);
     }
+  };
+
+  const setDate = (name: string, set: (v: string) => void) => (v: string) => {
+    set(v);
+    setFieldErrors(({ [name]: _gone, ...rest }) => rest);
   };
 
   const setValue = (name: string, v: string) => {
@@ -436,12 +503,43 @@ export function PricerForm({ spec }: { spec: ProductSpec }) {
               </div>
             )}
           </div>
+          <DateField
+            id="pricer-trade-date"
+            label="Fecha de pacto"
+            value={tradeDate}
+            error={fieldErrors.trade_date}
+            onChange={setDate('trade_date', setTradeEdit)}
+          />
+          <DateField
+            id="pricer-start-date"
+            label="Inicio"
+            value={startDate}
+            error={fieldErrors.start_date}
+            onChange={setDate('start_date', setStartEdit)}
+          />
+          <DateField
+            id="pricer-maturity-date"
+            label="Vencimiento"
+            value={maturity}
+            error={fieldErrors.maturity_date}
+            help="Vacío: se calcula con el plazo"
+            onChange={setDate('maturity_date', setMaturity)}
+          />
           <button type="submit" className="pricer__btn" disabled={adding}>
             {adding ? 'Agregando…' : 'Agregar al portafolio'}
           </button>
           {added && (
             <div className="pricer__ok" role="status">
-              Operación {added.id} agregada. <Link to="/portafolio">Ver portafolio</Link>
+              <span>
+                Operación {added.trade.id} agregada. <Link to="/portafolio">Ver portafolio</Link> ·{' '}
+                <Link to={`/portafolio/${added.trade.id}`}>Ver ficha</Link>
+              </span>
+              <span>
+                {added.requestedMaturity !== '' && added.requestedMaturity !== added.trade.maturity_date
+                  ? 'Vencimiento ajustado'
+                  : 'Vencimiento'}
+                : <span className="num">{fmtDate(added.trade.maturity_date)}</span>
+              </span>
             </div>
           )}
         </form>

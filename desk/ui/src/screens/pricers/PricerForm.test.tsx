@@ -66,6 +66,31 @@ function mockApi(routes: Record<string, () => Response>) {
 
 const json = (body: unknown, status = 200) => () => new Response(JSON.stringify(body), { status });
 
+/** Operación tal como la devuelve `POST /trades`. */
+const tradeBody = (over: Record<string, unknown> = {}) => ({
+  id: 7,
+  product: 'irs',
+  counterparty: 'Banorte',
+  trade_date: '2026-11-10',
+  start_date: '2026-11-10',
+  maturity_date: '2027-11-03',
+  params: {},
+  notional: 1,
+  currency: 'MXN',
+  maturity: '2027-11-03',
+  created_at: 'x',
+  ...over,
+});
+
+const dateInput = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
+const add = () => fireEvent.click(screen.getByRole('button', { name: 'Agregar al portafolio' }));
+/** Pacto e inicio se prellenan con el `as_of` del snapshot cuando llega la lista. */
+const prefilled = (asOf = '2026-11-10') =>
+  waitFor(() => {
+    expect(dateInput('Fecha de pacto').value).toBe(asOf);
+    expect(dateInput('Inicio').value).toBe(asOf);
+  });
+
 function SwitchTo({ id }: { id: string }) {
   const { setSnapshotId } = useSnapshot();
   return <button onClick={() => setSnapshotId(id)}>cambiar a {id}</button>;
@@ -181,33 +206,28 @@ describe('PricerForm', () => {
     expect(screen.getByTestId('chart').getAttribute('data-kind')).toBe('cashflows');
   });
 
-  it('Agregar al portafolio llama a createTrade con {product, counterparty, params}', async () => {
-    const api = mockApi({
-      'POST /trades': json(
-        { id: 7, product: 'irs', counterparty: 'Banorte', params: {}, notional: 1, currency: 'MXN', maturity: '2027-11-10', created_at: 'x' },
-        201,
-      ),
-    });
+  it('Agregar al portafolio llama a createTrade con producto, contraparte, parámetros y fechas', async () => {
+    const api = mockApi({ 'POST /trades': json(tradeBody(), 201) });
     renderForm();
+    await prefilled();
 
     fireEvent.change(screen.getByLabelText('Contraparte'), { target: { value: ' Banorte ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Agregar al portafolio' }));
+    add();
 
     await screen.findByText(/Operación 7 agregada/);
     expect(api.of('POST', '/trades')[0].body).toEqual({
       product: 'irs',
       counterparty: 'Banorte',
       params: { curve: 'TIIE-F', side: 'payer', notional: 100000000, periods: 13 },
+      trade_date: '2026-11-10',
+      start_date: '2026-11-10',
     });
   });
 
   it('tras valuar un irs con la tasa en blanco la rellena con la usada y "Agregar" la envía', async () => {
     const api = mockApi({
       'POST /price/irs': json({ ...IRS_RESPONSE, details: { fixed_rate: 0.0671234567 } }),
-      'POST /trades': json(
-        { id: 8, product: 'irs', counterparty: 'Banorte', params: {}, notional: 1, currency: 'MXN', maturity: '2027-11-10', created_at: 'x' },
-        201,
-      ),
+      'POST /trades': json(tradeBody({ id: 8 }), 201),
     });
     renderForm();
     expect((screen.getByLabelText('Tasa fija') as HTMLInputElement).value).toBe('');
@@ -239,6 +259,108 @@ describe('PricerForm', () => {
 
     await screen.findByText('Medidas de riesgo');
     expect((screen.getByLabelText('Tasa fija') as HTMLInputElement).value).toBe('7.1');
+  });
+
+  it('las fechas de pacto, inicio y vencimiento viajan en la petición', async () => {
+    const api = mockApi({ 'POST /trades': json(tradeBody({ maturity_date: '2027-05-10' }), 201) });
+    renderForm();
+    await prefilled();
+
+    fireEvent.change(dateInput('Fecha de pacto'), { target: { value: '2026-11-05' } });
+    fireEvent.change(dateInput('Inicio'), { target: { value: '2026-11-12' } });
+    fireEvent.change(dateInput('Vencimiento'), { target: { value: '2027-05-10' } });
+    fireEvent.change(screen.getByLabelText('Contraparte'), { target: { value: 'Banorte' } });
+    add();
+
+    await screen.findByText(/Operación 7 agregada/);
+    expect(api.of('POST', '/trades')[0].body).toMatchObject({
+      trade_date: '2026-11-05',
+      start_date: '2026-11-12',
+      maturity_date: '2027-05-10',
+    });
+  });
+
+  it('sin vencimiento no se envía la clave maturity_date', async () => {
+    const api = mockApi({ 'POST /trades': json(tradeBody(), 201) });
+    renderForm();
+    await prefilled();
+    expect(dateInput('Vencimiento').value).toBe('');
+    expect(screen.getByText('Vacío: se calcula con el plazo')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Contraparte'), { target: { value: 'Banorte' } });
+    add();
+
+    await screen.findByText(/Operación 7 agregada/);
+    expect(api.of('POST', '/trades')[0].body).not.toHaveProperty('maturity_date');
+  });
+
+  it('pacto e inicio siguen al snapshot activo salvo que se hayan editado', async () => {
+    mockApi({});
+    renderForm();
+    await prefilled('2026-11-10');
+
+    fireEvent.change(dateInput('Inicio'), { target: { value: '2026-12-01' } });
+    fireEvent.click(screen.getByRole('button', { name: 'cambiar a ALT' }));
+
+    await waitFor(() => expect(dateInput('Fecha de pacto').value).toBe('2026-11-11'));
+    expect(dateInput('Inicio').value).toBe('2026-12-01');
+  });
+
+  it('el error 400 de maturity_date aparece bajo Vencimiento', async () => {
+    mockApi({
+      'POST /trades': json({ error: 'El vencimiento debe ser posterior al inicio', field: 'maturity_date' }, 400),
+    });
+    renderForm();
+    await prefilled();
+
+    fireEvent.change(dateInput('Vencimiento'), { target: { value: '2026-01-01' } });
+    add();
+
+    const message = await screen.findByText('El vencimiento debe ser posterior al inicio');
+    const input = dateInput('Vencimiento');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(input.getAttribute('aria-describedby')).toBe(message.id);
+    expect(input.closest('.pricer__field')?.contains(message)).toBe(true);
+    // el único aviso es el del campo: no hay banner general
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('el error 400 de start_date aparece bajo Inicio y se limpia al editarlo', async () => {
+    mockApi({ 'POST /trades': json({ error: 'El inicio no puede ser anterior al pacto', field: 'start_date' }, 400) });
+    renderForm();
+    await prefilled();
+
+    add();
+
+    const message = await screen.findByText('El inicio no puede ser anterior al pacto');
+    expect(dateInput('Inicio').closest('.pricer__field')?.contains(message)).toBe(true);
+    fireEvent.change(dateInput('Inicio'), { target: { value: '2026-11-11' } });
+    expect(screen.queryByText('El inicio no puede ser anterior al pacto')).toBeNull();
+  });
+
+  it('tras crear muestra el vencimiento devuelto y enlaza a la ficha', async () => {
+    mockApi({ 'POST /trades': json(tradeBody({ id: 9, maturity_date: '2027-11-03' }), 201) });
+    renderForm();
+    await prefilled();
+
+    add();
+
+    await screen.findByText(/Operación 9 agregada/);
+    expect(screen.getByText(/^Vencimiento:/).textContent).toBe('Vencimiento: 2027-11-03');
+    expect(screen.queryByText(/Vencimiento ajustado/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Ver ficha' }).getAttribute('href')).toBe('/portafolio/9');
+  });
+
+  it('si el vencimiento devuelto difiere del capturado se rotula como ajustado', async () => {
+    mockApi({ 'POST /trades': json(tradeBody({ maturity_date: '2027-11-03' }), 201) });
+    renderForm();
+    await prefilled();
+
+    fireEvent.change(dateInput('Vencimiento'), { target: { value: '2027-11-10' } });
+    add();
+
+    await screen.findByText(/Operación 7 agregada/);
+    expect(screen.getByText(/^Vencimiento ajustado:/).textContent).toBe('Vencimiento ajustado: 2027-11-03');
   });
 
   it('el error de contraparte vacía aparece junto a su input', async () => {

@@ -152,6 +152,9 @@
 }
 
 .pricer__ok {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
   color: var(--pos);
   font-size: var(--fs-sm);
 }
