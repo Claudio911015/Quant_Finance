@@ -8,13 +8,9 @@ export const FLOW_STATUS_LABEL: Record<FlowStatus, string> = {
   projected: 'Proyectado',
 };
 
-export const FLOW_KIND_LABEL = {
-  coupon: 'Cupón',
-  settlement: 'Liquidación',
-  transfer: 'Transferencia',
-  exchange: 'Intercambio de nocional',
-  redemption: 'Amortización',
-} as const;
+// Los rótulos de tipo de flujo y de producto son los de la ficha y Pricers: `FLOW_KIND_LABEL` (lib/csaLabels) y
+// `productTitle` (pricers/registry); aquí no se repiten.
+export { FLOW_KIND_LABEL } from '../../lib/csaLabels';
 
 export const RECON_STATUS_LABEL: Record<ReconStatus, string> = {
   conciliada: 'Conciliada',
@@ -22,19 +18,11 @@ export const RECON_STATUS_LABEL: Record<ReconStatus, string> = {
   revisar: 'Revisar',
 };
 
-export const PRODUCT_LABEL: Record<ProductId, string> = {
-  irs: 'Swap de tasa',
-  fx_forward: 'Forward USD/MXN',
-  fx_option: 'Opción USD/MXN',
-  cap_floor: 'Cap / floor',
-  swaption: 'Swaption',
-  bond: 'Bono',
-  equity_option: 'Opción de renta variable',
-  xccy_swap: 'Cross currency swap',
-};
-
 /** Productos que exportan a FpML (espejo de `FPML_PRODUCTS` del backend). */
 export const FPML_PRODUCTS: ProductId[] = ['irs', 'fx_forward', 'fx_option'];
+
+/** Productos sin plantilla de confirmación imprimible (espejo del backend: por ahora el cross currency swap). */
+export const NO_CONFIRMATION_PRODUCTS: ProductId[] = ['xccy_swap'];
 
 /** Encabezado del CSV del banco; sirve de `placeholder` del área de pegado. */
 export const CSV_TEMPLATE = 'trade_id,bank_pv,currency,bank_ref\n';

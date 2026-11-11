@@ -301,7 +301,7 @@ describe('ReconciliationPanel', () => {
 
     const r4 = within(screen.getByTestId('recon-row-4'));
     expect(r4.getByText('19.42 (+1.20 %)')).toBeTruthy();
-    expect(r4.getByText('Forward USD/MXN')).toBeTruthy();
+    expect(r4.getByText('Forward FX')).toBeTruthy();
     expect(r4.getByRole('link', { name: '#5' }).getAttribute('href')).toBe('/portafolio/5');
   });
 
@@ -326,7 +326,7 @@ describe('ReconciliationPanel', () => {
     expect(bank.getByText('#999')).toBeTruthy();
 
     const own = within(screen.getByRole('region', { name: 'Solo en QF Desk' }));
-    expect(own.getByText('Cap / floor')).toBeTruthy();
+    expect(own.getByText('Cap / Floor')).toBeTruthy();
     expect(own.getByRole('link', { name: '#7' }).getAttribute('href')).toBe('/portafolio/7');
     expect(own.getByText('812,345.00')).toBeTruthy();
   });

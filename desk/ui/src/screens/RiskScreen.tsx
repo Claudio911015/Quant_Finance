@@ -11,6 +11,7 @@ import {
 import { ApiError, listTrades, riskDv01, riskScenarios, riskVar } from '../api/client';
 import type { Dv01Response, ScenarioSpec, ScenariosResponse, Trade, TradeError, VarResponse } from '../api/types';
 import { CSA_CURVE_NOTE } from '../lib/csaLabels';
+import { productTitle } from './pricers/registry';
 import { fmtMoney, fmtNumber, fmtRate } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import './RiskScreen.css';
@@ -283,7 +284,7 @@ function buildRows(res: ScenariosResponse, trades: Trade[]): { rows: ScenarioRow
   for (const sc of res.scenarios) for (const t of sc.trades) if (!ids.includes(t.id)) ids.push(t.id);
   const rows = ids.map((id): ScenarioRow => {
     const t = byId.get(id);
-    const row: ScenarioRow = { label: t ? `#${id} ${t.product} · ${t.counterparty}` : `#${id}` };
+    const row: ScenarioRow = { label: t ? `#${id} ${productTitle(t.product)} · ${t.counterparty}` : `#${id}` };
     res.scenarios.forEach((sc, i) => {
       const cell = sc.trades.find((x) => x.id === id);
       row[`s${i}`] = cell?.pnl_mxn ?? null;

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Snapshot, Source } from '../api/types';
+import { CSA_CURVE_NOTE } from '../lib/csaLabels';
 import { SnapshotProvider, useSnapshot } from '../state/SnapshotContext';
 import { MarketScreen } from './MarketScreen';
 
@@ -573,9 +574,7 @@ describe('MarketScreen · colateral y MXN-USD', () => {
     const curve = screen.getByRole('region', { name: 'MXN-USD' });
     expect(within(curve).getByRole('img', { name: 'Curva MXN-USD: cero y forward' })).toBeTruthy();
     expect(
-      within(curve).getByText(
-        'Curva dependiente: se recalibra con los puntos forward y la base fijos cuando se mueven SOFR, TIIE-F o el spot',
-      ),
+      within(curve).getByText(CSA_CURVE_NOTE),
     ).toBeTruthy();
     expect(within(curve).getByText('Sintético (inventado para demostración)')).toBeTruthy();
     expect(curve.querySelector('.market__grid')).toBeNull();

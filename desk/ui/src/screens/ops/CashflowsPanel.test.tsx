@@ -152,7 +152,7 @@ describe('CashflowsPanel', () => {
     const proj = within(flowRow('2026-12-08', 1));
     expect(proj.getByText('Proyectado')).toBeTruthy();
     expect(proj.getAllByText('-152,340.12').length).toBe(2);
-    expect(within(flowRow('2026-11-05', 4)).getByText('Forward USD/MXN')).toBeTruthy();
+    expect(within(flowRow('2026-11-05', 4)).getByText('Forward FX')).toBeTruthy();
     expect(within(flowRow('2026-11-05', 4)).getByText('Liquidación')).toBeTruthy();
 
     const totals = within(screen.getByRole('region', { name: 'Totales' }));
@@ -333,6 +333,32 @@ describe('CashflowsPanel', () => {
     expect(vi.mocked(getCashflows).mock.calls.length).toBe(before);
     // Sigue editable: se puede corregir y reintentar.
     expect((within(screen.getByRole('form')).getByRole('button', { name: 'Confirmar' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('el cross currency swap: rótulos de la ficha y Pricers, y cada pata se confirma por separado', async () => {
+    const legs = [
+      row({ date: '2026-12-08', trade_id: 8, product: 'xccy_swap', currency: 'USD', amount: -31546.36, amount_mxn: -592630,
+        status: 'confirmed', confirmed_amount: -31000, difference: 546.36 }),
+      row({ date: '2026-12-08', trade_id: 8, product: 'xccy_swap', currency: 'MXN', amount: 1008048.25, amount_mxn: 1008048.25 }),
+      row({ date: '2028-11-07', trade_id: 8, product: 'xccy_swap', kind: 'exchange', status: 'projected', currency: 'MXN',
+        amount: 186000000, amount_mxn: 186000000 }),
+      row({ date: '2028-11-07', trade_id: 8, product: 'xccy_swap', kind: 'redemption', status: 'projected', currency: 'MXN',
+        amount: 100000000, amount_mxn: 100000000 }),
+    ];
+    vi.mocked(getCashflows).mockResolvedValue({ ...RESPONSE, rows: legs, errors: [] });
+    renderPanel();
+    await loaded();
+    const table = within(screen.getByRole('table', { name: 'Flujos' }));
+    const [usd, mxn, exchange, redemption] = table.getAllByRole('row').slice(1).map((r) => within(r));
+    expect(usd.getByText('Cross currency swap USDMXN')).toBeTruthy();
+    expect(exchange.getByText('Intercambio de nocional')).toBeTruthy();
+    expect(redemption.getByText('Amortización')).toBeTruthy();
+    // la pata USD ya está confirmada; la MXN, del mismo día, sigue pidiendo su confirmación
+    expect(usd.queryByRole('button', { name: 'Confirmar liquidación' })).toBeNull();
+    expect(usd.getByText('Confirmado')).toBeTruthy();
+    expect(mxn.getByRole('button', { name: 'Confirmar liquidación' })).toBeTruthy();
+    expect(mxn.getByText('Liquidado')).toBeTruthy();
+    expect(exchange.queryByRole('button', { name: 'Confirmar liquidación' })).toBeNull();
   });
 
   it('un monto que no es número no llega al backend', async () => {

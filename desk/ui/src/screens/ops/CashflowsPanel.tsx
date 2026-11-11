@@ -5,7 +5,8 @@ import { cashflowsCsvUrl, confirmSettlement, getCashflows } from '../../api/opsC
 import type { CashflowRow, CashflowsQuery, CashflowsResponse, OpsCurrency } from '../../api/opsTypes';
 import { fmtDate, fmtMoney, fmtNumber, parseNumber } from '../../lib/format';
 import { useSnapshot } from '../../state/SnapshotContext';
-import { FLOW_KIND_LABEL, FLOW_STATUS_LABEL, PRODUCT_LABEL } from './opsLabels';
+import { productTitle } from '../pricers/registry';
+import { FLOW_KIND_LABEL, FLOW_STATUS_LABEL } from './opsLabels';
 import './CashflowsPanel.css';
 
 /** Días hacia atrás desde el `as_of` con que abre el filtro "Desde": se ven los liquidados recientes y los proyectados. */
@@ -329,7 +330,7 @@ export function CashflowsPanel() {
                       <Link to={`/portafolio/${r.trade_id}`}>#{r.trade_id}</Link>
                     </td>
                     <td>{r.counterparty}</td>
-                    <td>{PRODUCT_LABEL[r.product] ?? r.product}</td>
+                    <td>{productTitle(r.product)}</td>
                     <td>{FLOW_KIND_LABEL[r.kind] ?? r.kind}</td>
                     <td>{FLOW_STATUS_LABEL[r.status] ?? r.status}</td>
                     <td>{r.currency}</td>

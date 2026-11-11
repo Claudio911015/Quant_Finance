@@ -337,8 +337,8 @@ describe('RiskScreen: escenarios', () => {
     const calls = mocks.grid.setGridOption.mock.calls;
     const rows = calls.filter((c) => c[0] === 'rowData').pop()?.[1];
     const total = calls.filter((c) => c[0] === 'pinnedBottomRowData').pop()?.[1];
-    expect(rows[0]).toMatchObject({ label: '#1 irs · Banco A', s0: 100, s7: 800 });
-    expect(rows[1]).toMatchObject({ label: '#2 fx_forward · Banco B', s0: 5, s3: null, e3: 'Sin cotización' });
+    expect(rows[0]).toMatchObject({ label: '#1 Swap de tasas (IRS) · Banco A', s0: 100, s7: 800 });
+    expect(rows[1]).toMatchObject({ label: '#2 Forward FX · Banco B', s0: 5, s3: null, e3: 'Sin cotización' });
     expect(total).toEqual([expect.objectContaining({ label: 'Total', s0: 105, s7: 805 })]);
   });
 

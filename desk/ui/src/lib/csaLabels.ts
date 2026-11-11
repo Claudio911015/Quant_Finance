@@ -1,4 +1,4 @@
-import type { CollateralCurrency } from '../api/types';
+import type { CollateralCurrency, FlowKind } from '../api/types';
 
 /** Rótulos de colateral, patas y cross currency swap (corte 3). */
 
@@ -18,6 +18,14 @@ export const FLOW_KIND_EXTRA_LABEL: Record<'exchange' | 'redemption', string> = 
   redemption: 'Amortización',
 };
 
+/** Rótulo de cada tipo de flujo: el mismo en la ficha de la operación y en el calendario de Operaciones. */
+export const FLOW_KIND_LABEL: Record<FlowKind, string> = {
+  coupon: 'Cupón',
+  settlement: 'Liquidación',
+  transfer: 'Transferencia',
+  ...FLOW_KIND_EXTRA_LABEL,
+};
+
 export const XCCY_SIDE_LABEL: Record<'pay_usd' | 'pay_mxn', string> = {
   pay_usd: 'Paga USD / recibe MXN',
   pay_mxn: 'Paga MXN / recibe USD',
@@ -31,6 +39,6 @@ export const EXCHANGE_LABEL: Record<'both' | 'initial' | 'final' | 'none', strin
 };
 
 export const CSA_CURVE_NOTE =
-  'Curva dependiente: se recalibra con los puntos forward y la base fijos cuando se mueven SOFR, TIIE-F o el spot';
+  'MXN-USD descuenta los flujos MXN de una operación con colateral en USD. Curva dependiente: se recalibra con los puntos forward y la base fijos cuando se mueven SOFR, TIIE-F o el spot';
 
 export const NO_CSA_TEXT = 'Sin curva MXN-USD en este snapshot: se descuenta con TIIE-F';

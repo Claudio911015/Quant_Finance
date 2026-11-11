@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import type { ProductId } from '../../api/types';
 import { ApiError } from '../../api/client';
 import { fpmlUrl, getTradeRef, putTradeRef } from '../../api/opsClient';
-import { FPML_PRODUCTS } from './opsLabels';
+import { FPML_PRODUCTS, NO_CONFIRMATION_PRODUCTS } from './opsLabels';
 import './TradeOps.css';
 
 const REF_MAX = 64;
@@ -49,7 +49,9 @@ export function TradeOpsPanel({ tradeId, product }: { tradeId: number; product: 
 
   return (
     <div className="ops-trade" data-testid="trade-ops">
-      <Link to={`/portafolio/${tradeId}/confirmacion`}>Confirmación</Link>
+      {!NO_CONFIRMATION_PRODUCTS.includes(product) && (
+        <Link to={`/portafolio/${tradeId}/confirmacion`}>Confirmación</Link>
+      )}
       {FPML_PRODUCTS.includes(product) && (
         <a href={fpmlUrl(tradeId)} download>
           Descargar FpML

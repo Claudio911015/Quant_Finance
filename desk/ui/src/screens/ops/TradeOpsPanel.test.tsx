@@ -11,7 +11,7 @@ vi.mock('../../api/opsClient', () => ({
   fpmlUrl: (id: number) => `/api/trades/${id}/fpml`,
 }));
 
-function renderPanel(product: 'irs' | 'cap_floor') {
+function renderPanel(product: 'irs' | 'cap_floor' | 'xccy_swap') {
   return render(
     <MemoryRouter>
       <TradeOpsPanel tradeId={5} product={product} />
@@ -41,6 +41,13 @@ describe('TradeOpsPanel', () => {
     renderPanel('cap_floor');
     expect(screen.queryByRole('link', { name: 'Descargar FpML' })).toBeNull();
     expect(screen.getByRole('link', { name: 'Confirmación' })).toBeTruthy();
+  });
+
+  it('con xccy_swap no ofrece la confirmación (no tiene plantilla) ni FpML, pero sí la referencia', () => {
+    renderPanel('xccy_swap');
+    expect(screen.queryByRole('link', { name: 'Confirmación' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Descargar FpML' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Editar' })).toBeTruthy();
   });
 
   it('editar y guardar llama putTradeRef con la referencia', async () => {

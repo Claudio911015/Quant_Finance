@@ -11,7 +11,8 @@ import type { ReconRow, Reconciliation, ReconciliationSummary } from '../../api/
 import { fmtDate, fmtDateTime, fmtMoney, fmtNumber, parseNumber } from '../../lib/format';
 import { useSnapshot } from '../../state/SnapshotContext';
 import { FilePicker } from './FilePicker';
-import { CSV_TEMPLATE, PRODUCT_LABEL, RECON_STATUS_LABEL } from './opsLabels';
+import { productTitle } from '../pricers/registry';
+import { CSV_TEMPLATE, RECON_STATUS_LABEL } from './opsLabels';
 import './ReconciliationPanel.css';
 
 const DEFAULT_TOLERANCE_PCT = '0.01';
@@ -343,7 +344,7 @@ function RunResult({ run }: { run: Reconciliation }) {
                   <Link to={`/portafolio/${r.trade_id}`}>#{r.trade_id}</Link>
                   {r.bank_ref && <span className="ops-recon__muted"> · {r.bank_ref}</span>}
                 </td>
-                <td>{PRODUCT_LABEL[r.product] ?? r.product}</td>
+                <td>{productTitle(r.product)}</td>
                 <td className="num">{num(r.own_pv_mxn)}</td>
                 <td className="num">{fmtNumber(r.bank_pv, 2)}</td>
                 <td>{r.bank_currency}</td>
@@ -418,7 +419,7 @@ function RunResult({ run }: { run: Reconciliation }) {
                     <td>
                       <Link to={`/portafolio/${o.trade_id}`}>#{o.trade_id}</Link>
                     </td>
-                    <td>{PRODUCT_LABEL[o.product] ?? o.product}</td>
+                    <td>{productTitle(o.product)}</td>
                     <td className="num">{num(o.own_pv_mxn)}</td>
                   </tr>
                 ))}

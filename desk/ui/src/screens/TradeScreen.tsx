@@ -4,7 +4,6 @@ import { ApiError, getTrade, holidays, listHedges, postEvent, tradeFlows, tradeS
 import type {
   EventType,
   Flow,
-  FlowKind,
   FlowsResponse,
   HedgeSummary,
   TradeDetail,
@@ -13,7 +12,7 @@ import type {
   TradeStatus,
   Warning,
 } from '../api/types';
-import { FLOW_KIND_EXTRA_LABEL, LEG_LABEL, NO_CSA_TEXT } from '../lib/csaLabels';
+import { FLOW_KIND_LABEL, LEG_LABEL, NO_CSA_TEXT } from '../lib/csaLabels';
 import { HEDGE_STATUS_LABEL, HEDGE_TYPE_LABEL } from '../lib/hedgeLabels';
 import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
@@ -37,13 +36,6 @@ const EVENT_LABEL: Record<EventType, string> = {
   terms_change: 'Cambio de términos',
   exercise: 'Ejercicio',
   termination: 'Terminación anticipada',
-};
-
-const FLOW_KIND_LABEL: Record<FlowKind, string> = {
-  coupon: 'Cupón',
-  settlement: 'Liquidación',
-  transfer: 'Transferencia',
-  ...FLOW_KIND_EXTRA_LABEL, // corte 3: intercambio de nocional y amortización
 };
 
 // --- corte 3 ---
