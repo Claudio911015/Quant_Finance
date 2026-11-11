@@ -1,6 +1,11 @@
 build/
 .worktrees/
-docs/
+docs/*
+!docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/qf-desk/
+docs/superpowers/qf-desk/**/plan.md
+docs/superpowers/qf-desk/plan.md
 graphify-out/
 *.png
 *.jpg
