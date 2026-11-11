@@ -48,6 +48,11 @@ function initialText(f: FieldSpec): string {
   });
 }
 
+/** Decimal → texto de un campo percent (0.0671234 → "6.71234"), con la precisión que `parseParams` conserva. */
+function percentText(dec: number): string {
+  return (dec * 100).toLocaleString('en-US', { maximumFractionDigits: 10, useGrouping: false });
+}
+
 /** Convierte el texto de los campos en el cuerpo de la petición (percent: % → decimal). */
 function parseParams(spec: ProductSpec, values: Record<string, string>) {
   const params: Record<string, unknown> = {};
@@ -317,6 +322,16 @@ export function PricerForm({ spec }: { spec: ProductSpec }) {
         if (mine !== ticket.current) return;
         resultRef.current = { params, response };
         setResult(resultRef.current);
+        // Un porcentaje opcional en blanco (tasa fija del irs = tasa par) se rellena con lo que el
+        // backend usó: "Agregar al portafolio" necesita el valor explícito.
+        const used: Record<string, string> = {};
+        for (const f of spec.fields) {
+          const v = response.details?.[f.name];
+          if (f.kind === 'percent' && f.optional && params[f.name] === undefined && typeof v === 'number') {
+            used[f.name] = percentText(v);
+          }
+        }
+        if (Object.keys(used).length > 0) setValues((prev) => ({ ...prev, ...used }));
       } catch (e) {
         if (mine !== ticket.current) return;
         resultRef.current = null;
@@ -326,7 +341,7 @@ export function PricerForm({ spec }: { spec: ProductSpec }) {
         if (mine === ticket.current) setPending(false);
       }
     },
-    [spec.product, snapshotId, report],
+    [spec.product, spec.fields, snapshotId, report],
   );
 
   // Al cambiar de snapshot se revalúa lo que ya está en pantalla.

@@ -189,6 +189,46 @@ describe('PricerForm', () => {
     });
   });
 
+  it('tras valuar un irs con la tasa en blanco la rellena con la usada y "Agregar" la envía', async () => {
+    const api = mockApi({
+      'POST /price/irs': json({ ...IRS_RESPONSE, details: { fixed_rate: 0.0671234567 } }),
+      'POST /trades': json(
+        { id: 8, product: 'irs', counterparty: 'Banorte', params: {}, notional: 1, currency: 'MXN', maturity: '2027-11-10', created_at: 'x' },
+        201,
+      ),
+    });
+    renderForm();
+    expect((screen.getByLabelText('Tasa fija') as HTMLInputElement).value).toBe('');
+
+    valuate();
+
+    await waitFor(() => expect((screen.getByLabelText('Tasa fija') as HTMLInputElement).value).toBe('6.71234567'));
+    // la valuación salió sin tasa (par); la operación guardada lleva la tasa explícita
+    expect(api.of('POST', '/price/irs')[0].body).not.toHaveProperty('fixed_rate');
+    fireEvent.change(screen.getByLabelText('Contraparte'), { target: { value: 'Banorte' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar al portafolio' }));
+
+    await screen.findByText(/Operación 8 agregada/);
+    expect(api.of('POST', '/trades')[0].body?.params).toEqual({
+      curve: 'TIIE-F',
+      side: 'payer',
+      notional: 100000000,
+      periods: 13,
+      fixed_rate: 0.0671234567,
+    });
+  });
+
+  it('con una tasa fija capturada no se sobrescribe tras valuar', async () => {
+    mockApi({ 'POST /price/irs': json({ ...IRS_RESPONSE, details: { fixed_rate: 0.071 } }) });
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText('Tasa fija'), { target: { value: '7.1' } });
+    valuate();
+
+    await screen.findByText('Medidas de riesgo');
+    expect((screen.getByLabelText('Tasa fija') as HTMLInputElement).value).toBe('7.1');
+  });
+
   it('el error de contraparte vacía aparece junto a su input', async () => {
     mockApi({
       'POST /trades': json({ error: 'La contraparte es obligatoria', field: 'counterparty' }, 400),
