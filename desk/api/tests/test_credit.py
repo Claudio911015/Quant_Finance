@@ -1,10 +1,14 @@
 """Corte 6, T7: exposición (EE/PFE), CVA informativo y parámetros de crédito por contraparte."""
 import calendar
+import re
 import sqlite3
 from datetime import date, datetime, timezone
 
 import pytest
 
+from desk.api import db, lifecycle, market, portfolio, valuation
+from desk.api import fixings as fixing_store
+from desk.api.qf import qfpy
 from desk.api.risk import credit
 from desk.api.tests.conftest import empty_portfolio, insert_raw_trade
 
@@ -224,9 +228,12 @@ def test_products_without_simulated_exposure_are_listed_as_excluded(client):
     expected = {4: "fx_forward", 5: "fx_forward", 6: "fx_option", 7: "cap_floor"}
     top = {x["id"]: x for x in body["excluded"]}
     assert set(top) == set(expected)
+    label = {"fx_forward": "Forward FX", "fx_option": "Opción FX", "cap_floor": "Cap / Floor"}
     for trade_id, product in expected.items():
-        reason = "La exposición simulada solo cubre swaps de tasa (irs): %s se excluye" % product
+        reason = "La exposición simulada solo cubre swaps de tasas (IRS): %s se excluye" % label[product]
         assert top[trade_id]["product"] == product and top[trade_id]["reason"] == reason
+        # el aviso se lee en la interfaz: sin códigos internos de producto
+        assert not re.search(r"\b(irs|fx_forward|fx_option|cap_floor)\b", top[trade_id]["reason"])
     assert top[4]["counterparty"] == ALFA and top[7]["counterparty"] == ALFA and top[6]["counterparty"] == GAMMA
     by = _by_name(body)
     assert [x["id"] for x in by[ALFA]["excluded"]] == [4, 7]
@@ -270,26 +277,100 @@ def test_unreadable_swap_is_excluded_with_its_reason_and_does_not_stop_the_rest(
     assert _by_name(body)[BETA]["profile"]  # las demás se calculan igual
 
 
-def test_several_netting_sets_per_counterparty_do_not_net_across_currencies(client):
-    # Alfa recibe 4 % en SOFR pagando solo 1 %: PV positivo en USD, mientras su swap TIIE-F vale menos que 0
+def _alfa_with_sofr_swap(client, notional_usd):
+    """Alfa recibe 4 % en SOFR pagando solo 1 % (PV positivo en USD) además de su swap TIIE-F (PV negativo)."""
     r = client.post(
         "/api/trades",
         json={
             "product": "irs",
             "counterparty": ALFA,
-            "params": {"curve": "SOFR", "side": "payer", "notional": 5e6, "periods": 3, "fixed_rate": 0.01},
+            "params": {"curve": "SOFR", "side": "payer", "notional": notional_usd, "periods": 3, "fixed_rate": 0.01},
         },
     )
     assert r.status_code == 201, r.get_json()
-    alfa = _by_name(_exposure(client))[ALFA]
+    return _by_name(_exposure(client))[ALFA]
+
+
+@pytest.mark.parametrize("notional_usd, total_is_positive", [(5e6, True), (5e5, False)])
+def test_ee_at_zero_nets_across_currencies_and_later_points_do_not(client, notional_usd, total_is_positive):
+    alfa = _alfa_with_sofr_swap(client, notional_usd)
     assert [(ns["curve"], ns["currency"]) for ns in alfa["netting_sets"]] == [("TIIE-F", "MXN"), ("SOFR", "USD")]
     assert alfa["pv_mxn"] == pytest.approx(sum(ns["pv_mxn"] for ns in alfa["netting_sets"]), rel=1e-12)
     pv_tiie, pv_sofr = (ns["pv_mxn"] for ns in alfa["netting_sets"])
     assert pv_tiie < 0.0 < pv_sofr
-    # sin compensación entre monedas: EE(0) = Σ max(PV de cada conjunto, 0), mayor que max(PV total, 0)
-    assert alfa["profile"][0]["ee_mxn"] == pytest.approx(pv_sofr, rel=1e-12)
-    assert alfa["profile"][0]["ee_mxn"] > max(alfa["pv_mxn"], 0.0)
-    assert all(p["pfe_mxn"] >= p["ee_mxn"] for p in alfa["profile"])
+    assert (alfa["pv_mxn"] > 0.0) is total_is_positive
+    # R4: EE(0) = max(PV de la contraparte, 0): el valor de hoy compensa entre monedas...
+    first = alfa["profile"][0]
+    assert first["ee_mxn"] == pytest.approx(max(alfa["pv_mxn"], 0.0), rel=1e-12)
+    assert first["pfe_mxn"] == first["ee_mxn"]
+    # ...y es menor que la suma de los conjuntos (que es lo que sí suman los puntos mensuales: cota superior)
+    assert first["ee_mxn"] < max(pv_tiie, 0.0) + max(pv_sofr, 0.0)
+    assert all(p["pfe_mxn"] >= p["ee_mxn"] >= 0.0 for p in alfa["profile"])
+
+
+def _model_swap_inputs(app):
+    """Por cada `irs` vivo de MX-DEMO: (operación, PV del desk en la moneda de la curva, mercado, términos)."""
+    conn = db.connect(app.config["DESK_DB"])
+    try:
+        mkt = market.load_context(conn, "MX-DEMO")
+        fixings = fixing_store.load_all(conn)
+        out = []
+        for trade in portfolio.load_trades(conn):
+            if trade["product"] != "irs" or not valuation.is_live(trade, mkt.as_of):
+                continue
+            terms = lifecycle.state(trade, trade["events"], mkt.as_of)["terms"]
+            v = valuation.value_trade(trade, mkt, fixings)
+            out.append((trade, v, mkt, terms))
+        return out
+    finally:
+        conn.close()
+
+
+def _side(terms):
+    return qfpy.SwapType.Payer if terms["side"] == "payer" else qfpy.SwapType.Receiver
+
+
+def test_model_swap_is_calibrated_to_the_desk_pv_at_zero(app):
+    inputs = _model_swap_inputs(app)
+    assert len(inputs) == 3
+    for trade, v, mkt, terms in inputs:
+        curve = mkt.curves[terms["curve"]]
+        mat = credit._model_maturity(trade, mkt.as_of)
+        rate = credit._effective_fixed_rate(qfpy, curve, _side(terms), v["notional"], mat, v["pv"])
+        swap = qfpy.InterestRateSwap(v["notional"], rate, mat, credit._MODEL_FREQUENCY, _side(terms))
+        assert swap.npv(qfpy.MarketEnvironment(curve)) == pytest.approx(v["pv"], rel=1e-9), trade["id"]
+        # la tasa efectiva es la del contrato más la base de días y el calendario: del mismo orden
+        assert rate == pytest.approx(terms["fixed_rate"], rel=0.05), trade["id"]
+
+
+def test_calibration_without_coupons_is_an_error(app):
+    trade, v, mkt, terms = _model_swap_inputs(app)[0]
+    with pytest.raises(ValueError):
+        credit._effective_fixed_rate(qfpy, mkt.curves[terms["curve"]], _side(terms), 1e6, 1e-6, 0.0)
+
+
+def test_simulated_swap_starts_at_the_desk_pv_without_a_step_in_the_first_month(app):
+    """Auditoría del corte 6: con los términos crudos el modelo valía +2.2 M (Alfa) y −0.36 M (Beta) en t ≈ 0
+    frente a un PV del desk de −0.94 M y +1.60 M. Con volatilidad despreciable la simulación es el valor
+    determinista del swap del modelo: debe arrancar en el PV del desk y no saltar al mes siguiente."""
+    import qfxva
+
+    for trade, v, mkt, terms in _model_swap_inputs(app):
+        name = terms["curve"]
+        hw = qfpy.HullWhite(a=mkt.hw[name]["a"], sigma=1e-7, curve=mkt.curves[name])
+        rate = credit._effective_fixed_rate(
+            qfpy, mkt.curves[name], _side(terms), v["notional"], credit._model_maturity(trade, mkt.as_of), v["pv"]
+        )
+        ns = credit._netting_set(
+            qfxva, [{"notional": v["notional"], "model_rate": rate, "terms": terms, "maturity_date": trade["maturity_date"]}], mkt.as_of
+        )
+        sim = qfxva.SimParams(n_paths=2, monitor_dates=[1e-4, 1.0 / 12.0], seed=1)
+        near, month = (p.epe - p.ene for p in qfxva.simulate_exposure(hw, ns, sim, pfe_quantile=0.95))
+        tol = 5e-4 * v["notional"]  # 0.05 % del nocional: a lo más un cupón diario del modelo
+        assert abs(near - v["pv"]) < tol, (trade["id"], near, v["pv"])
+        assert near * v["pv"] > 0.0  # mismo signo (Alfa y Gamma negativos, Beta positivo)
+        # un mes después solo cambia el acarreo (<= 0.12 % del nocional aquí); el escalón de antes era de 0.5 a 3 %
+        assert abs(month - v["pv"]) < 2e-3 * v["notional"], (trade["id"], month, v["pv"])
 
 
 def test_same_response_on_two_calls(client):
