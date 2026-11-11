@@ -50,4 +50,33 @@ describe('Metodología de operaciones', () => {
     );
     expect(row('Conciliación')).toContain('0.01 %');
   });
+
+  it('Descomposición indicativa declara que una operación cerca de la par no delata un nocional distinto', () => {
+    render(
+      <MemoryRouter>
+        <MethodologyScreen />
+      </MemoryRouter>,
+    );
+    const text = row('Descomposición indicativa');
+    expect(text).toContain('cerca de la par');
+    expect(text).toContain('nocional');
+  });
+
+  it('FpML declara que el vencimiento de un swap debe caer en periodos enteros', () => {
+    render(
+      <MemoryRouter>
+        <MethodologyScreen />
+      </MemoryRouter>,
+    );
+    expect(row('FpML')).toContain('periodos enteros');
+  });
+
+  it('Confirmación aclara que el calendario de un swap es solo la pierna fija', () => {
+    render(
+      <MemoryRouter>
+        <MethodologyScreen />
+      </MemoryRouter>,
+    );
+    expect(row('Confirmación')).toContain('pierna fija');
+  });
 });

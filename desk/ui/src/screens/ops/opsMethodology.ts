@@ -18,11 +18,11 @@ export const OPS_SECTIONS: {
       },
       {
         label: 'Confirmación',
-        text: 'Documento informativo con los términos pactados y las convenciones de la operación. No sustituye la confirmación ISDA ni el contrato marco, y no lleva firma.',
+        text: 'Documento informativo con los términos pactados y las convenciones de la operación. No sustituye la confirmación ISDA ni el contrato marco, y no lleva firma. El calendario de un swap muestra solo la pierna fija, que es conocida de antemano: la pierna variable depende de las fijaciones, así que el neto que liquida el banco no es esa cifra.',
       },
       {
         label: 'FpML',
-        text: 'Exporta e importa swaps OIS, forwards y opciones USD/MXN en FpML 5.12 (vista de confirmación), con el subconjunto de elementos necesario para ida y vuelta. No se valida contra el esquema XSD oficial, no se aceptan DTD ni entidades, y los nombres de índice ISDA (MXN-TIIE-ON-OIS Compound, USD-SOFR-OIS Compound) están por verificar contra las definiciones vigentes. No incluye prima de opciones ni ajustes de días hábiles.',
+        text: 'Exporta e importa swaps OIS, forwards y opciones USD/MXN en FpML 5.12 (vista de confirmación), con el subconjunto de elementos necesario para ida y vuelta. No se valida contra el esquema XSD oficial, no se aceptan DTD ni entidades, y los nombres de índice ISDA (MXN-TIIE-ON-OIS Compound, USD-SOFR-OIS Compound) están por verificar contra las definiciones vigentes. No incluye prima de opciones ni ajustes de días hábiles. Al importar un swap, la fecha de terminación debe caer en periodos enteros (28 días en TIIE-F, 365 en SOFR) desde el inicio; si no, se rechaza en lugar de moverla.',
       },
       {
         label: 'Conciliación',
@@ -30,7 +30,7 @@ export const OPS_SECTIONS: {
       },
       {
         label: 'Descomposición indicativa',
-        text: 'La descomposición es una ayuda de diagnóstico, no una prueba: indica qué movimiento explicaría la diferencia, no que lo haya causado. Mueve un solo factor a la vez, en paralelo sobre la tasa cero, y no usa calendario de días inhábiles.',
+        text: 'La descomposición es una ayuda de diagnóstico, no una prueba: indica qué movimiento explicaría la diferencia, no que lo haya causado. Mueve un solo factor a la vez, en paralelo sobre la tasa cero, y no usa calendario de días inhábiles. La bandera de términos compara PV: en una operación cerca de la par (PV casi cero) un nocional distinto casi no cambia el PV y no se detecta.',
       },
       {
         label: 'Fuera de alcance',
