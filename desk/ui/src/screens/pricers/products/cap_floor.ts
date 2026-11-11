@@ -34,5 +34,5 @@ export const spec: ProductSpec = {
       help: 'TIIE-F: cupones de 28 días; SOFR: años.',
     },
   ],
-  chart: 'none',
+  chart: 'payoff',
 };

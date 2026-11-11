@@ -29,5 +29,5 @@ export const spec: ProductSpec = {
     { name: 'expiry_years', label: 'Vencimiento (años)', kind: 'number', default: 1 },
     { name: 'swap_tenor_years', label: 'Plazo del swap (años)', kind: 'number', default: 5 },
   ],
-  chart: 'none',
+  chart: 'payoff',
 };

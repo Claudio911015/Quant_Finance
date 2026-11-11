@@ -12,7 +12,7 @@ import { ApiError, createTrade, price } from '../../api/client';
 import type { Cashflow, PriceResponse, Trade } from '../../api/types';
 import { fmtMoney, fmtNumber, fmtRate } from '../../lib/format';
 import { useSnapshot } from '../../state/SnapshotContext';
-import { PricerChart, type ChartData } from './PricerChart';
+import { PricerChart, payoffText, type ChartData } from './PricerChart';
 import type { FieldSpec, ProductSpec } from './types';
 import './PricerForm.css';
 
@@ -157,14 +157,18 @@ function CashflowGrid({ rows }: { rows: Cashflow[] }) {
 function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
   const { response, params } = result;
   const { currency, pv, pv_mxn: pvMxn, risk, cashflows } = response;
+  const { snapshot } = useSnapshot();
+  // Cap/floor y swaption necesitan el periodo de pago de su curva para la gráfica de payoff.
+  const periodDays = snapshot?.curves[String(params.curve)]?.period_days;
 
   const chart = useMemo<ChartData | null>(() => {
     if (spec.chart === 'cashflows' && cashflows && cashflows.length > 0) {
       return { kind: 'cashflows', cashflows, currency };
     }
-    if (spec.chart === 'payoff') return { kind: 'payoff', params, pv, currency };
+    if (spec.chart === 'payoff') return { kind: 'payoff', product: spec.product, params, pv, currency, periodDays };
     return null;
-  }, [spec.chart, cashflows, params, pv, currency]);
+  }, [spec.chart, spec.product, cashflows, params, pv, currency, periodDays]);
+  const note = chart?.kind === 'payoff' ? payoffText(chart.product).note : undefined;
 
   const riskRows = Object.entries(risk ?? {});
 
@@ -205,9 +209,10 @@ function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
       {chart && (
         <section className="pricer__block">
           <h2 className="pricer__caption">
-            {chart.kind === 'cashflows' ? 'Perfil de flujos' : 'Resultado al vencimiento, neto de prima'}
+            {chart.kind === 'cashflows' ? 'Perfil de flujos' : payoffText(chart.product).title}
           </h2>
           <PricerChart data={chart} />
+          {note && <p className="pricer__note">{note}</p>}
         </section>
       )}
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PriceResponse } from '../../api/types';
@@ -8,8 +8,11 @@ import { PRODUCT_SPECS } from './registry';
 
 // echarts y AG Grid dependen de medidas de layout que jsdom no tiene; aquí solo importa
 // qué datos reciben, no cómo pintan.
-vi.mock('./PricerChart', () => ({
-  PricerChart: ({ data }: { data: { kind: string } }) => <div data-testid="chart" data-kind={data.kind} />,
+vi.mock('./PricerChart', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./PricerChart')>()), // los textos de cada gráfica sí son los reales
+  PricerChart: ({ data }: { data: { kind: string; product?: string; periodDays?: number } }) => (
+    <div data-testid="chart" data-kind={data.kind} data-product={data.product} data-period-days={data.periodDays} />
+  ),
 }));
 
 const SNAPSHOTS = [
@@ -44,7 +47,16 @@ function mockApi(routes: Record<string, () => Response>) {
       calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : null });
       if (path === '/market/snapshots') return new Response(JSON.stringify({ snapshots: SNAPSHOTS }));
       const snap = SNAPSHOTS.find((s) => path === `/market/snapshots/${s.id}`);
-      if (snap) return new Response(JSON.stringify({ ...snap, quotes: [], curves: {} }));
+      if (snap) return new Response(
+          JSON.stringify({
+            ...snap,
+            quotes: [],
+            curves: {
+              'TIIE-F': { currency: 'MXN', period_days: 28, points: [] },
+              SOFR: { currency: 'USD', period_days: 365, points: [] },
+            },
+          }),
+        );
       const route = routes[`${method} ${path}`];
       return route ? route() : new Response(JSON.stringify({ error: 'sin ruta', field: null }), { status: 404 });
     }),
@@ -289,6 +301,37 @@ describe('PricerForm', () => {
       days: 91,
       snapshot: 'MX-DEMO',
     });
-    expect(screen.queryByTestId('chart')).toBeNull();
+  });
+
+  it.each([
+    ['cap_floor', 'Pago por periodo contra la tasa de referencia', '28'],
+    ['swaption', 'Valor intrínseco al vencimiento contra la tasa swap', '28'],
+    ['fx_forward', 'Resultado al vencimiento del forward', null],
+  ] as const)('%s: tras valuar monta la tarjeta de gráfica de payoff', async (product, title, periodDays) => {
+    mockApi({
+      [`POST /price/${product}`]: json({
+        product,
+        currency: 'MXN',
+        pv: 5000,
+        pv_mxn: 5000,
+        risk: {},
+        cashflows: null,
+        details: {},
+      }),
+    });
+    renderForm(product);
+
+    valuate();
+
+    const heading = await screen.findByRole('heading', { name: title });
+    const card = heading.closest('section') as HTMLElement;
+    const chart = within(card).getByTestId('chart');
+    expect(chart.getAttribute('data-kind')).toBe('payoff');
+    expect(chart.getAttribute('data-product')).toBe(product);
+    // el periodo de pago sale de la curva del snapshot, que llega aparte de la valuación
+    await waitFor(() => expect(chart.getAttribute('data-period-days')).toBe(periodDays));
+    // solo la swaption avisa que su gráfica es aproximada
+    const note = 'Aproximación con descuento plano; el PV exacto es el de arriba.';
+    expect(within(card).queryByText(note) !== null).toBe(product === 'swaption');
   });
 });

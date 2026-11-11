@@ -24,5 +24,5 @@ export const spec: ProductSpec = {
     },
     { name: 'days', label: 'Días al vencimiento', kind: 'int', default: 91 },
   ],
-  chart: 'none',
+  chart: 'payoff',
 };
