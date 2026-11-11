@@ -102,7 +102,7 @@ const GENERAL_SECTIONS: Section[] = [
       {
         label: 'DV01 por plazo',
         text:
-          'El DV01 por plazo se calcula con diferencia central, (PV(−1 pb) − PV(+1 pb)) / 2, sobre un desplazamiento de la tasa cero en cada pilar; el DV01 paralelo es PV(base) − PV(+1 pb). Para productos con convexidad (cap/floor) la suma por plazo puede diferir del paralelo en unas décimas de punto porcentual.',
+          'El DV01 por plazo se calcula con diferencia central, (PV(−1 pb) − PV(+1 pb)) / 2, sobre un desplazamiento de la tasa cero en cada pilar; el DV01 paralelo es PV(base) − PV(+1 pb). Para productos con convexidad (cap/floor) la suma por plazo difiere del paralelo: la diferencia absoluta es chica (el paralelo es unilateral y los pilares usan diferencia central), pero en un portafolio casi neutro en DV01 puede pasar del 2 % del total.',
       },
       {
         label: 'VaR',
@@ -122,15 +122,15 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Curva MXN-USD',
-        text: 'Puntos forward hasta 1 año y base de cross currency swaps después. Sin cotizaciones no existe y todo se descuenta con TIIE-F. En MX-DEMO es sintética; MKT-LIVE no la trae porque no hay fuente libre.',
+        text: 'Puntos forward hasta 1 año y base de cross currency swaps después. Sin cotizaciones no existe y todo se descuenta con TIIE-F. En MX-DEMO es sintética; MKT-LIVE no la trae porque no hay fuente libre. Interpola igual que las demás curvas (lineal en la tasa cero), así que con puntos forward en paridad y base cero coincide con TIIE-F solo si los días de cotización coinciden con los pilares de TIIE-F; con otros días el factor de descuento difiere hasta unas millonésimas. No tiene pilar a un día: antes de su primera cotización la tasa cero se extrapola plana.',
       },
       {
         label: 'Efecto del colateral',
-        text: 'Colateral por contraparte, con historial y fecha efectiva. Con colateral USD, los flujos MXN descuentan con MXN-USD y proyectan con TIIE-F; sin curva, aviso y TIIE-F. Con MXN no cambia nada. Cap/floor y swaption con colateral USD usan base determinista: cada flujo × DF_MXN-USD / DF_TIIE-F en el cap/floor, y razón de anualidades en la swaption.',
+        text: 'Colateral por contraparte, con historial y fecha efectiva. Con colateral USD, los flujos MXN descuentan con MXN-USD y proyectan con TIIE-F; sin curva, aviso y TIIE-F. Con MXN no cambia nada. Cap/floor y swaption con colateral USD usan base determinista: cada flujo × DF_MXN-USD / DF_TIIE-F en el cap/floor, y razón de anualidades en la swaption. Los puntos forward cotizados se mantienen fijos cuando se recalibra la curva, así que un forward FX con colateral USD apenas reacciona a un choque de SOFR.',
       },
       {
         label: 'Cross currency swap',
-        text: 'Nocional constante, sin reinicio a mercado. Siempre se descuenta bajo colateral USD.',
+        text: 'Nocional constante, sin reinicio a mercado. Siempre se descuenta bajo colateral USD. El intercambio inicial de nocional sigue en el PV hasta el día de inicio incluido y, al salir de él, se liquida en el P&L (al FIX de ese día), de modo que un tipo de cambio inicial distinto del spot no genera un salto en el P&L.',
       },
       {
         label: 'Calendarios',
@@ -177,7 +177,7 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Estados',
-        text: 'no_pactada, viva, vencida, terminada y ejercida. Solo las vivas entran a riesgo. Una operación pactada dentro de la ventana del P&L entra con pv_from = 0, sin prima ni pago inicial.',
+        text: 'no_pactada, viva, vencida, terminada y ejercida. Solo las vivas entran a riesgo. Una operación pactada dentro de la ventana del P&L entra con pv_from = 0, sin prima ni pago inicial (salvo el intercambio inicial del cross currency swap, que se liquida al salir del PV).',
       },
       {
         label: 'Vencimientos',
@@ -185,7 +185,7 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Bono y cap/floor envejecidos',
-        text: 'Bono: precio sucio con cupón corrido, envejecido día a día; sus cupones y su amortización se liquidan. Cap/floor: el caplet ya fijado no entra en el valor y no tiene liquidación derivada, como las swaptions.',
+        text: 'Bono: precio sucio con cupón corrido, envejecido día a día; sus cupones y su amortización se liquidan. Cap/floor: el caplet ya fijado no entra en el valor y no tiene liquidación derivada, como las swaptions (su pago conocido deja de contar en el PV y no entra al P&L). El cupón corrido se mide con el calendario exacto de i/frecuencia años, pero el cupón se liquida en el día entero más cercano: el día siguiente a un cupón semestral el corrido es medio día, no un día.',
       },
       {
         label: 'Cambios de nocional',

@@ -43,6 +43,23 @@ describe('MethodologyScreen', () => {
     expect(row('Calendarios')).toContain('no se ajustan por inhábil');
   });
 
+  it('declara las limitaciones que dejó la auditoría del corte 3', () => {
+    render(<MethodologyScreen />);
+    // R2: la paridad con TIIE-F es exacta solo con los días de cotización en los pilares de TIIE-F.
+    expect(row('Curva MXN-USD')).toContain('solo si los días de cotización coinciden con los pilares de TIIE-F');
+    expect(row('Curva MXN-USD')).toContain('No tiene pilar a un día');
+    // D7: el forward FX bajo colateral USD casi no reacciona a SOFR.
+    expect(row('Efecto del colateral')).toContain('apenas reacciona a un choque de SOFR');
+    // D1: el intercambio inicial se liquida al salir del PV (en Estados no se promete que no haya pago inicial).
+    expect(row('Cross currency swap')).toContain('se liquida en el P&L');
+    expect(row('Estados')).toContain('salvo el intercambio inicial del cross currency swap');
+    // D5/D6: cupón corrido a medio día y caplet fijado sin liquidación.
+    expect(row('Bono y cap/floor envejecidos')).toContain('medio día');
+    expect(row('Bono y cap/floor envejecidos')).toContain('su pago conocido deja de contar');
+    // D2: la suma por plazo contra el paralelo, en términos relativos, en portafolios casi neutros.
+    expect(row('DV01 por plazo')).toContain('casi neutro');
+  });
+
   it('dice que un swap sin tasa fija nace a la par', () => {
     render(<MethodologyScreen />);
     expect(row('Alta a la par')).toContain('nace a la par');
