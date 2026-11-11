@@ -1,6 +1,7 @@
 """Fijaciones traídas de la fuente (NY Fed y Banxico) con `urlopen` simulado: sin red en la suite."""
 import json
 import socket
+import sqlite3
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -151,6 +152,38 @@ def test_tolerance_boundary_is_one_nano(client, served):
     client.post("/api/fixings", json={"index": "SOFR", "date": "2026-11-06", "value": 0.0389 + 2e-9})
     body = post(client, index="SOFR", **RANGE).get_json()
     assert len(body["conflicts"]) == 1 and body["unchanged"] == 0
+
+
+def test_a_row_saved_by_a_concurrent_fetch_after_the_read_is_unchanged_or_a_conflict_not_a_500(
+    client, served, monkeypatch
+):
+    # D4 de la auditoría del corte 8: otro fetch del mismo rango guarda filas entre la lectura de lo guardado y la
+    # escritura; el INSERT simple chocaba con la llave y daba un 500 genérico.
+    from desk.api import fixings
+
+    served(fixture_bytes("nyfed_sofr.json"))
+    real = fixings.list_fixings
+
+    def racing(conn, *args, **kwargs):
+        rows = real(conn, *args, **kwargs)
+        monkeypatch.setattr(fixings, "list_fixings", real)  # solo la primera lectura
+        other = sqlite3.connect(client.application.config["DESK_DB"])
+        other.executemany(
+            "INSERT INTO fixings (index_name, fixing_date, value) VALUES ('SOFR', ?, ?)",
+            [("2026-11-06", 0.0389), ("2026-11-05", 0.0392 + 5e-10), ("2026-11-04", 0.05)],
+        )
+        other.commit()
+        other.close()
+        return rows
+
+    monkeypatch.setattr(fixings, "list_fixings", racing)
+    resp = post(client, index="SOFR", **RANGE)
+    assert resp.status_code == 200, resp.get_json()
+    body = resp.get_json()
+    assert (body["fetched"], body["inserted"], body["unchanged"]) == (9, 6, 2)
+    assert body["conflicts"] == [{"date": "2026-11-04", "stored": 0.05, "source": 0.0394}]
+    rows = {r["date"]: r["value"] for r in stored(client)}
+    assert len(rows) == 9 and rows["2026-11-04"] == 0.05 and rows["2026-11-06"] == 0.0389  # nada se sobrescribe
 
 
 def test_range_without_data_is_not_an_error(client, served):

@@ -91,26 +91,34 @@ def fetch_fixings(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, A
         )
         stored = {r["date"]: r["value"] for r in rows}
 
-    to_insert = []  # type: List[Tuple[str, str, float]]
-    conflicts = []  # type: List[Dict[str, Any]]
+    inserted = 0
     unchanged = 0
+    conflicts = []  # type: List[Dict[str, Any]]
     for day, value in valid:
-        if day not in stored:
-            to_insert.append((index, day, value))
-        elif abs(value - stored[day]) <= TOLERANCE:
+        current = stored.get(day)
+        if current is None:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO fixings (index_name, fixing_date, value) VALUES (?, ?, ?)",
+                (index, day, value),
+            )
+            if cur.rowcount == 1:
+                inserted += 1
+                continue
+            # Otra petición la guardó entre la lectura y esta escritura: se compara con lo que quedó.
+            current = conn.execute(
+                "SELECT value FROM fixings WHERE index_name = ? AND fixing_date = ?", (index, day)
+            ).fetchone()["value"]
+        if abs(value - current) <= TOLERANCE:
             unchanged += 1
         else:
-            conflicts.append({"date": day, "stored": stored[day], "source": value})
-    conn.executemany(
-        "INSERT INTO fixings (index_name, fixing_date, value) VALUES (?, ?, ?)", to_insert
-    )
+            conflicts.append({"date": day, "stored": current, "source": value})
     return {
         "index": index,
         "source": SOURCE_OF[index],
         "from": start.isoformat(),
         "to": end.isoformat(),
-        "fetched": len(to_insert) + unchanged + len(conflicts),
-        "inserted": len(to_insert),
+        "fetched": inserted + unchanged + len(conflicts),
+        "inserted": inserted,
         "unchanged": unchanged,
         "conflicts": conflicts,
     }
