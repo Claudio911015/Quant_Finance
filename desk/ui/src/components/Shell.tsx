@@ -112,7 +112,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <header className="shell__topbar">
           <div className="shell__field">
             <label htmlFor="shell-snapshot" className="shell__caption">
-              Snapshot
+              Fecha de valuación
             </label>
             <select
               id="shell-snapshot"
@@ -122,7 +122,7 @@ export function Shell({ children }: { children: ReactNode }) {
             >
               {options.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.label}
+                  {'as_of' in s ? `${s.label} · ${s.as_of}` : s.label}
                 </option>
               ))}
             </select>

@@ -113,9 +113,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const selector = () => screen.getByLabelText('Snapshot') as HTMLSelectElement;
+const selector = () => screen.getByLabelText('Fecha de valuación') as HTMLSelectElement;
 
 describe('Shell: barra superior', () => {
+  it('cada opción del selector muestra su fecha de valuación', async () => {
+    mockApi([DEMO, ALT]);
+    renderShell();
+    await screen.findByText('Datos sintéticos');
+
+    expect(within(selector()).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'México demo (sintético) · 2026-11-10',
+      'Mercado alterno · 2026-11-12',
+    ]);
+  });
+
   it('muestra "Datos sintéticos" si la calidad es synthetic', async () => {
     mockApi([DEMO]);
     renderShell();
