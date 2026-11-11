@@ -63,3 +63,66 @@ Backend real en `127.0.0.1:5073` con base temporal nueva (`scratchpad/audit.db`)
 7. **Presentación de la liquidación en valor razonable.** El cupón neto del swap se lleva a «Resultados — cobertura de valor razonable» en vez de a gasto por intereses. Es una elección de presentación que el contador querría ver declarada.
 8. **Componente forward del forward.** El hipotético al forward de mercado designa el forward completo, puntos forward incluidos, sin elección de 6.5.16. Está declarado («sin costo de cobertura»); es correcto como simplificación.
 9. **Designación sin relación económica.** Se acepta una relación cuya prueba prospectiva da «relación económica: no» (6.4.1(c)(i)). La prueba es informativa y no bloquea la designación. Debería al menos advertirse en el alta.
+
+## Segunda ronda
+
+Re-auditoría independiente de `bf8f948` (backend) y `09f8a6b` (interfaz) contra C1–C8 y R1–R12. No se leyeron reportes de implementadores; no se tocó el repo ni se hicieron commits. Escenarios propios con el cliente de pruebas de Flask sobre bases temporales (scratchpad `reaudit.py`, `edge.py`, `term.py`, `seedui.py`) y, para la interfaz, backend en 127.0.0.1:5073 + Chrome headless propio (puerto 9335, perfil en scratchpad) a 1280 px. Todo apagado al final (5073 y 9335 libres; 5070, 9222 y Brave sin tocar).
+
+### Suites
+
+| Suite | Resultado |
+|---|---|
+| C++ `ctest --test-dir build` | 402/402 |
+| `pytests` (qfpy) | 56 OK |
+| `pytest desk/api/tests -q` | 2335 pasan |
+| UI `npm test` | 266 pasan (18 archivos) |
+| UI `npm run build` | compila (solo aviso de tamaño de chunk) |
+
+### Escenarios propios (números)
+
+Snapshots rodados desde MX-DEMO (2026-11-10) y movidos con `PUT`: S1 +35 d, TIIE-F +40 pb, spot 19.10; S2 +70 d, −10 pb; S3 +105 d, −60 pb; S4 +400 d (después del vencimiento). Fijaciones TIIE-F 7.05 %. Crédito variable 100 M a 364 d. El hipotético se verificó **por fuera**: el instrumento de la relación idéntica es exactamente el hipotético, así que su `inst_total`/`settled_period` sirve de referencia independiente para `hypo_total`/`hypo_settled_period` de las demás. 255 comprobaciones; solo 3 «fallos» esperados (la relación de signo opuesto no tiene línea de reciclaje porque `recycled = 0` por definición).
+
+- **Idéntico (R2):** inefectividad 0.00000000 en S1–S4; `oci = inst_cum` (374 636.23; −365 102.62; −38 730.40; 0.00); `Δoci + reciclaje = Δinst_total`. Cierre final S4 `vencida`, Σ reciclaje 321 609.64 = `inst_total`.
+- **Sobrecubierto 120 % (R3/C3):** `hypo_total` = total del idéntico en cada cierre; `effective_cum` = menor sobre totales; reciclaje = cupón del hipotético (no el del swap); Σ inefectividad 64 321.93 = 20 % del total; Σ reciclaje 321 609.64 (= lo del hipotético).
+- **Subcubierto 80 %:** `|oci| = |inst_cum|`, inefectividad 0 en todos los cierres; reciclaje = cupón del instrumento; Σ 257 287.71.
+- **Signo opuesto:** `oci = 0` en todos los cierres, Σ inefectividad −321 609.64, aviso `no_economic_relationship` al designar.
+- **Fracción 0.5 sobre 200 M:** idéntico al de 100 M, cuadra.
+- **R4:** cargos = abonos al centavo por periodo y acumulados; `identity_residual` ≤ 1e-6; `Δinst_cum + settled_period = F × pnl(/api/pnl?from&to)` ≤ 1e-6 en los 20 cierres (incluida F = 0.5).
+- **Forward 1 M USD a 50 d (miércoles), F = 0.7 (R5):** S1 reserva 312 147.17; cierre final `vencida`: reserva 0, reciclaje 301 000.00 = 0.7 × 1 M × 0.43; `ORI` y `Derivado` acumulados netos **0.00** exactos; `Efectivo` = liquidación; cierre posterior 409 (P12).
+- **Valor razonable (R6):** deuda fija 300 M con swap receptor idéntico: `Δinst_cum + item_adjustment = 0` en S1/S2/S3 (−2 199 427.27 / +2 199 427.27, etc.); la cuenta de cobertura neta 0 sin la línea de liquidación; acumulado de `Derivado` y `Partida cubierta` = saldo redondeado (C4).
+
+### Veredictos C1–C8
+
+| C | Veredicto | Evidencia |
+|---|---|---|
+| C1 | CORREGIDO | Reproducción de D-1: relación 50 % designada en MX-DEMO, cierre S1, desdesignada en S2; designar 100 % con MX-DEMO → **409 `snapshot`**; con S1 → 409; con S2 (= fecha de desdesignación) → 201; 10 % más en S3 → 409 (fracción). Otra operación: 60 % en MX-DEMO, luego 60 % en S1 → 409 y 40 % en S1 → 201. Ver observación sobre retroactividad absoluta. |
+| C2 | CORREGIDO (con hueco) | Reproducción de D-2: cierre S1 (oci 374 636.23), desdesignar con S2 → cierre implícito al 2027-01-19 y `frozen_oci` = −38 730.40 (el de S2, no el de S1). Cuerpo antiguo `{date}` → 400; sin `cause` → 400 `cause`; `cause` desconocida → 400; con el snapshot de la designación → 201 sin cierre. **Hueco:** si la operación se terminó, no se puede medir hasta la terminación (defecto N-2). |
+| C3 | CORREGIDO (según su texto) | Fórmulas verificadas por fuera en 20 cierres (arriba). Identidad `F×ΔPV + liquidado = Δoci + reciclaje + inefectividad` se cumple. Pero la propia regla de reciclaje de C3 produce una reserva sin respaldo cuando `effective_cum = 0` (defecto N-1). |
+| C4 | CORREGIDO | Forward con F = 0.7: acumulados `ORI` y `Derivado` 0.00 exactos tras el cierre final (D-3 ya no se reproduce). Swap tres cierres y valor razonable: acumulado de cada cuenta de balance = saldo redondeado al centavo. Tras liberar toda la reserva, `ORI` acumulado 0.00. |
+| C5 | CORREGIDO | Desdesignada con −38 730.40: liberar con fecha anterior al último evento 409; signo contrario 409; 101 % 409; en relación activa 409; parcial 40 % (`flow_occurred`) 201 → saldo −23 238.24, asiento `ORI` abono 15 492.16 / reciclaje cargo; liberación anterior a la previa 409; total (`flow_no_longer_expected`) 201 → saldo 0, asiento contra inefectividad; con saldo 0 → 409. Reporte: `reserve_releases`, `reserve.released`, `entries_total`; CSV cuadra e incluye filas con `period_id` vacío. Detalle y reporte en la interfaz lo muestran. |
+| C6 | CORREGIDO | Avisos devueltos y guardados (aparecen en `GET /api/hedges/<id>`): `no_economic_relationship` (swap receptor), `instrument_off_market` (swap a 9 % fija), `forecast_date_weekend` (2027-01-16, sábado). Término `side` «Sentido» en créditos: receptor vs `pays_floating` → `mismatch` (D-4 resuelto). |
+| C7 | CORREGIDO | `hedgeDeclarations.ts` es fuente única usada por Metodología y por el reporte: reciclaje con el hipotético como proxy, componente de tasa de referencia (6.3.7) sin amortizar, presentación del cupón en la cuenta de cobertura, causa obligatoria (6.5.6), derivado fuera de mercado. Se quitó «designación de componentes de riesgo» de fuera de alcance. |
+| C8 | CORREGIDO | Headless 1280 px sin desborde en `/coberturas`, `/1`, `/2`, `/3`, `/4`, `/3/reporte`, `/metodologia`; banda D10 en todas. Desdesignar con snapshot + causa + motivo (sin `<input type="date">`, D-6 resuelto); «Liberar reserva» solo en desdesignadas con saldo (monto tecleado en magnitud y firmado con el saldo); avisos en el alta y en el detalle; «Sentido» en términos críticos; fechas ISO (ninguna `dd/mm/aaaa` en pantalla); «Generado: 2026-11-11 16:35 UTC»; `break-inside: avoid` en el resumen de efectividad; errores de formulario se limpian al activar otro (`if (!p.active) setErrors({})`). Menor: el selector de snapshot de «Liberar reserva» arranca en el snapshot global (MX-DEMO), que el backend rechaza por anterior al último evento. |
+
+### R1–R12 con la nueva medición
+
+R1–R12 siguen cumpliéndose (R2–R6 con los números de arriba; R7 términos críticos ahora con `side`; R8 con desdesignación por snapshot; R9 con liberaciones; R10/R11 vistos en headless y en Metodología; R12 suites verdes). Sin regresiones en las suites.
+
+### Defectos nuevos
+
+| # | Severidad | Defecto |
+|---|---|---|
+| N-1 | media | **Reciclaje sin reserva que lo respalde (regla de C3).** El reciclaje del periodo es el menor de lo liquidado por instrumento e hipotético aunque `effective_cum = 0`. Probado (`edge.py`): swap pagador de 728 d cubriendo crédito de 364 d, S1 con curva corta +50 pb y larga −150 pb: `inst_total` −2 315 375.77, `hypo_total` +487 353.49 → `effective_cum` 0, pero `recycled` 24 739.20 y **`oci` −24 739.20**: se crea una pérdida diferida en ORI que nunca fue porción efectiva, y el reciclaje lleva a «partida cubierta» una ganancia que no salió de la reserva. Bajo 6.5.11(a) la reserva debería ser 0 y todo el resultado del instrumento ir a inefectividad. Corrección natural: limitar el reciclaje a lo que la reserva tiene (mismo signo y no más que `effective_cum − Σ reciclaje previo`). Con hipotético idéntico, sobre o subcubierto sobre los mismos términos no se manifiesta. |
+| N-2 | media | **Terminación del instrumento no medible (hueco de C2).** Con la operación terminada (evento `termination` 2027-01-19, monto 250 000), desdesignar con el snapshot de esa fecha → 409 «ya no está viva» y cerrar periodo → 409. Solo se puede desdesignar con el snapshot del último cierre: el cambio del derivado desde ese cierre, el último cupón y el pago de terminación (que `/api/pnl` sí reconoce: `settled` 274 739.20) nunca entran a los asientos de la cobertura, y la reserva se congela al último cierre. Es exactamente D-2 para la causa más común, `instrument_ended`. El docstring lo declara como «hueco resuelto de forma conservadora», pero no Metodología ni la pantalla. |
+| N-3 | baja | Periodos guardados antes de `bf8f948` carecen de `inst_total`, `effective_cum`, `hypo_settled_period`…: cerrar un periodo nuevo sobre ellos da **500** (probado sobre copia de `it.db`, relación 5 con D2). No hay base real con coberturas (`desk/data/desk.db` no existe), así que solo afecta bases de prueba; no hay migración ni 409 legible. |
+| N-4 | baja | El selector de snapshot de «Liberar reserva» (y de desdesignar) arranca en el snapshot global de la barra, normalmente anterior al último evento → 409 al primer intento. |
+
+### Observaciones contables que siguen abiertas (no declaradas en Metodología ni en el reporte)
+
+1. **Cierre final con partida que sobrevive al instrumento (6.5.12(a), 6.5.6).** Cuando el instrumento vence antes que el flujo cubierto, el cierre final recicla toda la reserva a «Resultados — partida cubierta (reciclaje)» (lo fija la prueba `test_the_final_close_zeroes_the_reserve_even_when_the_hypothetical_outlives_the_instrument`). La norma deja la reserva en ORI hasta que el flujo cubierto afecte resultados; ya existe el mecanismo (desdesignar `instrument_ended` + liberar con `flow_occurred`). Metodología dice «en el cierre final la reserva queda en 0», pero no lo presenta como desviación.
+2. **Reserva sin respaldo (N-1)**: el contador objetaría un saldo de ORI distinto del menor de los acumulados.
+3. **Terminación anticipada (N-2)**: el pago de terminación y la porción efectiva hasta la terminación no se asientan.
+4. **Retroactividad absoluta (6.4.1(b)).** C1 solo ordena eventos de la misma operación: una relación nueva se puede designar hoy con cualquier snapshot pasado (no se compara contra `created_at`). Metodología afirma «La designación no es retroactiva», lo que sobreestima el control.
+5. **Ajuste de la partida en valor razonable incluye devengo (6.5.8(b)).** El ajuste es `−Δ` del PV del swap hipotético (flujos futuros, no precio limpio): entre fechas de cupón incorpora el devengo del diferencial fija-variable y lo revierte al pagarse. Un contador mediría el componente de tasa con valor limpio. Con hipotético idéntico el neto es 0, por eso no lo detectan las pruebas.
+6. **Causas sin verificar.** `cause = instrument_ended` se acepta con la operación viva y `flow_occurred` se acepta antes de la fecha del flujo cubierto; son elecciones del usuario sin contraste con los datos que el sistema sí tiene.
+7. Siguen declaradas y aceptables: sin ajuste de base para partidas no financieras, sin costo de cobertura (puntos forward), reciclaje en la fecha del hipotético, cupón de valor razonable en la cuenta de cobertura, ajuste sin amortizar.
