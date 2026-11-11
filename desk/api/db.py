@@ -35,6 +35,38 @@ CREATE TABLE IF NOT EXISTS hedge_periods (id INTEGER PRIMARY KEY AUTOINCREMENT,
   result TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE (relationship_id, as_of));
 CREATE TRIGGER IF NOT EXISTS hedge_periods_no_update BEFORE UPDATE ON hedge_periods BEGIN SELECT RAISE(ABORT, 'hedge_periods es solo de inserción'); END;
 CREATE TRIGGER IF NOT EXISTS hedge_periods_no_delete BEFORE DELETE ON hedge_periods BEGIN SELECT RAISE(ABORT, 'hedge_periods es solo de inserción'); END;
+-- --- corte 6: riesgo avanzado (historia de factores, límites, crédito, conjuntos de escenarios) ---
+CREATE TABLE IF NOT EXISTS factor_history (factor TEXT NOT NULL, source TEXT NOT NULL, date TEXT NOT NULL,
+  value REAL NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (factor, source, date));
+CREATE TRIGGER IF NOT EXISTS factor_history_no_update BEFORE UPDATE ON factor_history BEGIN SELECT RAISE(ABORT, 'factor_history es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS factor_history_no_delete BEFORE DELETE ON factor_history BEGIN SELECT RAISE(ABORT, 'factor_history es solo de inserción'); END;
+CREATE TABLE IF NOT EXISTS limits (id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, key TEXT NOT NULL,
+  metric TEXT NOT NULL, amount REAL NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS limits_no_update BEFORE UPDATE ON limits BEGIN SELECT RAISE(ABORT, 'limits es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS limits_no_delete BEFORE DELETE ON limits BEGIN SELECT RAISE(ABORT, 'limits es solo de inserción'); END;
+CREATE TABLE IF NOT EXISTS limit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, limit_id INTEGER NOT NULL REFERENCES limits(id),
+  type TEXT NOT NULL, amount REAL, reason TEXT, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS limit_events_no_update BEFORE UPDATE ON limit_events BEGIN SELECT RAISE(ABORT, 'limit_events es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS limit_events_no_delete BEFORE DELETE ON limit_events BEGIN SELECT RAISE(ABORT, 'limit_events es solo de inserción'); END;
+CREATE TABLE IF NOT EXISTS limit_breaches (id INTEGER PRIMARY KEY AUTOINCREMENT, limit_id INTEGER NOT NULL REFERENCES limits(id),
+  snapshot_id TEXT NOT NULL, as_of TEXT NOT NULL, amount REAL NOT NULL, usage REAL NOT NULL, pct REAL NOT NULL,
+  created_at TEXT NOT NULL, UNIQUE (limit_id, as_of));
+CREATE TRIGGER IF NOT EXISTS limit_breaches_no_update BEFORE UPDATE ON limit_breaches BEGIN SELECT RAISE(ABORT, 'limit_breaches es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS limit_breaches_no_delete BEFORE DELETE ON limit_breaches BEGIN SELECT RAISE(ABORT, 'limit_breaches es solo de inserción'); END;
+CREATE TABLE IF NOT EXISTS counterparty_credit (id INTEGER PRIMARY KEY AUTOINCREMENT,
+  counterparty_id INTEGER NOT NULL REFERENCES counterparties(id), hazard_rate REAL NOT NULL, recovery REAL NOT NULL,
+  as_of TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS counterparty_credit_no_update BEFORE UPDATE ON counterparty_credit BEGIN SELECT RAISE(ABORT, 'counterparty_credit es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS counterparty_credit_no_delete BEFORE DELETE ON counterparty_credit BEGIN SELECT RAISE(ABORT, 'counterparty_credit es solo de inserción'); END;
+CREATE TABLE IF NOT EXISTS scenario_sets (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+  description TEXT, scenarios TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS scenario_sets_no_update BEFORE UPDATE ON scenario_sets BEGIN SELECT RAISE(ABORT, 'scenario_sets es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS scenario_sets_no_delete BEFORE DELETE ON scenario_sets BEGIN SELECT RAISE(ABORT, 'scenario_sets es solo de inserción'); END;
+CREATE TABLE IF NOT EXISTS scenario_set_events (id INTEGER PRIMARY KEY AUTOINCREMENT,
+  set_id INTEGER NOT NULL REFERENCES scenario_sets(id), type TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS scenario_set_events_no_update BEFORE UPDATE ON scenario_set_events BEGIN SELECT RAISE(ABORT, 'scenario_set_events es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS scenario_set_events_no_delete BEFORE DELETE ON scenario_set_events BEGIN SELECT RAISE(ABORT, 'scenario_set_events es solo de inserción'); END;
+-- --- fin corte 6 ---
 """
 
 

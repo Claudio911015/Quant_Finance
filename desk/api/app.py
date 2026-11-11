@@ -51,6 +51,20 @@ def create_app(db_path: Optional[Union[str, Path]] = None, seed: bool = True) ->
     for module in (market, price, trades, risk, fixings, pnl, hedges):
         app.register_blueprint(module.bp)
 
+    # --- corte 6: riesgo avanzado (rutas nuevas y semilla de la historia sintética) ---
+    from desk.api.risk import factor_history
+    from desk.api.routes import risk_adv
+
+    app.register_blueprint(risk_adv.bp)
+    if seed:
+        seed_conn = db.connect(path)
+        try:
+            factor_history.seed_synthetic(seed_conn)
+            seed_conn.commit()
+        finally:
+            seed_conn.close()
+    # --- fin corte 6 ---
+
     @app.get("/", defaults={"path": ""})
     @app.get("/<path:path>")
     def spa(path):
