@@ -220,6 +220,16 @@
   font-size: var(--fs-xs);
 }
 
+.pricer__warn {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
 .pricer__table {
   width: 100%;
   border-collapse: collapse;

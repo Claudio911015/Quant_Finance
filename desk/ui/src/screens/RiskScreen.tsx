@@ -10,6 +10,7 @@ import {
 } from 'ag-grid-community';
 import { ApiError, listTrades, riskDv01, riskScenarios, riskVar } from '../api/client';
 import type { Dv01Response, ScenarioSpec, ScenariosResponse, Trade, TradeError, VarResponse } from '../api/types';
+import { CSA_CURVE_NOTE } from '../lib/csaLabels';
 import { fmtMoney, fmtNumber, fmtRate } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import './RiskScreen.css';
@@ -108,7 +109,7 @@ function ladderOption(data: Dv01Response | null): echarts.EChartsOption {
     return [...names].join(' / ');
   });
   const dim = cssVar('--text-dim');
-  const colors = [cssVar('--accent'), cssVar('--warn')];
+  const colors = [cssVar('--accent'), cssVar('--warn'), cssVar('--pos')]; // la tercera es MXN-USD (corte 3)
   const font = { color: dim, fontFamily: cssVar('--font-sans'), fontSize: 11 };
   return {
     animation: false,
@@ -176,6 +177,37 @@ function Tile({ label, value }: { label: string; value: number }) {
   );
 }
 
+// --- corte 3 --- la curva MXN-USD (solo viene si el snapshot trae puntos forward o base): pilares y su nota
+const CSA_CURVE = 'MXN-USD';
+
+function CsaCurveTable({ curve }: { curve: Dv01Response['curves'][string] }) {
+  return (
+    <div className="risk-csa">
+      <h3 className="risk-caption">{CSA_CURVE} · DV01 por plazo</h3>
+      <table className="risk-table" aria-label={`DV01 por plazo de ${CSA_CURVE}`}>
+        <thead>
+          <tr>
+            <th>Plazo</th>
+            <th className="num">Días</th>
+            <th className="num">DV01</th>
+          </tr>
+        </thead>
+        <tbody>
+          {curve.points.map((p) => (
+            <tr key={`${p.label}-${p.days}`}>
+              <td>{p.label}</td>
+              <td className="num">{fmtNumber(p.days, 0)}</td>
+              <td className={`num ${signClass(p.dv01_mxn)}`}>{fmtNumber(p.dv01_mxn, 2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="risk-foot">{CSA_CURVE_NOTE}</p>
+    </div>
+  );
+}
+// --- fin corte 3 ---
+
 function Dv01Section() {
   const { snapshotId } = useSnapshot();
   const { data, error, loading } = useLoad(() => riskDv01(snapshotId), [snapshotId]);
@@ -195,6 +227,7 @@ function Dv01Section() {
       )}
       <LadderChart data={data} />
       <p className="risk-foot">DV01 = PV base − PV con la curva +1 pb; positivo si el PV sube cuando bajan las tasas.</p>
+      {data?.curves[CSA_CURVE] && <CsaCurveTable curve={data.curves[CSA_CURVE]} />}
       <ExcludedNote errors={data?.errors ?? []} />
     </section>
   );

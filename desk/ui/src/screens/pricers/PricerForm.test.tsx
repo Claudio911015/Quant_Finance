@@ -1,10 +1,25 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PriceResponse } from '../../api/types';
+import type { PriceResponse, XccyCashflow } from '../../api/types';
+import { LEG_LABEL, NO_CSA_TEXT } from '../../lib/csaLabels';
 import { SnapshotProvider, useSnapshot } from '../../state/SnapshotContext';
+import { cashflowsByLeg } from './PricerChart';
 import { PricerForm } from './PricerForm';
 import { PRODUCT_SPECS } from './registry';
+
+// La tabla de flujos se deja crear de verdad; solo se anotan las opciones con que se creó.
+const grids = vi.hoisted(() => ({ options: [] as { columnDefs: { headerName: string; valueFormatter?: (p: { value: unknown }) => string }[] }[] }));
+vi.mock('ag-grid-community', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ag-grid-community')>();
+  return {
+    ...actual,
+    createGrid: ((el: HTMLElement, options: (typeof grids.options)[number]) => {
+      grids.options.push(options);
+      return (actual.createGrid as (...a: unknown[]) => unknown)(el, options);
+    }) as typeof actual.createGrid,
+  };
+});
 
 // echarts y AG Grid dependen de medidas de layout que jsdom no tiene; aquí solo importa
 // qué datos reciben, no cómo pintan.
@@ -28,6 +43,25 @@ const IRS_RESPONSE: PriceResponse = {
   risk: { dv01: -4567.8, par_rate: 0.0671 },
   cashflows: [{ date: '2026-12-08', days: 28, amount: -1234.5, df: 0.9947, pv: -1228 }],
   details: {},
+};
+
+/** Dos cupones y los intercambios del cross currency swap, como los entrega `POST /api/price/xccy_swap`. */
+const XCCY_FLOWS: XccyCashflow[] = [
+  { date: '2026-12-08', days: 28, leg: 'USD', kind: 'coupon', amount: -30330, df: 0.997, pv: -30240, pv_mxn: -562464 },
+  { date: '2026-12-08', days: 28, leg: 'MXN', kind: 'coupon', amount: 1009000, df: 0.995, pv: 1003955, pv_mxn: 1003955 },
+  { date: '2027-01-05', days: 56, leg: 'USD', kind: 'coupon', amount: -30000, df: 0.994, pv: -29820, pv_mxn: -554652 },
+  { date: '2027-01-05', days: 56, leg: 'USD', kind: 'exchange', amount: 10000000, df: 0.994, pv: 9940000, pv_mxn: 184884000 },
+  { date: '2027-01-05', days: 56, leg: 'MXN', kind: 'exchange', amount: -186000000, df: 0.99, pv: -184140000, pv_mxn: -184140000 },
+];
+
+const XCCY_RESPONSE: PriceResponse = {
+  product: 'xccy_swap',
+  currency: 'MXN',
+  pv: 12345.6,
+  pv_mxn: 12345.6,
+  risk: { par_spread: -0.001, dv01_mxn_usd: 1234.5, dv01_tiie: -50.1, dv01_sofr: 980.2 },
+  cashflows: XCCY_FLOWS,
+  details: { fx_rate: 18.6, spread: -0.001, notional_mxn: 186000000, discount_curve: 'MXN-USD' },
 };
 
 interface Call {
@@ -425,6 +459,105 @@ describe('PricerForm', () => {
     });
   });
 
+  it('cross currency swap: el resultado trae diferencial par en pb, nocional, tipo de cambio, DV01 por curva y curva de descuento', async () => {
+    mockApi({ 'POST /price/xccy_swap': json(XCCY_RESPONSE) });
+    renderForm('xccy_swap');
+
+    valuate();
+
+    await screen.findByText('Medidas de riesgo');
+    const rowOf = (label: string) => screen.getByText(label).closest('tr') as HTMLElement;
+    expect(within(rowOf('Diferencial par')).getByText('-10.00 pb')).toBeTruthy();
+    expect(within(rowOf('DV01 MXN-USD')).getByText('1,234.50')).toBeTruthy();
+    expect(within(rowOf('DV01 TIIE-F')).getByText('-50.10')).toBeTruthy();
+    expect(within(rowOf('DV01 SOFR')).getByText('980.20')).toBeTruthy();
+    expect(within(rowOf('Nocional MXN')).getByText('MXN 186,000,000.00')).toBeTruthy();
+    expect(within(rowOf('Tipo de cambio')).getByText('18.6000')).toBeTruthy();
+    expect(screen.getByText('Curva de descuento: MXN-USD')).toBeTruthy();
+    expect(screen.queryByText(NO_CSA_TEXT)).toBeNull();
+    // PV en MXN
+    expect(screen.getAllByText('MXN 12,345.60').length).toBeGreaterThan(0);
+  });
+
+  it('cross currency swap sin curva MXN-USD (descuento TIIE-F) muestra el texto de sin curva', async () => {
+    mockApi({
+      'POST /price/xccy_swap': json({ ...XCCY_RESPONSE, details: { ...XCCY_RESPONSE.details, discount_curve: 'TIIE-F' } }),
+    });
+    renderForm('xccy_swap');
+
+    valuate();
+
+    expect(await screen.findByText(NO_CSA_TEXT)).toBeTruthy();
+    expect(screen.queryByText('Curva de descuento: MXN-USD')).toBeNull();
+  });
+
+  it('cross currency swap: la tabla de flujos lleva Pata y Tipo, y la gráfica es por pata', async () => {
+    grids.options.length = 0;
+    mockApi({ 'POST /price/xccy_swap': json(XCCY_RESPONSE) });
+    renderForm('xccy_swap');
+
+    valuate();
+
+    const heading = await screen.findByRole('heading', { name: 'VP de los flujos por pata (MXN)' });
+    expect(within(heading.closest('section') as HTMLElement).getByTestId('chart').getAttribute('data-kind')).toBe('cashflows');
+    const cols = grids.options[grids.options.length - 1].columnDefs;
+    expect(cols.map((c) => c.headerName)).toEqual(['Fecha', 'Pata', 'Tipo', 'Monto', 'Factor desc.', 'VP (MXN)']);
+    expect(cols[1].valueFormatter?.({ value: 'MXN' })).toBe(LEG_LABEL.MXN);
+    expect(cols[2].valueFormatter?.({ value: 'exchange' })).toBe('Intercambio de nocional');
+    expect(cols[2].valueFormatter?.({ value: 'coupon' })).toBe('Cupón');
+  });
+
+  it('los demás productos conservan su tabla y su gráfica de flujos sin Pata', async () => {
+    grids.options.length = 0;
+    mockApi({ 'POST /price/irs': json(IRS_RESPONSE) });
+    renderForm();
+
+    valuate();
+
+    await screen.findByText('Medidas de riesgo');
+    expect(screen.getByRole('heading', { name: 'Perfil de flujos' })).toBeTruthy();
+    expect(grids.options[grids.options.length - 1].columnDefs.map((c) => c.headerName)).toEqual([
+      'Fecha',
+      'Días',
+      'Monto',
+      'Factor desc.',
+      'VP',
+    ]);
+    expect(screen.queryByText('Detalle del swap')).toBeNull();
+  });
+
+  it('cross currency swap: valúa con los campos de su especificación y se agrega como los demás productos', async () => {
+    const api = mockApi({
+      'POST /price/xccy_swap': json(XCCY_RESPONSE),
+      'POST /trades': json(tradeBody({ id: 9, product: 'xccy_swap', maturity_date: '2027-11-03' }), 201),
+    });
+    renderForm('xccy_swap');
+    await prefilled();
+
+    valuate();
+    await screen.findByText('Medidas de riesgo');
+    expect(api.of('POST', '/price/xccy_swap')[0].body).toEqual({
+      side: 'pay_usd',
+      notional_usd: 10000000,
+      periods: 26,
+      exchange: 'both',
+      snapshot: 'MX-DEMO',
+    });
+
+    fireEvent.change(screen.getByLabelText('Contraparte'), { target: { value: 'Banorte' } });
+    add();
+
+    await screen.findByText(/Operación 9 agregada/);
+    expect(api.of('POST', '/trades')[0].body).toEqual({
+      product: 'xccy_swap',
+      counterparty: 'Banorte',
+      // como en el irs, el diferencial en blanco se rellena con el que usó el backend (el par)
+      params: { side: 'pay_usd', notional_usd: 10000000, periods: 26, exchange: 'both', spread: -0.001 },
+      trade_date: '2026-11-10',
+      start_date: '2026-11-10',
+    });
+  });
+
   it.each([
     ['cap_floor', 'Pago por periodo contra la tasa de referencia', '28'],
     ['swaption', 'Valor intrínseco al vencimiento contra la tasa swap', '28'],
@@ -455,5 +588,27 @@ describe('PricerForm', () => {
     // solo la swaption avisa que su gráfica es aproximada
     const note = 'Aproximación con descuento plano; el PV exacto es el de arriba.';
     expect(within(card).queryByText(note) !== null).toBe(product === 'swaption');
+  });
+});
+
+describe('cashflowsByLeg', () => {
+  it('una serie por pata sobre las fechas de pago, con el VP en MXN y sumando cupón e intercambio de un mismo día', () => {
+    const byLeg = cashflowsByLeg(XCCY_FLOWS)!;
+    expect(byLeg.dates).toEqual(['2026-12-08', '2027-01-05']);
+    expect(byLeg.legs.map((l) => l.leg)).toEqual(['USD', 'MXN']);
+    expect(byLeg.legs[0].values).toEqual([-562464, -554652 + 184884000]);
+    expect(byLeg.legs[1].values).toEqual([1003955, -184140000]);
+  });
+
+  it('una fecha donde una pata no paga queda en blanco y una sola pata da una sola serie', () => {
+    const byLeg = cashflowsByLeg(XCCY_FLOWS.filter((f) => f.leg === 'USD' || f.date === '2026-12-08'))!;
+    expect(byLeg.legs.map((l) => l.leg)).toEqual(['USD', 'MXN']);
+    expect(byLeg.legs[1].values).toEqual([1003955, null]);
+    expect(cashflowsByLeg(XCCY_FLOWS.filter((f) => f.leg === 'MXN'))!.legs.map((l) => l.leg)).toEqual(['MXN']);
+  });
+
+  it('sin flujos con pata (los demás productos) no hay series por pata', () => {
+    expect(cashflowsByLeg(IRS_RESPONSE.cashflows!)).toBeNull();
+    expect(cashflowsByLeg([])).toBeNull();
   });
 });

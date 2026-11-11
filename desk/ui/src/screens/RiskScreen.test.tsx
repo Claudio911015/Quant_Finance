@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
 import type { Dv01Response, ScenariosResponse, Snapshot, Trade, VarResponse } from '../api/types';
+import { CSA_CURVE_NOTE } from '../lib/csaLabels';
 import { SnapshotProvider, useSnapshot } from '../state/SnapshotContext';
 import { RiskScreen } from './RiskScreen';
 
@@ -234,6 +235,63 @@ describe('RiskScreen: escalera DV01', () => {
       expect(option.series[0].data).toEqual([-400, null, -600]);
       expect(option.series[1].data).toEqual([null, -500, null]);
     });
+  });
+});
+
+describe('RiskScreen: curva MXN-USD en el DV01', () => {
+  const dv01Card = () => screen.getByRole('region', { name: 'Escalera DV01' });
+  const withCsa: Dv01Response = {
+    ...DV01,
+    total_mxn: -1250,
+    curves: {
+      ...DV01.curves,
+      'MXN-USD': {
+        parallel_mxn: 250,
+        points: [
+          { label: '1M', days: 28, dv01_mxn: 100 },
+          { label: '2Y', days: 728, dv01_mxn: 150.5 },
+        ],
+      },
+    },
+  };
+
+  it('muestra su total paralelo, su tabla por plazo, la nota de curva dependiente y su serie', async () => {
+    mocks.riskDv01.mockImplementation(async (id: string) => ({ ...withCsa, snapshot: id }));
+    renderScreen();
+
+    expect(await within(dv01Card()).findByText('MXN-USD paralelo')).toBeTruthy();
+    const table = within(dv01Card()).getByRole('table', { name: 'DV01 por plazo de MXN-USD' });
+    const rows = within(table)
+      .getAllByRole('row')
+      .slice(1) // sin el encabezado
+      .map((r) => within(r).getAllByRole('cell').map((c) => c.textContent));
+    expect(rows).toEqual([
+      ['1M', '28', '100.00'],
+      ['2Y', '728', '150.50'],
+    ]);
+    expect(within(dv01Card()).getByText(CSA_CURVE_NOTE)).toBeTruthy();
+
+    await waitFor(() => {
+      const option = mocks.chart.setOption.mock.calls.map((c) => c[0]).find((o) => o.series?.length === 3);
+      expect(option.series.map((s: { name: string }) => s.name)).toEqual(['TIIE-F', 'SOFR', 'MXN-USD']);
+    });
+  });
+
+  it('sin MXN-USD en la respuesta no hay tabla ni nota', async () => {
+    renderScreen();
+    await within(dv01Card()).findByText('MXN -1,500.00');
+
+    expect(within(dv01Card()).queryByText('MXN-USD paralelo')).toBeNull();
+    expect(within(dv01Card()).queryByRole('table')).toBeNull();
+    expect(within(dv01Card()).queryByText(CSA_CURVE_NOTE)).toBeNull();
+  });
+
+  it('los escenarios no cambian: siguen los mismos ocho', async () => {
+    mocks.riskDv01.mockImplementation(async (id: string) => ({ ...withCsa, snapshot: id }));
+    renderScreen();
+    await waitFor(() => expect(mocks.riskScenarios).toHaveBeenCalled());
+
+    expect(mocks.riskScenarios.mock.calls[0][1]).toHaveLength(8);
   });
 });
 

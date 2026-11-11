@@ -9,10 +9,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, createTrade, price } from '../../api/client';
-import type { Cashflow, PriceResponse, Trade } from '../../api/types';
+import type { Cashflow, PriceResponse, Trade, XccyCashflow } from '../../api/types';
+import { FLOW_KIND_EXTRA_LABEL, LEG_LABEL, NO_CSA_TEXT } from '../../lib/csaLabels';
 import { fmtDate, fmtMoney, fmtNumber, fmtRate } from '../../lib/format';
 import { useSnapshot } from '../../state/SnapshotContext';
-import { PricerChart, payoffText, type ChartData } from './PricerChart';
+import { PricerChart, cashflowsByLeg, payoffText, type ChartData } from './PricerChart';
 import type { FieldSpec, ProductSpec } from './types';
 import './PricerForm.css';
 
@@ -36,6 +37,12 @@ const RISK_LABELS: Record<string, { label: string; fmt: (v: number) => string }>
   rho: { label: 'Rho', fmt: (v) => fmtNumber(v, 4) },
   duration: { label: 'Duración', fmt: (v) => fmtNumber(v, 4) },
   convexity: { label: 'Convexidad', fmt: (v) => fmtNumber(v, 4) },
+  // --- corte 3 --- cross currency swap
+  par_spread: { label: 'Diferencial par', fmt: (v) => `${fmtNumber(v * 10000, 2)} pb` },
+  dv01_mxn_usd: { label: 'DV01 MXN-USD', fmt: (v) => fmtNumber(v, 2) },
+  dv01_tiie: { label: 'DV01 TIIE-F', fmt: (v) => fmtNumber(v, 2) },
+  dv01_sofr: { label: 'DV01 SOFR', fmt: (v) => fmtNumber(v, 2) },
+  // --- fin corte 3 ---
 };
 
 /** Texto inicial de un campo: miles con coma en montos, sin ceros de relleno. */
@@ -125,16 +132,79 @@ const CASHFLOW_COLUMNS: ColDef<Cashflow>[] = [
   },
 ];
 
+// --- corte 3 --- flujos del cross currency swap: pata y tipo, y VP en MXN (los montos van en la moneda de su pata)
+const XCCY_KIND_LABEL: Record<XccyCashflow['kind'], string> = {
+  coupon: 'Cupón',
+  exchange: FLOW_KIND_EXTRA_LABEL.exchange,
+};
+
+const legOf = (c: Cashflow | undefined) => (c as Partial<XccyCashflow> | undefined)?.leg;
+
+const XCCY_COLUMNS: ColDef<Cashflow>[] = [
+  { headerName: 'Fecha', field: 'date', minWidth: 88, flex: 1 },
+  {
+    headerName: 'Pata',
+    colId: 'leg',
+    valueGetter: (p) => legOf(p.data),
+    valueFormatter: (p) => (p.value ? LEG_LABEL[p.value as 'USD' | 'MXN'] : '—'),
+    minWidth: 110,
+    flex: 1.6,
+    wrapText: true,
+    autoHeight: true,
+  },
+  {
+    headerName: 'Tipo',
+    colId: 'kind',
+    valueGetter: (p) => (p.data as Partial<XccyCashflow> | undefined)?.kind,
+    valueFormatter: (p) => XCCY_KIND_LABEL[p.value as XccyCashflow['kind']] ?? '—',
+    minWidth: 84,
+    flex: 1.2,
+    wrapText: true,
+    autoHeight: true,
+  },
+  {
+    headerName: 'Monto',
+    field: 'amount',
+    minWidth: 96,
+    flex: 1.2,
+    cellClass: 'num',
+    headerClass: 'ag-right-aligned-header',
+    valueFormatter: (p) => fmtNumber(p.value, 2),
+  },
+  {
+    headerName: 'Factor desc.',
+    field: 'df',
+    minWidth: 70,
+    flex: 0.9,
+    cellClass: 'num',
+    headerClass: 'ag-right-aligned-header',
+    valueFormatter: (p) => fmtNumber(p.value, 6),
+  },
+  {
+    headerName: 'VP (MXN)',
+    colId: 'pv_mxn',
+    valueGetter: (p) => (p.data as Partial<XccyCashflow> | undefined)?.pv_mxn,
+    minWidth: 100,
+    flex: 1.2,
+    cellClass: 'num',
+    headerClass: 'ag-right-aligned-header',
+    valueFormatter: (p) => (typeof p.value === 'number' ? fmtNumber(p.value, 2) : '—'),
+  },
+];
+// --- fin corte 3 ---
+
 function CashflowGrid({ rows }: { rows: Cashflow[] }) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<GridApi<Cashflow> | null>(null);
+  const withLegs = rows.some((r) => legOf(r) != null);
+  const columns = withLegs ? XCCY_COLUMNS : CASHFLOW_COLUMNS;
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
     const grid = createGrid<Cashflow>(el, {
       theme: GRID_THEME,
-      columnDefs: CASHFLOW_COLUMNS,
+      columnDefs: columns,
       rowData: rows,
       suppressCellFocus: true,
     });
@@ -151,8 +221,46 @@ function CashflowGrid({ rows }: { rows: Cashflow[] }) {
     api.current?.setGridOption('rowData', rows);
   }, [rows]);
 
+  useEffect(() => {
+    api.current?.setGridOption('columnDefs', columns);
+  }, [columns]);
+
   return <div ref={host} className="pricer__grid" aria-label="Tabla de flujos" />;
 }
+
+// --- corte 3 --- detalle del cross currency swap: nocional MXN, tipo de cambio y curva de descuento
+function XccyDetails({ details }: { details: Record<string, unknown> }) {
+  const { notional_mxn: notionalMxn, fx_rate: fxRate, discount_curve: curve } = details;
+  return (
+    <section className="pricer__block">
+      <h2 className="pricer__caption">Detalle del swap</h2>
+      <table className="pricer__table">
+        <tbody>
+          {typeof notionalMxn === 'number' && (
+            <tr>
+              <th scope="row">Nocional MXN</th>
+              <td className="num">{fmtMoney(notionalMxn, 'MXN')}</td>
+            </tr>
+          )}
+          {typeof fxRate === 'number' && (
+            <tr>
+              <th scope="row">Tipo de cambio</th>
+              <td className="num">{fmtNumber(fxRate, 4)}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      {curve === 'TIIE-F' ? (
+        <p className="pricer__warn" role="status">
+          {NO_CSA_TEXT}
+        </p>
+      ) : (
+        typeof curve === 'string' && <p className="pricer__note">Curva de descuento: {curve}</p>
+      )}
+    </section>
+  );
+}
+// --- fin corte 3 ---
 
 function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
   const { response, params } = result;
@@ -171,6 +279,7 @@ function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
   const note = chart?.kind === 'payoff' ? payoffText(chart.product).note : undefined;
 
   const riskRows = Object.entries(risk ?? {});
+  const byLeg = chart?.kind === 'cashflows' && cashflowsByLeg(chart.cashflows) !== null; // corte 3
 
   return (
     <>
@@ -184,6 +293,8 @@ function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
           <span className={`num pricer__pv${pvMxn < 0 ? ' pricer__pv--neg' : ''}`}>{fmtMoney(pvMxn, 'MXN')}</span>
         </div>
       </div>
+
+      {spec.product === 'xccy_swap' && <XccyDetails details={response.details ?? {}} />}
 
       {riskRows.length > 0 && (
         <section className="pricer__block">
@@ -209,7 +320,11 @@ function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
       {chart && (
         <section className="pricer__block">
           <h2 className="pricer__caption">
-            {chart.kind === 'cashflows' ? 'Perfil de flujos' : payoffText(chart.product).title}
+            {chart.kind === 'cashflows'
+              ? byLeg
+                ? 'VP de los flujos por pata (MXN)'
+                : 'Perfil de flujos'
+              : payoffText(chart.product).title}
           </h2>
           <PricerChart data={chart} />
           {note && <p className="pricer__note">{note}</p>}

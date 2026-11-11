@@ -94,6 +94,15 @@
   height: 260px;
 }
 
+/* MXN-USD (corte 3) */
+.risk-csa {
+  margin-top: var(--space-3);
+}
+
+.risk-csa > h3 {
+  margin: 0 0 var(--space-1);
+}
+
 /* Escenarios */
 .risk-grid {
   width: 100%;

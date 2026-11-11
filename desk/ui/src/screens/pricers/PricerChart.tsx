@@ -1,12 +1,13 @@
 import { BarChart, LineChart } from 'echarts/charts';
-import { GridComponent, MarkLineComponent, TooltipComponent } from 'echarts/components';
+import { GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from 'echarts/components';
 import { init, use, type ECharts, type EChartsCoreOption } from 'echarts/core';
 import { SVGRenderer } from 'echarts/renderers';
 import { useEffect, useRef } from 'react';
-import type { Cashflow, ProductId } from '../../api/types';
+import type { Cashflow, ProductId, XccyCashflow } from '../../api/types';
+import { LEG_LABEL } from '../../lib/csaLabels';
 import { fmtNumber } from '../../lib/format';
 
-use([BarChart, LineChart, GridComponent, MarkLineComponent, TooltipComponent, SVGRenderer]);
+use([BarChart, LineChart, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent, SVGRenderer]);
 
 export type ChartData =
   | { kind: 'cashflows'; cashflows: Cashflow[]; currency: string }
@@ -33,6 +34,33 @@ export interface PayoffSeries {
 function token(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
+}
+
+/** VP en MXN de cada pata del cross currency swap por fecha de pago (las dos patas comparten escala). */
+export interface LegSeries {
+  leg: 'USD' | 'MXN';
+  values: (number | null)[];
+}
+
+/**
+ * Agrupa los flujos con `leg` (cross currency swap) en una serie por pata sobre las fechas de pago,
+ * con el VP en MXN que trae el backend; un cupón y un intercambio de la misma pata y fecha se suman.
+ * Sin ningún flujo con pata devuelve `null` (los demás productos).
+ */
+export function cashflowsByLeg(cashflows: Cashflow[]): { dates: string[]; legs: LegSeries[] } | null {
+  const rows = (cashflows as Partial<XccyCashflow>[]).filter((c) => c.leg === 'USD' || c.leg === 'MXN');
+  if (rows.length === 0) return null;
+  const dates = [...new Set(rows.map((c) => c.date as string))].sort();
+  const legs = (['USD', 'MXN'] as const)
+    .filter((leg) => rows.some((c) => c.leg === leg))
+    .map((leg): LegSeries => ({
+      leg,
+      values: dates.map((d) => {
+        const mine = rows.filter((c) => c.leg === leg && c.date === d);
+        return mine.length === 0 ? null : mine.reduce((acc, c) => acc + (c.pv_mxn ?? 0), 0);
+      }),
+    }));
+  return { dates, legs };
 }
 
 const PAYOFF_POINTS = 61;
@@ -217,6 +245,30 @@ function buildOption(data: ChartData): EChartsCoreOption | null {
   };
 
   if (data.kind === 'cashflows') {
+    const byLeg = cashflowsByLeg(data.cashflows);
+    if (byLeg) {
+      return {
+        ...base,
+        grid: { ...base.grid, top: 28 },
+        legend: { top: 0, right: 0, textStyle: { color: token('--text', '#e9e3d8'), fontSize: 11 } },
+        tooltip: {
+          ...base.tooltip,
+          valueFormatter: (v: unknown) => (typeof v === 'number' ? `${fmtNumber(v, 2)} MXN` : '—'),
+        },
+        xAxis: { type: 'category', data: byLeg.dates, ...axis, splitLine: { show: false } },
+        yAxis: {
+          type: 'value',
+          ...axis,
+          axisLabel: { ...axis.axisLabel, formatter: (v: number) => fmtNumber(v, 0) },
+        },
+        series: byLeg.legs.map((l) => ({
+          type: 'bar' as const,
+          name: LEG_LABEL[l.leg],
+          data: l.values,
+          itemStyle: { color: l.leg === 'USD' ? accent : token('--warn', '#d9a441') },
+        })),
+      };
+    }
     return {
       ...base,
       xAxis: { type: 'category', data: data.cashflows.map((c) => c.date), ...axis, splitLine: { show: false } },
