@@ -73,6 +73,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Cambio de colateral registrado con fecha efectiva posterior a la valuación: aún no rige. */
+.counterparties__pending {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
 .counterparties__row-actions {
   display: flex;
   justify-content: flex-end;

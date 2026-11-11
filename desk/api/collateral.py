@@ -112,8 +112,10 @@ def list_counterparties(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     """Contrapartes por nombre en su forma pública.
 
     `{"id", "name", "collateral_currency", "effective_date", "trades", "history"}`: la moneda y la
-    fecha son las del último evento (`"MXN"` y `None` si no hay), `trades` cuenta las operaciones
-    de la contraparte e `history` son sus eventos por `(effective_date, id)`.
+    fecha son las del último evento registrado (`"MXN"` y `None` si no hay), aunque su fecha efectiva
+    sea posterior a la fecha de valuación; el colateral que rige en una fecha lo da `history` (la
+    interfaz lo lee de ahí, como `currency_on`). `trades` cuenta las operaciones de la contraparte e
+    `history` son sus eventos por `(effective_date, id)`.
     """
     events = _events_by_counterparty(conn)
     counts = _trade_counts(conn)

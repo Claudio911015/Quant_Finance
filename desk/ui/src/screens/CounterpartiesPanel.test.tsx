@@ -27,8 +27,7 @@ function json(body: unknown, status = 200) {
 }
 
 /** GET /api/counterparties devuelve la lista vigente; PUT responde lo que diga `put`. */
-function mockApi(put?: (id: number, body: unknown) => Response) {
-  const list = [ALFA, BETA];
+function mockApi(put?: (id: number, body: unknown) => Response, list: Counterparty[] = [ALFA, BETA]) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === '/api/counterparties' && (init?.method ?? 'GET') === 'GET') {
@@ -67,6 +66,52 @@ describe('CounterpartiesPanel', () => {
     expect(within(beta).getByText('Colateral en USD')).toBeTruthy();
     expect(within(beta).getByText('2026-11-10')).toBeTruthy();
     expect(screen.getByText('2 contrapartes')).toBeTruthy();
+  });
+
+  it('el colateral vigente se lee a la fecha de valuación: un cambio posterior se avisa y no se toma por vigente', async () => {
+    // Alfa pasó a USD el 2026-11-11, un día después del as_of: al 2026-11-10 su PV sigue en MXN.
+    const alfaUsdLater: Counterparty = {
+      ...ALFA,
+      collateral_currency: 'USD',
+      effective_date: '2026-11-11',
+      history: [
+        { id: 7, collateral_currency: 'USD', effective_date: '2026-11-11', created_at: '2026-11-11T18:00:00+00:00' },
+      ],
+    };
+    mockApi(undefined, [alfaUsdLater, BETA]);
+    const { rerender } = render(<CounterpartiesPanel asOf="2026-11-10" />);
+    const alfa = (await screen.findByText('Banco Alfa (sintético)')).closest('tr')!;
+    expect(within(alfa).getByText('Colateral en MXN')).toBeTruthy();
+    expect(within(alfa).queryByText('Colateral en USD')).toBeNull();
+    expect(within(alfa).getByText('—')).toBeTruthy();
+    expect(within(alfa).getByText('Colateral en USD desde 2026-11-11')).toBeTruthy();
+
+    // A la fecha efectiva ya rige.
+    rerender(<CounterpartiesPanel asOf="2026-11-11" />);
+    expect(within(alfa).getByText('Colateral en USD')).toBeTruthy();
+    expect(within(alfa).getByText('2026-11-11')).toBeTruthy();
+    expect(within(alfa).queryByText(/desde 2026-11-11/)).toBeNull();
+  });
+
+  it('con varios cambios rige el último con fecha efectiva hasta el as_of, y el siguiente se avisa', async () => {
+    const gamma: Counterparty = {
+      ...ALFA,
+      id: 3,
+      name: 'Banco Gamma (sintético)',
+      collateral_currency: 'USD',
+      effective_date: '2026-12-01',
+      history: [
+        { id: 8, collateral_currency: 'USD', effective_date: '2026-10-01', created_at: '2026-10-01T18:00:00+00:00' },
+        { id: 9, collateral_currency: 'MXN', effective_date: '2026-11-05', created_at: '2026-11-05T18:00:00+00:00' },
+        { id: 10, collateral_currency: 'USD', effective_date: '2026-12-01', created_at: '2026-11-11T18:00:00+00:00' },
+      ],
+    };
+    mockApi(undefined, [gamma]);
+    render(<CounterpartiesPanel asOf="2026-11-10" />);
+    const row = (await screen.findByText('Banco Gamma (sintético)')).closest('tr')!;
+    expect(within(row).getByText('Colateral en MXN')).toBeTruthy();
+    expect(within(row).getByText('2026-11-05')).toBeTruthy();
+    expect(within(row).getByText('Colateral en USD desde 2026-12-01')).toBeTruthy();
   });
 
   it('el formulario envía la moneda y la fecha efectiva (por omisión el as_of) y recarga', async () => {

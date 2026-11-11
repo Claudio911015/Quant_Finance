@@ -9,6 +9,22 @@ const CURRENCIES: CollateralCurrency[] = ['MXN', 'USD'];
 
 type FieldName = 'collateral_currency' | 'effective_date';
 
+/**
+ * Colateral que rige en `asOf` (la fecha de valuación del snapshot activo): el último cambio con fecha
+ * efectiva <= `asOf`, o MXN sin cambios todavía. `next` es el siguiente cambio, que aún no rige. Sin
+ * `asOf` se toma el último cambio registrado. El historial llega ordenado por `(fecha efectiva, id)`.
+ */
+function inForce(cp: Counterparty, asOf: string | null) {
+  if (!asOf) return { currency: cp.collateral_currency, since: cp.effective_date, next: null };
+  const applied = cp.history.filter((h) => h.effective_date <= asOf);
+  const last = applied.length ? applied[applied.length - 1] : null;
+  return {
+    currency: last ? last.collateral_currency : ('MXN' as CollateralCurrency),
+    since: last ? last.effective_date : null,
+    next: cp.history.find((h) => h.effective_date > asOf) ?? null,
+  };
+}
+
 function describe(e: unknown): string {
   return e instanceof ApiError ? e.message : 'No se pudo conectar con el backend';
 }
@@ -186,7 +202,7 @@ export default function CounterpartiesPanel({
       </header>
       <p className="counterparties__note">
         El colateral de cada contraparte decide con qué curva se descuentan sus flujos en MXN a partir de
-        la fecha efectiva.
+        la fecha efectiva. La tabla muestra el que rige en la fecha de valuación del snapshot activo.
       </p>
       {error && (
         <div className="counterparties__banner" role="alert">
@@ -213,13 +229,21 @@ export default function CounterpartiesPanel({
             <tbody>
               {rows.map((cp) => {
                 const open = expanded.has(cp.id);
+                const force = inForce(cp, asOf);
                 return (
                   <Fragment key={cp.id}>
                     <tr>
                       <td>{cp.name}</td>
                       <td className="num">{cp.trades}</td>
-                      <td>{COLLATERAL_LABEL[cp.collateral_currency]}</td>
-                      <td className="counterparties__date">{cp.effective_date ? fmtDate(cp.effective_date) : '—'}</td>
+                      <td>
+                        {COLLATERAL_LABEL[force.currency]}
+                        {force.next && (
+                          <div className="counterparties__pending">
+                            {COLLATERAL_LABEL[force.next.collateral_currency]} desde {fmtDate(force.next.effective_date)}
+                          </div>
+                        )}
+                      </td>
+                      <td className="counterparties__date">{force.since ? fmtDate(force.since) : '—'}</td>
                       <td>
                         <div className="counterparties__row-actions">
                           <button
