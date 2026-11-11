@@ -250,8 +250,13 @@ def _at_par(
 ) -> Dict[str, Any]:
     """`params` de un `irs` sin tasa fija con `fixed_rate` = la tasa par del swap con sus fechas
     finales, en el snapshot de la petición (o `MX-DEMO`): el swap nace a la par y queda guardado
-    con esa tasa. Es el mismo instrumento que luego valúa `valuation.aged_swap`."""
+    con esa tasa. Es el mismo instrumento que luego valúa `valuation.aged_swap`.
+
+    Corte 3: la tasa par es la que corresponde al colateral que la contraparte (`body["counterparty"]`)
+    tiene en `start_date`; con colateral USD y curva `MXN-USD` el swap TIIE-F se descuenta con ella."""
     mkt = market.load_context(conn, text(body, "snapshot", required=False) or SNAPSHOT_ID)
+    history = collateral.history(conn).get(text(body, "counterparty", required=False) or "", [])
+    mkt = mkt.with_collateral(collateral.currency_on({"collateral": history}, start))
     try:
         swap = trade_valuation.aged_swap(
             {"start_date": start, "maturity_date": maturity}, {**params, "fixed_rate": 0.0}, mkt, {}, []
@@ -313,6 +318,7 @@ def valuation(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
             "trade_date": trade["trade_date"].isoformat(),
             "start_date": trade["start_date"].isoformat(),
             "maturity_date": trade["maturity_date"].isoformat(),
+            "collateral_currency": collateral.currency_on(trade, mkt.as_of),
             "status": None,
             "notional": None,
             "currency": None,

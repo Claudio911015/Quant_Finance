@@ -20,6 +20,12 @@ def _iso(as_of: date, days: int) -> str:
     return (as_of + timedelta(days=days)).isoformat()
 
 
+def _domestic(mkt) -> str:
+    """Curva MXN con la que se proyecta y descuenta el lado peso (corte 3): `mkt.mxn_discount`
+    (`MXN-USD` con colateral USD y curva en el snapshot, si no `TIIE-F`)."""
+    return getattr(mkt, "mxn_discount", "TIIE-F")
+
+
 def _fx_params(d: Dict[str, Any], with_option_type: bool) -> Dict[str, Any]:
     out = {"side": choice(d, "side", ["buy", "sell"])}
     if with_option_type:
@@ -41,9 +47,13 @@ def _fx_describe(params: Dict[str, Any], as_of: date) -> Dict[str, Any]:
 # ----------------------------------------------------------------------------- fx_forward
 
 
-def _fx_forward(params: Dict[str, Any]):
+def _fx_forward(params: Dict[str, Any], mkt):
     return qfpy.FxForward(
-        params["notional_usd"], params["strike"], params["days"], _SIDE[params["side"]]
+        params["notional_usd"],
+        params["strike"],
+        params["days"],
+        _SIDE[params["side"]],
+        domestic_curve=_domestic(mkt),
     )
 
 
@@ -52,11 +62,11 @@ def _fx_forward_validate(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _fx_forward_pv_mxn(params: Dict[str, Any], mkt) -> float:
-    return float(_fx_forward(params).npv(mkt.env))
+    return float(_fx_forward(params, mkt).npv(mkt.env))
 
 
 def _fx_forward_price(params: Dict[str, Any], mkt) -> Dict[str, Any]:
-    inst = _fx_forward(params)
+    inst = _fx_forward(params, mkt)
     pv = float(inst.npv(mkt.env))
     return {
         "product": "fx_forward",
@@ -75,13 +85,14 @@ def _fx_forward_price(params: Dict[str, Any], mkt) -> Dict[str, Any]:
 # ----------------------------------------------------------------------------- fx_option
 
 
-def _fx_option(params: Dict[str, Any]):
+def _fx_option(params: Dict[str, Any], mkt):
     return qfpy.FxOption(
         params["notional_usd"],
         params["strike"],
         params["days"],
         _OPTION_TYPE[params["option_type"]],
         _SIDE[params["side"]],
+        domestic_curve=_domestic(mkt),
     )
 
 
@@ -90,11 +101,11 @@ def _fx_option_validate(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _fx_option_pv_mxn(params: Dict[str, Any], mkt) -> float:
-    return float(_fx_option(params).npv(mkt.env))
+    return float(_fx_option(params, mkt).npv(mkt.env))
 
 
 def _fx_option_price(params: Dict[str, Any], mkt) -> Dict[str, Any]:
-    g = _fx_option(params).greeks(mkt.env)
+    g = _fx_option(params, mkt).greeks(mkt.env)
     return {
         "product": "fx_option",
         "currency": "MXN",

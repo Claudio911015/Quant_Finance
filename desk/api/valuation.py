@@ -9,13 +9,18 @@ Aquí no hay matemática financiera: se arma el instrumento envejecido y lo val�
 * `cap_floor` y `bond` (aproximación declarada, sin C++ nuevo): se acortan los periodos con
   `ceil`; el caplet o cupón en curso ya fijado se omite. Viven en `aging.py`.
 * `xccy_swap`: lo valúa `xccy.pv_mxn` (gancho del corte 3).
+
+Colateral (corte 3): `value_trade` valúa con el colateral que la contraparte tiene en el `as_of`
+(`collateral.currency_on`). Con colateral USD y la curva `MXN-USD` en el snapshot, el lado MXN se
+descuenta con `MXN-USD` (`MarketContext.mxn_discount`); sin la curva avisa `no_csa_curve` y descuenta
+con `TIIE-F`. Con colateral MXN nada cambia.
 """
 import math
 from bisect import bisect_left
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from desk.api import aging, calendars, lifecycle, xccy
+from desk.api import aging, calendars, collateral, lifecycle, xccy
 from desk.api.market import CURVES, MarketContext
 from desk.api.pricing import PRODUCTS
 from desk.api.pricing.base import Product
@@ -24,6 +29,11 @@ from desk.api.qf import qfpy
 _DAYS_PER_YEAR = 365.0
 _OPTIONS = ("fx_option", "swaption", "equity_option")
 _PV_IN_MXN = ("fx_forward", "fx_option", "equity_option", "xccy_swap")  # D6: `pv` ya viene en MXN
+_MXN_RATE_PRODUCTS = ("irs", "cap_floor", "swaption", "bond")  # sensibles al colateral si su curva es TIIE-F
+NO_CSA_CURVE_MESSAGE = (
+    "La contraparte tiene colateral en USD pero el snapshot no trae la curva MXN-USD: "
+    "se descontó con TIIE-F"
+)
 
 Fixings = Dict[str, Dict[date, float]]
 
@@ -116,6 +126,8 @@ def aged_swap(
     curve = terms["curve"]
     if terms["fixed_rate"] is None:
         raise ValueError("Falta el parámetro 'fixed_rate'")
+    # corte 3: solo TIIE-F cambia de curva de descuento con el colateral de la contraparte (`mkt.mxn_discount`)
+    discount = getattr(mkt, "mxn_discount", "TIIE-F") if curve == "TIIE-F" else curve
     start, on = trade["start_date"], mkt.as_of
     pay = qfpy.ois_payment_days((trade["maturity_date"] - start).days, CURVES[curve]["period_days"])
     elapsed = (on - start).days  # negativo si la operación aún no empieza
@@ -135,6 +147,7 @@ def aged_swap(
         factor,
         side,
         curve,
+        discount_curve_key="" if discount == curve else discount,
     )
 
 
@@ -166,6 +179,14 @@ def shortened(product: str, terms: Dict[str, Any], days: int) -> Dict[str, Any]:
     return t
 
 
+def _sensitive_to_mxn_discount(product: str, terms: Dict[str, Any]) -> bool:
+    """True si el PV de la operación depende de la curva con la que se descuenta el lado MXN:
+    `fx_forward`, `fx_option` y los productos de tasas con curva `TIIE-F` (SOFR no cambia con el colateral)."""
+    if product in ("fx_forward", "fx_option"):
+        return True
+    return product in _MXN_RATE_PRODUCTS and terms.get("curve") == "TIIE-F"
+
+
 def value_trade(
     trade: Dict[str, Any], mkt: MarketContext, fixings: Optional[Fixings] = None
 ) -> Dict[str, Any]:
@@ -187,19 +208,24 @@ def value_trade(
     pv = pv_mxn = 0.0
     if status == "viva":
         name = trade["product"]
+        # corte 3 (D5): todo el pricing usa `vm`, el contexto con el colateral que la contraparte tiene en
+        # el `as_of`; un `mkt` que ya traiga otro colateral se ignora (manda el historial de la operación)
+        vm = mkt.with_collateral(collateral.currency_on(trade, mkt.as_of))
+        if vm.csa_missing and _sensitive_to_mxn_discount(name, terms):
+            warnings.append(_warning("no_csa_curve", None, [], NO_CSA_CURVE_MESSAGE))
         if name == "irs":
-            pv = _irs_pv(trade, terms, mkt, fixings or {}, warnings)
-            pv_mxn = pv * mkt.spot if CURVES[terms["curve"]]["currency"] == "USD" else pv
+            pv = _irs_pv(trade, terms, vm, fixings or {}, warnings)
+            pv_mxn = pv * vm.spot if CURVES[terms["curve"]]["currency"] == "USD" else pv
         elif name == "xccy_swap":
-            pv_mxn = pv = float(xccy.pv_mxn(trade, terms, mkt, fixings or {}, warnings))
+            pv_mxn = pv = float(xccy.pv_mxn(trade, terms, vm, fixings or {}, warnings))
         else:
             if name == "bond":
-                pv_mxn = aging.bond_pv_mxn(trade, terms, mkt)
+                pv_mxn = aging.bond_pv_mxn(trade, terms, vm)
             elif name == "cap_floor":
-                pv_mxn = aging.cap_floor_pv_mxn(trade, terms, mkt)
+                pv_mxn = aging.cap_floor_pv_mxn(trade, terms, vm)
             else:
                 days = (trade["maturity_date"] - mkt.as_of).days
-                pv_mxn = float(product.pv_mxn(shortened(name, terms, days), mkt))
+                pv_mxn = float(product.pv_mxn(shortened(name, terms, days), vm))
             usd = name not in _PV_IN_MXN and CURVES[terms["curve"]]["currency"] == "USD"
             pv = pv_mxn / mkt.spot if usd else pv_mxn
     elif status == "vencida" and trade["product"] in _OPTIONS:

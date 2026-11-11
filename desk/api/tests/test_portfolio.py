@@ -37,7 +37,7 @@ def test_seed_creates_seven_trades_and_values_without_errors(client):
     assert all(abs(r["pv_mxn"]) > 1e3 for r in v["rows"][:3])
     assert set(v["rows"][0]) == {
         "id", "product", "counterparty", "trade_date", "start_date", "maturity_date", "status",
-        "notional", "currency", "maturity", "pv", "pv_mxn", "warnings", "error",
+        "notional", "currency", "maturity", "pv", "pv_mxn", "warnings", "error", "collateral_currency",
     }
     assert all(r["status"] == "viva" and r["warnings"] == [] for r in v["rows"])
     assert all(r["trade_date"] == r["start_date"] == "2026-11-10" for r in v["rows"])

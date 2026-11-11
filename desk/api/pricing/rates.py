@@ -28,6 +28,15 @@ def _to_mxn(pv: float, curve: str, mkt: MarketContext) -> float:
     return pv * mkt.spot if _currency(curve) == "USD" else pv
 
 
+def _discount(curve: str, mkt: MarketContext) -> str:
+    """Curva con la que se descuenta un producto de la curva `curve` (corte 3, colateral).
+
+    Solo `TIIE-F` cambia: descuenta con `mkt.mxn_discount` (`MXN-USD` si la contraparte tiene colateral
+    en USD y el snapshot trae la curva, si no `TIIE-F`). `SOFR` descuenta con SOFR con cualquier colateral.
+    """
+    return getattr(mkt, "mxn_discount", "TIIE-F") if curve == "TIIE-F" else curve
+
+
 def _dv01(pv_fn: Callable[[MarketContext], float], curve: str, mkt: MarketContext) -> float:
     """DV01 = PV(base) − PV(curva +1 pb): positivo si el PV sube cuando bajan las tasas."""
     return pv_fn(mkt) - pv_fn(mkt.shifted(curve=curve, parallel_bp=1.0))
@@ -69,16 +78,23 @@ def _irs_validate(d: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _irs_swap(p: Dict[str, Any], fixed_rate: float) -> "qfpy.OisSwap":
+def _irs_swap(p: Dict[str, Any], fixed_rate: float, discount: str = "") -> "qfpy.OisSwap":
+    """El swap del pricer; `discount` es la curva de descuento ("" = la misma de proyección)."""
     period_days = CURVES[p["curve"]]["period_days"]
     side = qfpy.SwapType.Payer if p["side"] == "payer" else qfpy.SwapType.Receiver
     return qfpy.OisSwap(
-        p["notional"], fixed_rate, p["periods"] * period_days, period_days, side, p["curve"]
+        p["notional"],
+        fixed_rate,
+        p["periods"] * period_days,
+        period_days,
+        side,
+        p["curve"],
+        discount_curve_key="" if discount == p["curve"] else discount,
     )
 
 
 def _irs_par(p: Dict[str, Any], mkt: MarketContext) -> float:
-    return _irs_swap(p, 0.0).par_rate(mkt.env)
+    return _irs_swap(p, 0.0, _discount(p["curve"], mkt)).par_rate(mkt.env)
 
 
 def _irs_fixed(p: Dict[str, Any], mkt: MarketContext) -> float:
@@ -86,13 +102,13 @@ def _irs_fixed(p: Dict[str, Any], mkt: MarketContext) -> float:
 
 
 def _irs_pv(p: Dict[str, Any], mkt: MarketContext) -> float:
-    return _irs_swap(p, _irs_fixed(p, mkt)).npv(mkt.env)
+    return _irs_swap(p, _irs_fixed(p, mkt), _discount(p["curve"], mkt)).npv(mkt.env)
 
 
 def _irs_price(p: Dict[str, Any], mkt: MarketContext) -> Dict[str, Any]:
     par = _irs_par(p, mkt)
     fixed = p["fixed_rate"] if p["fixed_rate"] is not None else par
-    swap = _irs_swap(p, fixed)  # la misma tasa fija para la base y para el choque
+    swap = _irs_swap(p, fixed, _discount(p["curve"], mkt))  # la misma tasa fija para la base y para el choque
     pv = swap.npv(mkt.env)
     bumped = swap.npv(mkt.shifted(curve=p["curve"], parallel_bp=1.0).env)
     cashflows = [
@@ -154,6 +170,9 @@ def _cap_floor_instrument(p: Dict[str, Any], mkt: MarketContext) -> "qfpy.CapFlo
 
 
 def _cap_floor_pv(p: Dict[str, Any], mkt: MarketContext) -> float:
+    discount = _discount(p["curve"], mkt)
+    if discount != p["curve"]:  # colateral USD: se proyecta con TIIE-F y se descuenta con MXN-USD
+        return _cap_floor_instrument(p, mkt).price_dual(mkt.curves[p["curve"]], mkt.curves[discount])
     return _cap_floor_instrument(p, mkt).pv(mkt.env_with_default(p["curve"]))
 
 
@@ -219,6 +238,9 @@ def _swaption_instrument(p: Dict[str, Any], mkt: MarketContext) -> "qfpy.Swaptio
 
 
 def _swaption_pv(p: Dict[str, Any], mkt: MarketContext) -> float:
+    discount = _discount(p["curve"], mkt)
+    if discount != p["curve"]:  # colateral USD: se proyecta con TIIE-F y se descuenta con MXN-USD
+        return _swaption_instrument(p, mkt).price_dual(mkt.curves[p["curve"]], mkt.curves[discount])
     return _swaption_instrument(p, mkt).pv(mkt.env_with_default(p["curve"]))
 
 
@@ -269,13 +291,14 @@ def _bond_instrument(p: Dict[str, Any]) -> "qfpy.Bond":
 
 
 def _bond_pv(p: Dict[str, Any], mkt: MarketContext) -> float:
-    return _bond_instrument(p).pv(mkt.env_with_default(p["curve"]))
+    return _bond_instrument(p).pv(mkt.env_with_default(_discount(p["curve"], mkt)))
 
 
 def _bond_price(p: Dict[str, Any], mkt: MarketContext) -> Dict[str, Any]:
     bond = _bond_instrument(p)
-    curve = mkt.curves[p["curve"]]
-    pv = bond.pv(mkt.env_with_default(p["curve"]))
+    discount = _discount(p["curve"], mkt)
+    curve = mkt.curves[discount]
+    pv = bond.pv(mkt.env_with_default(discount))
     cashflows = []
     for t, amount in bond.cash_flow_schedule():
         days = int(round(t * _DAYS_PER_YEAR))
