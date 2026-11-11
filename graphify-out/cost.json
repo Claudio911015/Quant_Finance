@@ -17,6 +17,14 @@
       "input_tokens": 0,
       "output_tokens": 0,
       "files": 143
+    },
+    {
+      "date": "2026-11-11T11:46:53.728932+00:00",
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "subagent_total_tokens": 361380,
+      "files": 116,
+      "note": "update 2026-11-11: 113 código (AST) + 3 docs qf-desk (3 haiku)"
     }
   ],
   "total_input_tokens": 0,
