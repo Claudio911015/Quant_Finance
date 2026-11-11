@@ -163,6 +163,15 @@ describe('TradeScreen', () => {
     expect(warnings.textContent).toContain('2026-11-03');
   });
 
+  it('el encabezado de Fecha del calendario se alinea como sus celdas (a la derecha)', async () => {
+    setup();
+    renderScreen();
+    const table = await screen.findByRole('table');
+    expect(within(table).getByRole('columnheader', { name: 'Fecha' }).classList.contains('num')).toBe(true);
+    const firstDate = within(table).getAllByRole('row')[1].querySelector('td');
+    expect(firstDate?.classList.contains('num')).toBe(true);
+  });
+
   it('Terminar anticipadamente llama postEvent con la fecha y el importe y recarga', async () => {
     setup();
     renderScreen();

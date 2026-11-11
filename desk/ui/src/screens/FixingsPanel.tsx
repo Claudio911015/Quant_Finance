@@ -175,7 +175,9 @@ export default function FixingsPanel() {
           <thead>
             <tr>
               <th scope="col">Índice</th>
-              <th scope="col">Fecha</th>
+              <th scope="col" className="num">
+                Fecha
+              </th>
               <th scope="col" className="num">
                 Valor
               </th>

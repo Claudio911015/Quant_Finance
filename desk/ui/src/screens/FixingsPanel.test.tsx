@@ -39,6 +39,14 @@ describe('FixingsPanel', () => {
     expect(mocks.listFixings).toHaveBeenCalledWith({ index: undefined, from: undefined, to: undefined });
   });
 
+  it('el encabezado de Fecha se alinea como sus celdas (a la derecha, igual que Valor)', async () => {
+    render(<FixingsPanel />);
+    const table = await screen.findByRole('table', { name: 'Fijaciones' });
+    await within(table).findByText('7.0100 %');
+    expect(within(table).getByRole('columnheader', { name: 'Fecha' }).classList.contains('num')).toBe(true);
+    expect(within(table).getAllByText('2026-11-10', { selector: 'td' })[0].classList.contains('num')).toBe(true);
+  });
+
   it('el filtro por índice y fechas llama a listFixings', async () => {
     render(<FixingsPanel />);
     await screen.findByText('7.0100 %');

@@ -368,7 +368,7 @@ export default function TradeScreen() {
             <table className="trade__flows">
               <thead>
                 <tr>
-                  <th>Fecha</th>
+                  <th className="num">Fecha</th>
                   <th>Tipo</th>
                   <th>Estado</th>
                   <th className="num">Monto</th>
