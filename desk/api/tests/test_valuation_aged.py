@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from desk.api import market, valuation
+from desk.api import calendars, market, valuation
 from desk.api.app import create_app
 from desk.api.db import connect
 from desk.api.qf import qfpy
@@ -60,9 +60,10 @@ def _csv(client, index, values):
     assert r.status_code == 200, r.get_json()
 
 
-def _business(n):
-    """Fechas ISO de lunes a viernes de los `n` días que empiezan en AS_OF (martes)."""
-    return [_iso(i) for i in range(n) if (AS_OF + timedelta(days=i)).weekday() < 5]
+def _business(n, index="TIIE-F"):
+    """Fechas ISO hábiles del calendario de `index` (sin fines de semana ni feriados) de los `n` días desde AS_OF."""
+    cal = calendars.INDEX_CALENDAR[index]
+    return [_iso(i) for i in range(n) if calendars.is_business_day(cal, AS_OF + timedelta(days=i))]
 
 
 def _csv_business(client, index, values, n):
@@ -308,7 +309,7 @@ def test_r7_missing_fixings_warn_and_loaded_fixings_clear_the_warning(client):
     w = row["warnings"][0]
     assert w["index"] == "TIIE-F" and w["dates"] == _business(10) and w["message"]
     sofr = _rows(client, "D10")[3]  # irs SOFR: aviso del otro índice, valuado en MXN
-    assert sofr["warnings"][0]["index"] == "SOFR" and sofr["warnings"][0]["dates"] == _business(10)
+    assert sofr["warnings"][0]["index"] == "SOFR" and sofr["warnings"][0]["dates"] == _business(10, "SOFR")
     assert sofr["pv_mxn"] == pytest.approx(sofr["pv"] * 18.60, rel=1e-12)
 
     _csv(client, "TIIE-F", [0.0701 + 0.0001 * i for i in range(10)])

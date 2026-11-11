@@ -229,9 +229,9 @@ def test_new_trades_of_a_counterparty_inherit_its_history(app, client):
 
 # ------------------------------------------------------------------------------ feriados
 
-def test_holidays_route_is_501_until_the_calendars_exist(client):
+def test_holidays_route_answers_200_now_that_the_calendars_exist(client):
     r = client.get("/api/calendars/holidays?from=2026-01-01&to=2026-12-31")
-    assert r.status_code == 501
+    assert r.status_code == 200
 
 
 @pytest.mark.parametrize("query, field", [

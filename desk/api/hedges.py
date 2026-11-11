@@ -19,7 +19,7 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 from desk.api import fixings as fixing_store
-from desk.api import lifecycle, market, portfolio
+from desk.api import calendars, lifecycle, market, portfolio
 from desk.api import valuation as trade_valuation
 from desk.api.db import now_iso
 from desk.api.errors import ApiError
@@ -468,6 +468,19 @@ def _designation_warnings(
                 "code": "forecast_date_weekend",
                 "message": "La fecha del flujo pronosticado (%s) es sábado o domingo: se liquidará con el spot "
                 "del snapshot, sin FIX publicado" % rel["item_terms"]["date"].isoformat(),
+            }
+        )
+    if (
+        rel["item_kind"] == "forecast_fx"
+        and rel["item_terms"]["date"].weekday() < 5  # el fin de semana ya lo avisa `forecast_date_weekend`
+        and calendars.is_holiday("MX", rel["item_terms"]["date"])
+    ):
+        day = rel["item_terms"]["date"]
+        out.append(
+            {
+                "code": "forecast_date_holiday",
+                "message": "La fecha del flujo pronosticado (%s) es inhábil en México (%s): se liquidará con el "
+                "último FIX publicado" % (day.isoformat(), calendars.holidays_between("MX", day, day)[0]["name"]),
             }
         )
     late = (date.fromisoformat(documented_at[:10]) - rel["designation_date"]).days

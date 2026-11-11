@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from desk.api import fixings as fixing_store
-from desk.api import aging, lifecycle, market, portfolio, valuation, xccy
+from desk.api import aging, calendars, lifecycle, market, portfolio, valuation, xccy
 from desk.api.market import CURVES, MarketContext
 from desk.api.qf import qfpy
 
@@ -77,12 +77,27 @@ def _fx_fallback(days: List[date]) -> Dict[str, Any]:
 
 
 def _fix(fixings: Fixings, day: date, fallback_spot: float, fallback_days: List[date]) -> float:
-    """FIX de `day`; si falta, el spot de respaldo y la fecha queda anotada en `fallback_days`."""
-    value = fixings.get("USDMXN", {}).get(day)
-    if value is None:
-        fallback_days.append(day)
-        return fallback_spot
-    return value
+    """FIX de `day`; si falta, el spot de respaldo y la fecha queda anotada en `fallback_days`.
+
+    En un día inhábil de México (fin de semana o feriado) no se publica FIX: se usa el último
+    publicado, sin aviso, siempre que entre ese FIX y `day` no haya un día hábil sin FIX (un hueco
+    real de datos sigue avisando `fx_fallback`, no se arrastra un FIX viejo en silencio). En un día
+    hábil sin FIX, o sin ningún FIX anterior, se usa el spot de respaldo como siempre.
+    """
+    published = fixings.get("USDMXN", {})
+    value = published.get(day)
+    if value is not None:
+        return value
+    if not calendars.is_business_day("MX", day):
+        last = max((d for d in published if d < day), default=None)
+        if last is not None:
+            probe = day - _DAY
+            while probe > last and not calendars.is_business_day("MX", probe):
+                probe -= _DAY
+            if probe == last:
+                return published[last]
+    fallback_days.append(day)
+    return fallback_spot
 
 
 def _irs_coupons(

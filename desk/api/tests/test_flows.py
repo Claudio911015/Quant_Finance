@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 
+from desk.api import calendars
 from desk.api.tests.conftest import insert_raw_trade
 from desk.api.tests.test_valuation_aged import (
     AS_OF, FWD, IRS, _book, _business, _csv, _csv_business, _event, _iso, _roll, _rows,
@@ -74,10 +75,13 @@ def test_settled_coupon_with_business_day_fixings_only_has_no_warning_and_weeken
     settled, _ = _split(body)
     assert body["warnings"] == [] and len(settled) == 1
     factor = 1.0
-    for i in range(28):  # el viernes devenga también sábado y domingo (3 días)
+    for i in range(28):  # la última tasa hábil devenga también los inhábiles que le siguen (fin de semana, feriado)
         day = AS_OF + timedelta(days=i)
-        if day.weekday() < 5:
-            factor *= 1.0 + rate(day.isoformat()) * (3 if day.weekday() == 4 else 1) / 360.0
+        if calendars.is_business_day("MX", day):
+            days = 1
+            while i + days < 28 and not calendars.is_business_day("MX", day + timedelta(days=days)):
+                days += 1
+            factor *= 1.0 + rate(day.isoformat()) * days / 360.0
     expected = 500e6 * (factor - 1.0) - 500e6 * 0.0680 * 28 / 360.0
     assert settled[0]["amount"] == pytest.approx(expected, rel=1e-12)
 

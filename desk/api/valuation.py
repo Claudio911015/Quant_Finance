@@ -15,7 +15,7 @@ from bisect import bisect_left
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from desk.api import aging, lifecycle, xccy
+from desk.api import aging, calendars, lifecycle, xccy
 from desk.api.market import CURVES, MarketContext
 from desk.api.pricing import PRODUCTS
 from desk.api.pricing.base import Product
@@ -53,11 +53,12 @@ def accrued_factor(
     """Factor acumulado de las fijaciones diarias de `[first_day, on)` (1 si el rango es vacío).
 
     Las tasas a un día solo se publican en días hábiles: la del viernes devenga también sábado y
-    domingo (3 días), así que un sábado o domingo sin fijación no se espera ni se avisa, y se
-    agrupa con el día anterior. Una fijación cargada en sábado o domingo se usa tal cual, como un
-    día más. Un día de lunes a viernes sin fijación usa la última publicada anterior del índice
-    y, si no hay, la tasa a un día de la curva del snapshot, y todos esos días se reportan en un
-    aviso `missing_fixing` (los feriados todavía avisan: no hay calendario de inhábiles).
+    domingo (3 días), así que un día inhábil sin fijación no se espera ni se avisa, y se agrupa
+    con el día anterior. Inhábil = sábado, domingo o feriado del calendario del índice
+    (`calendars.INDEX_CALENDAR`: México para TIIE-F, EE. UU. para SOFR). Una fijación cargada en un
+    día inhábil se usa tal cual, como un día más. Un día hábil sin fijación usa la última publicada
+    anterior del índice y, si no hay, la tasa a un día de la curva del snapshot, y todos esos días
+    se reportan en un aviso `missing_fixing`.
     """
     published = fixings.get(index, {})
     ordered = sorted(published)
@@ -67,16 +68,21 @@ def accrued_factor(
         j = bisect_left(ordered, d)  # ordered[:j] son las fijaciones anteriores a `d`
         return published[ordered[j - 1]] if j else overnight
 
+    calendar = calendars.INDEX_CALENDAR.get(index)
+
+    def business(d: date) -> bool:  # sin calendario conocido solo se distingue el fin de semana
+        return d.weekday() < 5 if calendar is None else calendars.is_business_day(calendar, d)
+
     missing = []  # type: List[date]
     entries = []  # type: List[List[float]]  # [tasa, días que devenga]
     for i in range((on - first_day).days):
         d = first_day + timedelta(days=i)
         if d in published:
             entries.append([published[d], 1])
-        elif d.weekday() >= 5 and entries:  # sábado o domingo sin publicar: sigue la tasa anterior
+        elif not business(d) and entries:  # inhábil sin publicar: sigue la tasa anterior
             entries[-1][1] += 1
         else:
-            if d.weekday() < 5:
+            if business(d):
                 missing.append(d)
             entries.append([carried(d), 1])
     if missing:
