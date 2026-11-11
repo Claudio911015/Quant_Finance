@@ -1,0 +1,46 @@
+/* Estilos compartidos de la ficha de operación (TradeOpsPanel) e importación FpML (FpmlImport). */
+.ops-trade {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+
+.ops-trade__ref {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ops-trade__edit {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ops-trade__error {
+  color: var(--color-negative, #b42318);
+  font-size: 0.9em;
+  width: 100%;
+}
+
+.ops-fpml {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  max-width: 100%;
+}
+
+.ops-fpml textarea {
+  width: 100%;
+  min-height: 8rem;
+  font-family: var(--font-mono, monospace);
+}
+
+.ops-fpml__warnings {
+  margin: 0;
+  padding-left: 1.2em;
+}
