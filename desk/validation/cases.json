@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-11-11T17:23:14+00:00",
+  "generated_at": "2026-11-11T17:39:51+00:00",
   "snapshot": {
     "id": "MX-DEMO",
     "as_of": "2026-11-10",
     "spot": 18.6
   },
-  "desk_commit": "91b622a334081d70629b3a830a1711b7099fc63e",
-  "desk_dirty": true,
+  "desk_commit": "02d9dd3f228a71e9222b1510c962ab9f0992ffa7",
+  "desk_dirty": false,
   "hw": {
     "TIIE-F": {
       "a": 0.05,
