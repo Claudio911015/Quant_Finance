@@ -7,25 +7,31 @@ import {
   getHedge,
   hedgeEffectiveness,
   hedgeReportCsvUrl,
+  releaseHedgeReserve,
 } from '../api/client';
 import type {
   CriticalTerm,
+  DedesignationCause,
   EffectivenessResponse,
   HedgeDetail,
   HedgePeriod,
   JournalEntry,
+  ReleaseCause,
+  ReserveReleaseData,
 } from '../api/types';
 import { AccountingNotice } from '../components/AccountingNotice';
 import {
+  DEDESIGNATION_CAUSE_LABEL,
   DOC_FIELD_LABEL,
   HEDGE_STATUS_LABEL,
   HEDGE_TYPE_LABEL,
   ITEM_KIND_LABEL,
+  RELEASE_CAUSE_LABEL,
   SIDE_LABEL,
   TERM_RESULT_LABEL,
   localizeMessage,
 } from '../lib/hedgeLabels';
-import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
+import { fmtDate, fmtMoney, fmtNumber, parseNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import { PRODUCT_SPECS } from './pricers/registry';
 import './HedgeScreen.css';
@@ -61,23 +67,80 @@ interface SnapshotOption {
   as_of: string | null;
 }
 
-interface CloseFormProps {
+/** Saldo mínimo de reserva (media centésima) que se considera distinto de cero. */
+const HALF_CENT = 0.005;
+
+type FormName = 'close' | 'dedesignate' | 'release';
+
+/** Lo que comparten las acciones de la relación: quién está en uso, el snapshot activo y cómo recargar. */
+interface ActionProps {
   hedgeId: number;
   options: SnapshotOption[];
   activeId: string;
+  /** Este es el formulario que el usuario está usando; los demás borran sus errores. */
+  active: boolean;
+  onUse(): void;
   onDone(): Promise<void>;
   onBanner(message: string | null): void;
 }
 
+interface FieldErrorProps {
+  message?: string;
+}
+
+function FieldError({ message }: FieldErrorProps) {
+  if (!message) return null;
+  return (
+    <div className="hedge__error" role="alert">
+      {message}
+    </div>
+  );
+}
+
+interface SnapshotSelectProps {
+  id: string;
+  label: string;
+  options: SnapshotOption[];
+  value: string;
+  invalid: boolean;
+  onChange(value: string): void;
+}
+
+function SnapshotSelect({ id, label, options, value, invalid, onChange }: SnapshotSelectProps) {
+  return (
+    <div className="hedge__field">
+      <label htmlFor={id}>{label}</label>
+      <select
+        id={id}
+        className="hedge__input"
+        value={value}
+        aria-invalid={invalid ? true : undefined}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.as_of ? `${o.label} · ${o.as_of}` : o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /** Cierra un periodo con el snapshot elegido (por omisión el activo). */
-function CloseForm(p: CloseFormProps) {
+function CloseForm(p: ActionProps) {
   const [choice, setChoice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const value = choice ?? p.activeId;
 
+  useEffect(() => {
+    if (!p.active) setError(null);
+  }, [p.active]);
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    p.onUse();
     setError(null);
     p.onBanner(null);
     setBusy(true);
@@ -93,29 +156,23 @@ function CloseForm(p: CloseFormProps) {
   };
 
   return (
-    <form className="hedge__form" onSubmit={submit} noValidate aria-label="Cerrar periodo">
+    <form
+      className="hedge__form"
+      onSubmit={submit}
+      onFocus={p.onUse}
+      noValidate
+      aria-label="Cerrar periodo"
+    >
       <h3>Cerrar periodo</h3>
-      <div className="hedge__field">
-        <label htmlFor="hedge-close-snapshot">Snapshot del cierre</label>
-        <select
-          id="hedge-close-snapshot"
-          className="hedge__input"
-          value={value}
-          aria-invalid={error ? true : undefined}
-          onChange={(e) => setChoice(e.target.value)}
-        >
-          {p.options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.as_of ? `${o.label} · ${o.as_of}` : o.label}
-            </option>
-          ))}
-        </select>
-        {error && (
-          <div className="hedge__error" role="alert">
-            {error}
-          </div>
-        )}
-      </div>
+      <SnapshotSelect
+        id="hedge-close-snapshot"
+        label="Snapshot del cierre"
+        options={p.options}
+        value={value}
+        invalid={error != null}
+        onChange={setChoice}
+      />
+      <FieldError message={error ?? undefined} />
       <button type="submit" className="hedge__btn" disabled={busy}>
         Cerrar periodo
       </button>
@@ -123,26 +180,36 @@ function CloseForm(p: CloseFormProps) {
   );
 }
 
-interface DedesignateFormProps {
-  hedgeId: number;
-  defaultDate: string;
-  onDone(): Promise<void>;
-  onBanner(message: string | null): void;
+interface DedesignateFormProps extends ActionProps {
+  /** Snapshot con el que siempre se puede desdesignar: el del último cierre o, sin cierres, el de la designación. */
+  fallback: { id: string; kind: 'del último cierre' | 'de la designación' };
 }
 
-/** Desdesignación: fecha y motivo; los errores del backend van bajo su campo. */
+type DedesignateField = 'snapshot' | 'cause' | 'reason';
+
+/**
+ * Desdesignación: snapshot (su fecha es la de la desdesignación; si es posterior al último cierre el
+ * backend mide hasta ella), causa (IFRS 9 6.5.6 no admite desdesignar sin causa) y motivo.
+ */
 function DedesignateForm(p: DedesignateFormProps) {
-  const [date, setDate] = useState(p.defaultDate);
+  const [choice, setChoice] = useState<string | null>(null);
+  const [cause, setCause] = useState<DedesignationCause | ''>('');
   const [reason, setReason] = useState('');
-  const [errors, setErrors] = useState<Partial<Record<'date' | 'reason', string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<DedesignateField, string>>>({});
   const [busy, setBusy] = useState(false);
+  const snapshot = choice ?? p.activeId;
+
+  useEffect(() => {
+    if (!p.active) setErrors({});
+  }, [p.active]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    p.onUse();
     const local: typeof errors = {};
-    if (!date) local.date = 'Indica la fecha';
+    if (cause === '') local.cause = 'Indica la causa';
     if (reason.trim() === '') local.reason = 'Indica el motivo';
-    if (Object.keys(local).length > 0) {
+    if (cause === '' || Object.keys(local).length > 0) {
       setErrors(local);
       return;
     }
@@ -150,10 +217,10 @@ function DedesignateForm(p: DedesignateFormProps) {
     p.onBanner(null);
     setBusy(true);
     try {
-      await dedesignateHedge(p.hedgeId, { date, reason: reason.trim() });
+      await dedesignateHedge(p.hedgeId, { snapshot, reason: reason.trim(), cause });
       await p.onDone();
     } catch (err) {
-      if (err instanceof ApiError && (err.field === 'date' || err.field === 'reason')) {
+      if (err instanceof ApiError && (err.field === 'snapshot' || err.field === 'cause' || err.field === 'reason')) {
         setErrors({ [err.field]: localizeMessage(err.message) });
       } else {
         p.onBanner(describe(err));
@@ -164,23 +231,45 @@ function DedesignateForm(p: DedesignateFormProps) {
   };
 
   return (
-    <form className="hedge__form" onSubmit={submit} noValidate aria-label="Desdesignar">
+    <form
+      className="hedge__form"
+      onSubmit={submit}
+      onFocus={p.onUse}
+      noValidate
+      aria-label="Desdesignar"
+    >
       <h3>Desdesignar</h3>
+      <SnapshotSelect
+        id="hedge-dedesignate-snapshot"
+        label="Snapshot de la desdesignación"
+        options={p.options}
+        value={snapshot}
+        invalid={errors.snapshot != null}
+        onChange={setChoice}
+      />
+      <FieldError message={errors.snapshot} />
+      {errors.snapshot && snapshot !== p.fallback.id && (
+        <button type="button" className="hedge__link-btn" onClick={() => setChoice(p.fallback.id)}>
+          {`Usar el snapshot ${p.fallback.kind} (${p.fallback.id})`}
+        </button>
+      )}
       <div className="hedge__field">
-        <label htmlFor="hedge-dedesignate-date">Fecha</label>
-        <input
-          id="hedge-dedesignate-date"
-          type="date"
+        <label htmlFor="hedge-dedesignate-cause">Causa</label>
+        <select
+          id="hedge-dedesignate-cause"
           className="hedge__input"
-          value={date}
-          aria-invalid={errors.date ? true : undefined}
-          onChange={(e) => setDate(e.target.value)}
-        />
-        {errors.date && (
-          <div className="hedge__error" role="alert">
-            {errors.date}
-          </div>
-        )}
+          value={cause}
+          aria-invalid={errors.cause ? true : undefined}
+          onChange={(e) => setCause(e.target.value as DedesignationCause | '')}
+        >
+          <option value="">Elige la causa</option>
+          {(Object.keys(DEDESIGNATION_CAUSE_LABEL) as DedesignationCause[]).map((c) => (
+            <option key={c} value={c}>
+              {DEDESIGNATION_CAUSE_LABEL[c]}
+            </option>
+          ))}
+        </select>
+        <FieldError message={errors.cause} />
       </div>
       <div className="hedge__field">
         <label htmlFor="hedge-dedesignate-reason">Motivo</label>
@@ -193,14 +282,122 @@ function DedesignateForm(p: DedesignateFormProps) {
           aria-invalid={errors.reason ? true : undefined}
           onChange={(e) => setReason(e.target.value)}
         />
-        {errors.reason && (
-          <div className="hedge__error" role="alert">
-            {errors.reason}
-          </div>
-        )}
+        <FieldError message={errors.reason} />
       </div>
       <button type="submit" className="hedge__btn" disabled={busy}>
         Desdesignar
+      </button>
+    </form>
+  );
+}
+
+interface ReleaseFormProps extends ActionProps {
+  /** Reserva vigente (con signo): lo que queda por liberar. */
+  balance: number;
+}
+
+type ReleaseField = 'snapshot' | 'cause' | 'amount';
+
+/**
+ * Liberación de la reserva congelada de una relación desdesignada. El monto se teclea sin signo (vacío =
+ * todo el saldo); al enviarlo lleva el signo del saldo, que es lo que el backend exige.
+ */
+function ReleaseForm(p: ReleaseFormProps) {
+  const [choice, setChoice] = useState<string | null>(null);
+  const [cause, setCause] = useState<ReleaseCause | ''>('');
+  const [amount, setAmount] = useState('');
+  const [errors, setErrors] = useState<Partial<Record<ReleaseField, string>>>({});
+  const [busy, setBusy] = useState(false);
+  const snapshot = choice ?? p.activeId;
+
+  useEffect(() => {
+    if (!p.active) setErrors({});
+  }, [p.active]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    p.onUse();
+    const local: typeof errors = {};
+    if (cause === '') local.cause = 'Indica la causa';
+    const typed = amount.trim() === '' ? null : parseNumber(amount);
+    if (amount.trim() !== '' && typed == null) local.amount = 'Indica un número';
+    if (cause === '' || Object.keys(local).length > 0) {
+      setErrors(local);
+      return;
+    }
+    setErrors({});
+    p.onBanner(null);
+    setBusy(true);
+    try {
+      const body: { snapshot: string; cause: ReleaseCause; amount?: number } = { snapshot, cause };
+      // El backend pide el monto con el signo del saldo: se teclea la magnitud y aquí se le da ese signo.
+      if (typed != null) body.amount = Math.sign(p.balance) * Math.abs(typed);
+      await releaseHedgeReserve(p.hedgeId, body);
+      await p.onDone();
+    } catch (err) {
+      if (err instanceof ApiError && (err.field === 'snapshot' || err.field === 'cause' || err.field === 'amount')) {
+        setErrors({ [err.field]: localizeMessage(err.message) });
+      } else {
+        p.onBanner(describe(err));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form
+      className="hedge__form"
+      onSubmit={submit}
+      onFocus={p.onUse}
+      noValidate
+      aria-label="Liberar reserva"
+    >
+      <h3>Liberar reserva</h3>
+      <SnapshotSelect
+        id="hedge-release-snapshot"
+        label="Snapshot de la liberación"
+        options={p.options}
+        value={snapshot}
+        invalid={errors.snapshot != null}
+        onChange={setChoice}
+      />
+      <FieldError message={errors.snapshot} />
+      <div className="hedge__field">
+        <label htmlFor="hedge-release-cause">Causa de la liberación</label>
+        <select
+          id="hedge-release-cause"
+          className="hedge__input"
+          value={cause}
+          aria-invalid={errors.cause ? true : undefined}
+          onChange={(e) => setCause(e.target.value as ReleaseCause | '')}
+        >
+          <option value="">Elige la causa</option>
+          {(Object.keys(RELEASE_CAUSE_LABEL) as ReleaseCause[]).map((c) => (
+            <option key={c} value={c}>
+              {RELEASE_CAUSE_LABEL[c]}
+            </option>
+          ))}
+        </select>
+        <FieldError message={errors.cause} />
+      </div>
+      <div className="hedge__field">
+        <label htmlFor="hedge-release-amount">Monto a liberar</label>
+        <input
+          id="hedge-release-amount"
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          className="hedge__input num"
+          value={amount}
+          aria-invalid={errors.amount ? true : undefined}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <span className="hedge__hint">{`Vacío libera todo el saldo (${money(p.balance)})`}</span>
+        <FieldError message={errors.amount} />
+      </div>
+      <button type="submit" className="hedge__btn" disabled={busy}>
+        Liberar reserva
       </button>
     </form>
   );
@@ -262,11 +459,12 @@ function PeriodsTable({ hedge }: { hedge: HedgeDetail }) {
   );
 }
 
-function JournalTable({ period }: { period: HedgePeriod }) {
-  const entries: JournalEntry[] = period.entries;
+/** Asientos con el total de cargos y abonos; sirve para un cierre de periodo y para una liberación de reserva. */
+function EntriesTable(p: { entries: JournalEntry[]; label: string; totalLabel: string }) {
+  const { entries } = p;
   return (
     <div className="hedge__table-wrap">
-      <table className="hedge__table" aria-label={`Asientos ${period.as_of}`}>
+      <table className="hedge__table" aria-label={p.label}>
         <thead>
           <tr>
             <th>Cuenta</th>
@@ -287,13 +485,37 @@ function JournalTable({ period }: { period: HedgePeriod }) {
         </tbody>
         <tfoot>
           <tr>
-            <th>Total del periodo</th>
+            <th>{p.totalLabel}</th>
             <td className="num">{money(sum(entries.map((en) => en.debit)))}</td>
             <td className="num">{money(sum(entries.map((en) => en.credit)))}</td>
             <td />
           </tr>
         </tfoot>
       </table>
+    </div>
+  );
+}
+
+function JournalTable({ period }: { period: HedgePeriod }) {
+  return (
+    <EntriesTable entries={period.entries} label={`Asientos ${period.as_of}`} totalLabel="Total del periodo" />
+  );
+}
+
+/** Liberación de la reserva congelada: la causa, lo liberado, lo que queda y su asiento. */
+function ReleaseJournal({ event }: { event: HedgeDetail['events'][number] }) {
+  const d = event.data as unknown as ReserveReleaseData;
+  return (
+    <div className="hedge__journal">
+      <h3>{`Liberación de reserva al ${fmtDate(event.event_date)}`}</h3>
+      <p className="hedge__meta">
+        {`${RELEASE_CAUSE_LABEL[d.cause]} · Monto ${money(d.amount)} · Reserva restante ${money(d.reserve_after)}`}
+      </p>
+      <EntriesTable
+        entries={d.entries}
+        label={`Asientos de liberación ${event.event_date}`}
+        totalLabel="Total de la liberación"
+      />
     </div>
   );
 }
@@ -373,6 +595,8 @@ export default function HedgeScreen() {
   const [effError, setEffError] = useState<string | null>(null);
   const [effLoading, setEffLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Formulario en uso: los errores de los demás se borran para que no queden mensajes de otra acción.
+  const [activeForm, setActiveForm] = useState<FormName | null>(null);
   // Cada carga toma un número; solo la última escribe estado (una respuesta lenta de un
   // snapshot anterior no debe pisar la del que el usuario eligió después).
   const latestHedge = useRef(0);
@@ -425,6 +649,12 @@ export default function HedgeScreen() {
     await Promise.all([loadHedge(), loadEff()]);
   }, [loadHedge, loadEff]);
 
+  const use = (name: FormName) => () => {
+    if (name === activeForm) return;
+    setActiveForm(name);
+    setActionError(null);
+  };
+
   if (id == null) {
     return (
       <section className="hedge">
@@ -444,6 +674,9 @@ export default function HedgeScreen() {
     : [{ id: snapshotId, label: snapshotId, as_of: asOf }, ...snapshots];
   const spec = hedge ? PRODUCT_SPECS[hedge.product] : null;
   const frozen = hedge?.status === 'desdesignada';
+  const canRelease = frozen && hedge != null && Math.abs(hedge.oci_balance) >= HALF_CENT;
+  const lastPeriod = hedge && hedge.periods.length > 0 ? hedge.periods[hedge.periods.length - 1] : null;
+  const releases = hedge ? hedge.events.filter((e) => e.type === 'reserve_release') : [];
 
   return (
     <section className="hedge">
@@ -510,9 +743,19 @@ export default function HedgeScreen() {
                   <dd className="num">{money(hedge.dedesignation.frozen_oci)}</dd>
                 </div>
                 <div>
+                  <dt>Reserva vigente</dt>
+                  <dd className="num">{money(hedge.oci_balance)}</dd>
+                </div>
+                <div>
                   <dt>Desdesignada el</dt>
                   <dd className="num">{fmtDate(hedge.dedesignation.date)}</dd>
                 </div>
+                {hedge.dedesignation.cause && (
+                  <div>
+                    <dt>Causa</dt>
+                    <dd>{DEDESIGNATION_CAUSE_LABEL[hedge.dedesignation.cause]}</dd>
+                  </div>
+                )}
                 <div>
                   <dt>Motivo</dt>
                   <dd>{hedge.dedesignation.reason}</dd>
@@ -526,7 +769,18 @@ export default function HedgeScreen() {
             )}
           </dl>
 
-          {hedge.status === 'activa' && asOf != null && (
+          {hedge.warnings.length > 0 && (
+            <section className="hedge__block hedge__warnings" aria-label="Avisos de designación">
+              <h2>Avisos de designación</h2>
+              <ul>
+                {hedge.warnings.map((w) => (
+                  <li key={w.code}>{w.message}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {(hedge.status === 'activa' || canRelease) && asOf != null && (
             <section className="hedge__block" aria-label="Acciones">
               <h2>Acciones</h2>
               {actionError && (
@@ -535,20 +789,44 @@ export default function HedgeScreen() {
                 </div>
               )}
               <div className="hedge__actions">
-                <CloseForm
-                  hedgeId={hedge.id}
-                  options={options}
-                  activeId={snapshotId}
-                  onDone={reload}
-                  onBanner={setActionError}
-                />
-                <DedesignateForm
-                  key={`dedesignate-${asOf}`}
-                  hedgeId={hedge.id}
-                  defaultDate={asOf}
-                  onDone={reload}
-                  onBanner={setActionError}
-                />
+                {hedge.status === 'activa' ? (
+                  <>
+                    <CloseForm
+                      hedgeId={hedge.id}
+                      options={options}
+                      activeId={snapshotId}
+                      active={activeForm === 'close'}
+                      onUse={use('close')}
+                      onDone={reload}
+                      onBanner={setActionError}
+                    />
+                    <DedesignateForm
+                      hedgeId={hedge.id}
+                      options={options}
+                      activeId={snapshotId}
+                      active={activeForm === 'dedesignate'}
+                      onUse={use('dedesignate')}
+                      onDone={reload}
+                      onBanner={setActionError}
+                      fallback={
+                        lastPeriod
+                          ? { id: lastPeriod.snapshot, kind: 'del último cierre' }
+                          : { id: hedge.designation_snapshot, kind: 'de la designación' }
+                      }
+                    />
+                  </>
+                ) : (
+                  <ReleaseForm
+                    hedgeId={hedge.id}
+                    options={options}
+                    activeId={snapshotId}
+                    active={activeForm === 'release'}
+                    onUse={use('release')}
+                    onDone={reload}
+                    onBanner={setActionError}
+                    balance={hedge.oci_balance}
+                  />
+                )}
               </div>
             </section>
           )}
@@ -599,15 +877,20 @@ export default function HedgeScreen() {
 
           <section className="hedge__block" aria-label="Asientos">
             <h2>Asientos</h2>
-            {hedge.periods.length === 0 ? (
+            {hedge.periods.length === 0 && releases.length === 0 ? (
               <p className="hedge__meta">Sin asientos</p>
             ) : (
-              hedge.periods.map((p) => (
-                <div key={p.id} className="hedge__journal">
-                  <h3>{`Periodo al ${fmtDate(p.as_of)}`}</h3>
-                  <JournalTable period={p} />
-                </div>
-              ))
+              <>
+                {hedge.periods.map((p) => (
+                  <div key={p.id} className="hedge__journal">
+                    <h3>{`Periodo al ${fmtDate(p.as_of)}`}</h3>
+                    <JournalTable period={p} />
+                  </div>
+                ))}
+                {releases.map((e) => (
+                  <ReleaseJournal key={e.id} event={e} />
+                ))}
+              </>
             )}
           </section>
         </>

@@ -1,4 +1,11 @@
 import type { ReactNode } from 'react';
+import {
+  DECL_DEDESIGNATION,
+  DECL_FV_COMPONENT,
+  DECL_FV_PRESENTATION,
+  DECL_OFF_MARKET,
+  DECL_RECYCLING,
+} from '../lib/hedgeDeclarations';
 import './MethodologyScreen.css';
 
 interface Section {
@@ -226,7 +233,7 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Asientos sugeridos',
-        text: 'El sistema no es el libro mayor ni sustituye al contador. Cuentas fijas; redondeo a centavos con el residuo en resultados por inefectividad.',
+        text: 'El sistema no es el libro mayor ni sustituye al contador. Cuentas fijas; redondeo a centavos. Las cuentas de balance se asientan como la diferencia entre saldos acumulados ya redondeados, de modo que el acumulado de asientos coincide al centavo con el saldo; el residuo del periodo va a resultados por inefectividad.',
       },
       {
         label: 'Derivado hipotético',
@@ -234,19 +241,23 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Regla del menor',
-        text: 'La reserva ORI es el menor en valor absoluto entre el cambio acumulado del instrumento (por la fracción) y el del hipotético, si tienen el mismo signo; si no, 0. El resto es inefectividad.',
+        text: 'La reserva ORI es el menor en valor absoluto entre el cambio acumulado del instrumento (por la fracción) y el del hipotético, ambos desde la designación e incluyendo lo ya liquidado, si tienen el mismo signo; si no, 0. El resto es inefectividad, también el exceso liquidado de una cobertura sobrecubierta.',
       },
       {
         label: 'Reciclaje',
-        text: 'Las liquidaciones del derivado en el periodo se reconocen en resultados como el flujo cubierto ocurrido. Al vencer, el PV es 0 y la reserva queda en 0.',
+        text: `Las liquidaciones del derivado en el periodo se reconocen en resultados como el flujo cubierto ocurrido, pero solo la parte efectiva: el menor entre lo liquidado del instrumento y lo liquidado del hipotético; el exceso va a inefectividad. ${DECL_RECYCLING} En el cierre final (operación vencida) la reserva queda en 0.`,
       },
       {
         label: 'Valor razonable',
-        text: 'Solo para crédito o deuda a tasa fija cubierto con un swap. El cambio del instrumento, el ajuste de la partida (cambio del hipotético con signo contrario) y lo liquidado van a la cuenta Resultados — cobertura de valor razonable; sin reserva.',
+        text: `Solo para crédito o deuda a tasa fija cubierto con un swap. El cambio del instrumento, el ajuste de la partida (cambio del hipotético con signo contrario) y lo liquidado van a la cuenta Resultados — cobertura de valor razonable; sin reserva. ${DECL_FV_COMPONENT} ${DECL_FV_PRESENTATION}`,
       },
       {
         label: 'Combinaciones admitidas',
         text: 'Flujo de efectivo: crédito a tasa variable con swap del mismo índice, o flujo pronosticado en USD con forward. Valor razonable: crédito a tasa fija con swap del mismo índice.',
+      },
+      {
+        label: 'Fecha de designación',
+        text: 'La designación no es retroactiva: su fecha no puede ser anterior al último evento (designación, cierre, desdesignación o liberación) de ninguna relación de la misma operación, y las fracciones vigentes a esa fecha no suman más de 100 %.',
       },
       {
         label: 'Cambios de nocional',
@@ -254,7 +265,7 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Efectividad prospectiva',
-        text: 'Términos críticos y escenarios del escritorio. Hay relación económica si todas las razones son positivas. El rango 80 %–125 % es solo referencia; IFRS 9 no fija umbral.',
+        text: 'Términos críticos (nocional, índice o moneda, fechas y sentido: el swap debe ser el que compensa la partida) y escenarios del escritorio. Hay relación económica si todas las razones son positivas. El rango 80 %–125 % es solo referencia; IFRS 9 no fija umbral.',
       },
       {
         label: 'Jerarquía de valor razonable',
@@ -262,7 +273,15 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Desdesignación',
-        text: 'Congela la reserva, que se recicla cuando ocurra el flujo cubierto. No admite más cierres.',
+        text: `${DECL_DEDESIGNATION} La fecha es la del snapshot elegido: si es posterior al último cierre, se mide primero hasta ella y la reserva congelada es la de ese cierre. No admite más cierres.`,
+      },
+      {
+        label: 'Liberación de la reserva',
+        text: 'La reserva congelada se libera a mano, total o parcialmente y sin cambiar el signo del saldo: contra Resultados — partida cubierta (reciclaje) cuando el flujo cubierto ocurrió, o contra Resultados — inefectividad de cobertura cuando ya no se espera (IFRS 9 6.5.12). El saldo vigente es lo congelado menos lo liberado.',
+      },
+      {
+        label: 'Derivado fuera de mercado',
+        text: `${DECL_OFF_MARKET} Al designar, el alta avisa de esto, de que la prueba prospectiva no muestre relación económica y de un flujo pronosticado en fin de semana (se liquidará con el spot del snapshot).`,
       },
       {
         label: 'Simplificaciones',
@@ -270,7 +289,7 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Fuera de alcance',
-        text: 'Opciones como instrumento, coberturas de inversión neta, designación de componentes de riesgo, libro mayor y pólizas reales, y revelaciones de IFRS 7.',
+        text: 'Opciones como instrumento, coberturas de inversión neta, libro mayor y pólizas reales, y revelaciones de IFRS 7.',
       },
     ],
   },

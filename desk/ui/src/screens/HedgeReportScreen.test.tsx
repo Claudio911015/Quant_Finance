@@ -72,6 +72,7 @@ const REPORT: HedgeReport = {
     designation: { snapshot: 'MX-DEMO', as_of: '2026-11-10', data_quality: 'synthetic', pv_inst: 0, pv_hypo: 0 },
     status: 'activa',
     dedesignation: null,
+    warnings: [],
     oci_balance: -125000,
     last_close: '2026-12-15',
     created_at: '2026-11-11T18:00:00+00:00',
@@ -147,7 +148,8 @@ const REPORT: HedgeReport = {
       { role: 'period', snapshot: 'D1', as_of: '2026-12-15', data_quality: 'mixed' },
     ],
   },
-  reserve: { balance: -125000, frozen: false, note: null },
+  reserve_releases: [],
+  reserve: { balance: -125000, frozen: false, note: null, released: 0 },
 };
 
 function renderScreen(path = '/coberturas/1/reporte') {
@@ -189,10 +191,109 @@ describe('HedgeReportScreen', () => {
       'Acumulado',
       'Jerarquía de valor razonable',
       'Reserva',
+      'Supuestos de la metodología',
     ]) {
       expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy();
     }
-    expect(screen.getByText('Generado: 2026-11-11T18:00:00+00:00')).toBeTruthy();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Liberaciones de reserva' })).toBeNull();
+  });
+
+  it('"Generado" muestra la fecha y la hora legibles, con la zona', async () => {
+    renderScreen();
+    expect(await screen.findByText('Generado: 2026-11-11 18:00 UTC')).toBeTruthy();
+    expect(screen.queryByText(/T18:00:00/)).toBeNull();
+  });
+
+  it('declara los supuestos contables de la metodología', async () => {
+    renderScreen();
+    const section = (await screen.findByRole('heading', { level: 2, name: 'Supuestos de la metodología' })).closest('section')!;
+    const text = section.textContent ?? '';
+    expect(text).toContain('flujo cubierto proxy');
+    expect(text).toContain('componente de tasa de referencia');
+    expect(text).toContain('no se amortiza');
+    expect(text).toContain('no en gasto por intereses');
+    expect(text).toContain('Desdesignar exige una causa');
+    expect(text).toContain('fuente de inefectividad');
+  });
+
+  it('el resumen de la prueba prospectiva va en un bloque que no se parte al imprimir', async () => {
+    renderScreen();
+    const summary = (await screen.findByText('Relación económica: sí')).closest('.hedge-report__summary')!;
+    expect(summary).toBeTruthy();
+    expect(summary.textContent).toContain('En 80 %–125 %: 1 de 1');
+    expect(summary.textContent).toContain(PROSPECTIVE.reference_note);
+  });
+
+  it('muestra los avisos de la designación y la desdesignación con su causa', async () => {
+    mocks.hedgeReport.mockResolvedValue({
+      ...REPORT,
+      relationship: {
+        ...REPORT.relationship,
+        status: 'desdesignada',
+        warnings: [
+          { code: 'instrument_off_market', message: 'El instrumento vale MXN 12,500.00 al designar' },
+        ],
+        dedesignation: {
+          date: '2027-01-10',
+          reason: 'Prepago del crédito',
+          cause: 'instrument_ended',
+          snapshot: 'D2',
+          frozen_oci: -125000,
+        },
+      },
+    });
+    renderScreen();
+    const facts = (await screen.findByText('Avisos de la designación')).closest('dl')!;
+    expect(facts.textContent).toContain('El instrumento vale MXN 12,500.00 al designar');
+    expect(facts.textContent).toContain(
+      '2027-01-10 · El instrumento venció, se vendió o se terminó · Prepago del crédito',
+    );
+  });
+
+  it('sin avisos ni desdesignación no hay esas filas', async () => {
+    renderScreen();
+    await screen.findByText('Documentación de designación');
+    expect(screen.queryByText('Avisos de la designación')).toBeNull();
+    expect(screen.queryByText('Desdesignación')).toBeNull();
+  });
+
+  it('lista las liberaciones de reserva con su causa, su asiento y la reserva liberada', async () => {
+    mocks.hedgeReport.mockResolvedValue({
+      ...REPORT,
+      reserve_releases: [
+        {
+          id: 9,
+          snapshot: 'D2',
+          as_of: '2027-01-20',
+          cause: 'flow_no_longer_expected',
+          amount: -40000,
+          reserve_after: -85000,
+          entries: [
+            { account: 'ORI — reserva de cobertura', debit: 0, credit: 40000, memo: 'Liberación de la reserva de cobertura congelada' },
+            { account: 'Resultados — inefectividad de cobertura', debit: 40000, credit: 0, memo: 'Reserva a resultados: el flujo cubierto ya no se espera' },
+          ],
+        },
+      ],
+      reserve: { balance: -85000, frozen: true, note: 'Reserva congelada al desdesignar', released: -40000 },
+    });
+    renderScreen();
+    const section = (await screen.findByRole('heading', { level: 2, name: 'Liberaciones de reserva' })).closest('section')!;
+    expect(within(section).getByRole('heading', { level: 3, name: 'Liberación al 2027-01-20' })).toBeTruthy();
+    expect(section.textContent).toContain('El flujo cubierto ya no se espera · Snapshot D2 · Monto MXN -40,000.00 · Reserva restante MXN -85,000.00');
+    expect(within(section).getByText('Reserva a resultados: el flujo cubierto ya no se espera')).toBeTruthy();
+    expect(screen.getByText('Reserva liberada: MXN -40,000.00')).toBeTruthy();
+    expect(screen.getByText('Saldo de la reserva de cobertura: MXN -85,000.00')).toBeTruthy();
+  });
+
+  it('con la reserva liberada por completo no repite la nota de congelada', async () => {
+    mocks.hedgeReport.mockResolvedValue({
+      ...REPORT,
+      reserve: { balance: 0, frozen: true, note: null, released: -125000 },
+    });
+    renderScreen();
+    expect(await screen.findByText('Saldo de la reserva de cobertura: MXN 0.00')).toBeTruthy();
+    expect(screen.getByText('Reserva liberada: MXN -125,000.00')).toBeTruthy();
+    expect(screen.queryByText(/Reserva congelada/)).toBeNull();
   });
 
   it('describe la partida y el instrumento con los rótulos de coberturas', async () => {
@@ -282,6 +383,7 @@ describe('HedgeReportScreen', () => {
         balance: -125000,
         frozen: true,
         note: 'Reserva congelada al desdesignar: se reciclará a resultados cuando ocurra el flujo cubierto',
+        released: 0,
       },
     });
     renderScreen();

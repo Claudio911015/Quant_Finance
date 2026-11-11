@@ -73,6 +73,18 @@
   font-size: var(--fs-sm);
 }
 
+.hedge-report__list {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+/* El resumen de la prueba prospectiva va junto: no se parte entre páginas ni se queda solo tras la tabla. */
+.hedge-report__summary {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  break-before: avoid;
+}
+
 .hedge-report__error,
 .hedge-report__frozen {
   color: var(--warn);

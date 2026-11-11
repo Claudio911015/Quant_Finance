@@ -1,6 +1,7 @@
 import type {
   AddFixingResponse,
   CreateHedgeBody,
+  DedesignationCause,
   Dv01Response,
   EffectivenessResponse,
   EventType,
@@ -16,6 +17,7 @@ import type {
   PriceResponse,
   ProductId,
   RefreshResponse,
+  ReleaseCause,
   ScenarioSpec,
   ScenariosResponse,
   Snapshot,
@@ -214,11 +216,20 @@ export function closeHedgePeriod(id: number, snapshot: string): Promise<HedgePer
   return request('POST', `/hedges/${id}/periods`, { snapshot });
 }
 
+/** La fecha de la desdesignación es el `as_of` del snapshot; si es posterior al último cierre, el backend lo mide primero. */
 export function dedesignateHedge(
   id: number,
-  body: { date: string; reason: string },
+  body: { snapshot: string; reason: string; cause: DedesignationCause },
 ): Promise<HedgeDetail> {
   return request('POST', `/hedges/${id}/dedesignate`, body);
+}
+
+/** `amount` lleva el signo del saldo de la reserva; omitido, se libera todo. */
+export function releaseHedgeReserve(
+  id: number,
+  body: { snapshot: string; amount?: number; cause: ReleaseCause },
+): Promise<HedgeDetail> {
+  return request('POST', `/hedges/${id}/release`, body);
 }
 
 export function hedgeEffectiveness(id: number, snapshot: string): Promise<EffectivenessResponse> {

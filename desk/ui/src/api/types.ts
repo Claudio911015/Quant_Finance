@@ -279,6 +279,10 @@ export interface VarResponse {
 export type HedgeType = 'cash_flow' | 'fair_value';
 export type ItemKind = 'floating_loan' | 'fixed_loan' | 'forecast_fx';
 export type HedgeStatus = 'activa' | 'desdesignada';
+/** Causa de una desdesignación (IFRS 9 6.5.6: no hay desdesignación voluntaria sin causa). */
+export type DedesignationCause = 'instrument_ended' | 'criteria_not_met' | 'risk_objective_changed';
+/** Causa de la liberación de la reserva congelada. */
+export type ReleaseCause = 'flow_occurred' | 'flow_no_longer_expected';
 
 export interface FloatingLoanTerms {
   index: 'TIIE-F' | 'SOFR';
@@ -314,10 +318,26 @@ export interface HedgeDocumentation {
 export interface HedgeEvent {
   id: number;
   relationship_id: number;
-  type: 'designation' | 'period_close' | 'dedesignation';
+  type: 'designation' | 'period_close' | 'dedesignation' | 'reserve_release';
   event_date: string;
   data: Record<string, unknown>;
   created_at: string;
+}
+
+/** Aviso que el alta devuelve y guarda en el evento de designación; `message` ya viene en español. */
+export interface HedgeWarning {
+  code: 'no_economic_relationship' | 'instrument_off_market' | 'forecast_date_weekend';
+  message: string;
+}
+
+/** `data` de un evento `reserve_release`. */
+export interface ReserveReleaseData {
+  snapshot: string;
+  cause: ReleaseCause;
+  amount: number;
+  reserve_before: number;
+  reserve_after: number;
+  entries: JournalEntry[];
 }
 
 export interface JournalEntry {
@@ -352,7 +372,11 @@ export interface HedgePeriod {
   hypo_cum: number;
   d_inst_cum: number;
   d_hypo_cum: number;
+  inst_total: number;
+  hypo_total: number;
+  effective_cum: number;
   settled_period: number;
+  hypo_settled_period: number;
   settled_flows: HedgePeriodFlow[];
   oci: number;
   d_oci: number;
@@ -380,6 +404,15 @@ export interface HedgeSummary {
   oci_balance: number;
   last_close: string | null;
   periods_count: number;
+}
+
+/** `cause` y `snapshot` son `null` solo en desdesignaciones anteriores a la causa obligatoria. */
+export interface HedgeDedesignation {
+  date: string;
+  reason: string;
+  cause: DedesignationCause | null;
+  snapshot: string | null;
+  frozen_oci: number;
 }
 
 export interface HedgeDetail {
@@ -410,7 +443,9 @@ export interface HedgeDetail {
     pv_hypo: number;
   };
   status: HedgeStatus;
-  dedesignation: { date: string; reason: string; frozen_oci: number } | null;
+  dedesignation: HedgeDedesignation | null;
+  warnings: HedgeWarning[];
+  /** Reserva vigente: lo congelado menos lo liberado. */
   oci_balance: number;
   last_close: string | null;
   events: HedgeEvent[];
@@ -421,6 +456,7 @@ export interface HedgeDetail {
 export interface CriticalTerm {
   term: 'notional' | 'index' | 'currency' | 'start_date' | 'maturity_date' | 'side';
   label: string;
+  /** En `side`: `payer`/`receiver` (lado del swap) o `buy`/`sell` (forward). */
   instrument: string | number;
   item: string | number;
   result: 'match' | 'mismatch';
@@ -498,7 +534,17 @@ export interface HedgeReport {
       data_quality: DataQuality;
     }[];
   };
-  reserve: { balance: number; frozen: boolean; note: string | null };
+  reserve_releases: {
+    id: number;
+    snapshot: string;
+    as_of: string;
+    cause: ReleaseCause;
+    amount: number;
+    reserve_after: number;
+    entries: JournalEntry[];
+  }[];
+  /** `balance` es la reserva vigente; `released` la suma de lo liberado. */
+  reserve: { balance: number; frozen: boolean; note: string | null; released: number };
 }
 
 export interface CreateHedgeBody {

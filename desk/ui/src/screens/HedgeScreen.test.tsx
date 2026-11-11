@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   hedgeEffectiveness: vi.fn(),
   closeHedgePeriod: vi.fn(),
   dedesignateHedge: vi.fn(),
+  releaseHedgeReserve: vi.fn(),
 }));
 
 vi.mock('../api/client', async (importOriginal) => {
@@ -31,6 +32,7 @@ vi.mock('../api/client', async (importOriginal) => {
     hedgeEffectiveness: mocks.hedgeEffectiveness,
     closeHedgePeriod: mocks.closeHedgePeriod,
     dedesignateHedge: mocks.dedesignateHedge,
+    releaseHedgeReserve: mocks.releaseHedgeReserve,
   };
 });
 
@@ -60,7 +62,11 @@ function period(over: Partial<HedgePeriod> = {}): HedgePeriod {
     hypo_cum: -125000,
     d_inst_cum: -125000,
     d_hypo_cum: -125000,
+    inst_total: -94000,
+    hypo_total: -94000,
+    effective_cum: -94000,
     settled_period: 31000,
+    hypo_settled_period: 31000,
     settled_flows: [],
     oci: -125000,
     d_oci: -125000,
@@ -115,6 +121,7 @@ const HEDGE: HedgeDetail = {
   designation: { snapshot: 'MX-DEMO', as_of: '2026-11-10', data_quality: 'synthetic', pv_inst: 0, pv_hypo: 0 },
   status: 'activa',
   dedesignation: null,
+  warnings: [],
   oci_balance: -125000,
   last_close: '2026-12-15',
   events: [],
@@ -162,8 +169,44 @@ const FAIR_VALUE_HEDGE: HedgeDetail = {
 const DEDESIGNATED: HedgeDetail = {
   ...HEDGE,
   status: 'desdesignada',
-  dedesignation: { date: '2027-01-10', reason: 'Prepago del crédito', frozen_oci: -125000 },
+  dedesignation: {
+    date: '2027-01-10',
+    reason: 'Prepago del crédito',
+    cause: 'instrument_ended',
+    snapshot: 'D1',
+    frozen_oci: -125000,
+  },
 };
+
+const RELEASE_ENTRIES = [
+  { account: 'ORI — reserva de cobertura', debit: 0, credit: 40000, memo: 'Liberación de la reserva de cobertura congelada' },
+  { account: 'Resultados — partida cubierta (reciclaje)', debit: 40000, credit: 0, memo: 'Reciclaje de la reserva congelada: el flujo cubierto ocurrió' },
+];
+
+/** Desdesignada con una liberación parcial ya hecha: quedan 85,000 de los 125,000 congelados. */
+const PARTLY_RELEASED: HedgeDetail = {
+  ...DEDESIGNATED,
+  oci_balance: -85000,
+  events: [
+    {
+      id: 9,
+      relationship_id: 1,
+      type: 'reserve_release',
+      event_date: '2027-01-20',
+      created_at: '2027-01-20T10:00:00+00:00',
+      data: {
+        snapshot: 'D1',
+        cause: 'flow_occurred',
+        amount: -40000,
+        reserve_before: -125000,
+        reserve_after: -85000,
+        entries: RELEASE_ENTRIES,
+      },
+    },
+  ],
+};
+
+const FULLY_RELEASED: HedgeDetail = { ...PARTLY_RELEASED, oci_balance: 0 };
 
 function setup(hedge: HedgeDetail = HEDGE) {
   mocks.listSnapshots.mockResolvedValue(SNAPSHOTS);
@@ -175,6 +218,7 @@ function setup(hedge: HedgeDetail = HEDGE) {
   mocks.hedgeEffectiveness.mockResolvedValue(EFF);
   mocks.closeHedgePeriod.mockResolvedValue(period());
   mocks.dedesignateHedge.mockResolvedValue(DEDESIGNATED);
+  mocks.releaseHedgeReserve.mockResolvedValue(PARTLY_RELEASED);
 }
 
 /** Cambia el snapshot activo desde fuera de la pantalla, como lo haría el selector del Shell. */
@@ -317,50 +361,142 @@ describe('HedgeScreen', () => {
     expect(mocks.getHedge).toHaveBeenCalledTimes(1);
   });
 
-  it('Desdesignar llama dedesignateHedge con la fecha y el motivo y recarga', async () => {
+  it('Desdesignar llama dedesignateHedge con snapshot, motivo y causa y recarga', async () => {
     setup();
     renderScreen();
     const form = await screen.findByRole('form', { name: 'Desdesignar' });
-    fireEvent.change(within(form).getByLabelText('Fecha'), { target: { value: '2027-01-10' } });
+    const snap = within(form).getByLabelText('Snapshot de la desdesignación') as HTMLSelectElement;
+    expect(snap.value).toBe('MX-DEMO');
+    fireEvent.change(snap, { target: { value: 'D1' } });
+    fireEvent.change(within(form).getByLabelText('Causa'), { target: { value: 'criteria_not_met' } });
     fireEvent.change(within(form).getByLabelText('Motivo'), { target: { value: 'Prepago del crédito' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Desdesignar' }));
 
     await waitFor(() =>
-      expect(mocks.dedesignateHedge).toHaveBeenCalledWith(1, { date: '2027-01-10', reason: 'Prepago del crédito' }),
+      expect(mocks.dedesignateHedge).toHaveBeenCalledWith(1, {
+        snapshot: 'D1',
+        reason: 'Prepago del crédito',
+        cause: 'criteria_not_met',
+      }),
     );
     await waitFor(() => expect(mocks.getHedge).toHaveBeenCalledTimes(2));
   });
 
-  it('Desdesignar sin motivo no llama al backend', async () => {
+  it('la causa de desdesignar ofrece las tres de IFRS 9 y no hay fecha libre', async () => {
+    setup();
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Desdesignar' });
+    const cause = within(form).getByLabelText('Causa') as HTMLSelectElement;
+    expect(cause.value).toBe('');
+    expect(within(cause).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Elige la causa',
+      'El instrumento venció, se vendió o se terminó',
+      'La relación deja de cumplir los criterios',
+      'Cambió el objetivo de gestión de riesgo',
+    ]);
+    expect(within(form).queryByLabelText('Fecha')).toBeNull();
+    expect(form.querySelector('input[type="date"]')).toBeNull();
+  });
+
+  it('Desdesignar sin causa ni motivo no llama al backend y marca ambos campos', async () => {
     setup();
     renderScreen();
     const form = await screen.findByRole('form', { name: 'Desdesignar' });
     fireEvent.click(within(form).getByRole('button', { name: 'Desdesignar' }));
-    expect((await within(form).findByRole('alert')).textContent).toBe('Indica el motivo');
+    const alerts = await within(form).findAllByRole('alert');
+    expect(alerts.map((a) => a.textContent)).toEqual(['Indica la causa', 'Indica el motivo']);
     expect(mocks.dedesignateHedge).not.toHaveBeenCalled();
   });
 
-  it('un error de Desdesignar con campo date aparece bajo la fecha', async () => {
+  it('un error de Desdesignar con campo snapshot aparece bajo el select y ofrece el snapshot del último cierre', async () => {
     setup();
-    mocks.dedesignateHedge.mockRejectedValue(new ApiError(409, 'La fecha es anterior al último cierre', 'date'));
+    mocks.dedesignateHedge.mockRejectedValue(
+      new ApiError(409, 'El snapshot (2026-12-01) no puede ser anterior a 2026-12-15, fecha del último cierre', 'snapshot'),
+    );
     renderScreen();
     const form = await screen.findByRole('form', { name: 'Desdesignar' });
+    fireEvent.change(within(form).getByLabelText('Causa'), { target: { value: 'instrument_ended' } });
     fireEvent.change(within(form).getByLabelText('Motivo'), { target: { value: 'Prepago' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Desdesignar' }));
     const alert = await within(form).findByRole('alert');
-    expect(alert.textContent).toBe('La fecha es anterior al último cierre');
-    expect(within(form).getByLabelText('Fecha').getAttribute('aria-invalid')).toBe('true');
+    expect(alert.textContent).toContain('no puede ser anterior a 2026-12-15');
+    const snap = within(form).getByLabelText('Snapshot de la desdesignación') as HTMLSelectElement;
+    expect(snap.getAttribute('aria-invalid')).toBe('true');
+
+    fireEvent.click(within(form).getByRole('button', { name: 'Usar el snapshot del último cierre (D1)' }));
+    expect(snap.value).toBe('D1');
+    expect(within(form).queryByRole('button', { name: /Usar el snapshot/ })).toBeNull();
+  });
+
+  it('sin cierres, el snapshot que se ofrece tras un 409 es el de la designación', async () => {
+    setup({ ...HEDGE, periods: [], last_close: null });
+    mocks.dedesignateHedge.mockRejectedValue(new ApiError(409, 'El snapshot es anterior a la designación', 'snapshot'));
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Desdesignar' });
+    fireEvent.change(within(form).getByLabelText('Snapshot de la desdesignación'), { target: { value: 'D1' } });
+    fireEvent.change(within(form).getByLabelText('Causa'), { target: { value: 'instrument_ended' } });
+    fireEvent.change(within(form).getByLabelText('Motivo'), { target: { value: 'Prepago' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Desdesignar' }));
+    await within(form).findByRole('alert');
+    expect(
+      within(form).getByRole('button', { name: 'Usar el snapshot de la designación (MX-DEMO)' }),
+    ).toBeTruthy();
   });
 
   it('Desdesignar con el mensaje real del backend muestra el nombre del campo, no la clave', async () => {
     setup();
-    mocks.dedesignateHedge.mockRejectedValue(new ApiError(400, "'date' debe ser una fecha válida AAAA-MM-DD", 'date'));
+    mocks.dedesignateHedge.mockRejectedValue(new ApiError(400, "'reason' no puede estar vacío", 'reason'));
     renderScreen();
     const form = await screen.findByRole('form', { name: 'Desdesignar' });
+    fireEvent.change(within(form).getByLabelText('Causa'), { target: { value: 'instrument_ended' } });
     fireEvent.change(within(form).getByLabelText('Motivo'), { target: { value: 'Prepago' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Desdesignar' }));
     const alert = await within(form).findByRole('alert');
-    expect(alert.textContent).toBe('Fecha debe ser una fecha válida AAAA-MM-DD');
+    expect(alert.textContent).toBe('Motivo no puede estar vacío');
+  });
+
+  it('un 409 de Desdesignar sin campo visible (ya desdesignada) se muestra como banda de acciones', async () => {
+    setup();
+    mocks.dedesignateHedge.mockRejectedValue(new ApiError(409, 'La cobertura ya está desdesignada', 'id'));
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Desdesignar' });
+    fireEvent.change(within(form).getByLabelText('Causa'), { target: { value: 'instrument_ended' } });
+    fireEvent.change(within(form).getByLabelText('Motivo'), { target: { value: 'Prepago' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Desdesignar' }));
+    const acciones = screen.getByRole('region', { name: 'Acciones' });
+    expect((await within(acciones).findByText('La cobertura ya está desdesignada')).getAttribute('role')).toBe('alert');
+    expect(within(form).queryByRole('alert')).toBeNull();
+  });
+
+  it('los errores de un formulario se borran al usar el otro', async () => {
+    setup();
+    mocks.closeHedgePeriod.mockRejectedValue(new ApiError(409, 'El snapshot no es posterior al último cierre', 'snapshot'));
+    renderScreen();
+    const close = await screen.findByRole('form', { name: 'Cerrar periodo' });
+    const ded = screen.getByRole('form', { name: 'Desdesignar' });
+
+    // Error local en Desdesignar...
+    fireEvent.click(within(ded).getByRole('button', { name: 'Desdesignar' }));
+    await within(ded).findAllByRole('alert');
+    // ...se borra al enviar Cerrar periodo, que a su vez deja el suyo.
+    fireEvent.click(within(close).getByRole('button', { name: 'Cerrar periodo' }));
+    await within(close).findByRole('alert');
+    expect(within(ded).queryByRole('alert')).toBeNull();
+
+    // Volver a usar Desdesignar borra el error de Cerrar periodo.
+    fireEvent.focus(within(ded).getByLabelText('Motivo'));
+    await waitFor(() => expect(within(close).queryByRole('alert')).toBeNull());
+  });
+
+  it('el aviso de una acción fallida (banda) se borra al usar otro formulario', async () => {
+    setup();
+    mocks.closeHedgePeriod.mockRejectedValue(new ApiError(500, 'Error interno', null));
+    renderScreen();
+    const close = await screen.findByRole('form', { name: 'Cerrar periodo' });
+    fireEvent.click(within(close).getByRole('button', { name: 'Cerrar periodo' }));
+    expect(await screen.findByText('Error interno')).toBeTruthy();
+    fireEvent.focus(screen.getByLabelText('Motivo'));
+    await waitFor(() => expect(screen.queryByText('Error interno')).toBeNull());
   });
 
   it('una relación desdesignada no muestra acciones y sí la reserva congelada con fecha y motivo', async () => {
@@ -370,9 +506,185 @@ describe('HedgeScreen', () => {
     expect(screen.getByText('Desdesignada')).toBeTruthy();
     expect(screen.getByText('2027-01-10')).toBeTruthy();
     expect(screen.getByText('Prepago del crédito')).toBeTruthy();
+    expect(screen.getByText('El instrumento venció, se vendió o se terminó')).toBeTruthy();
     expect(screen.queryByRole('form', { name: 'Cerrar periodo' })).toBeNull();
     expect(screen.queryByRole('form', { name: 'Desdesignar' })).toBeNull();
     expect(screen.queryByText('Saldo de reserva')).toBeNull();
+  });
+
+  it('una desdesignación anterior a la causa obligatoria no rotula causa', async () => {
+    setup({
+      ...DEDESIGNATED,
+      dedesignation: { date: '2027-01-10', reason: 'Prepago', cause: null, snapshot: null, frozen_oci: -125000 },
+    });
+    renderScreen();
+    await screen.findByText('Reserva congelada');
+    expect(screen.queryByText('Causa')).toBeNull();
+  });
+
+  it('una desdesignada con saldo muestra congelada, vigente y el formulario Liberar reserva', async () => {
+    setup(PARTLY_RELEASED);
+    renderScreen();
+    await screen.findByText('Reserva congelada');
+    const facts = screen.getByText('Reserva congelada').closest('dl')!;
+    expect(within(facts).getByText('MXN -125,000.00')).toBeTruthy();
+    expect(within(facts).getByText('Reserva vigente')).toBeTruthy();
+    expect(within(facts).getByText('MXN -85,000.00')).toBeTruthy();
+    const form = screen.getByRole('form', { name: 'Liberar reserva' });
+    expect(within(form).getByText('Vacío libera todo el saldo (MXN -85,000.00)')).toBeTruthy();
+    const cause = within(form).getByLabelText('Causa de la liberación') as HTMLSelectElement;
+    expect(within(cause).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Elige la causa',
+      'El flujo cubierto ocurrió',
+      'El flujo cubierto ya no se espera',
+    ]);
+  });
+
+  it('Liberar reserva sin monto libera todo el saldo con el snapshot y la causa elegidos', async () => {
+    setup(PARTLY_RELEASED);
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Liberar reserva' });
+    fireEvent.change(within(form).getByLabelText('Snapshot de la liberación'), { target: { value: 'D1' } });
+    fireEvent.change(within(form).getByLabelText('Causa de la liberación'), { target: { value: 'flow_no_longer_expected' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
+
+    await waitFor(() =>
+      expect(mocks.releaseHedgeReserve).toHaveBeenCalledWith(1, { snapshot: 'D1', cause: 'flow_no_longer_expected' }),
+    );
+    expect(Object.keys(mocks.releaseHedgeReserve.mock.calls[0][1])).not.toContain('amount');
+    await waitFor(() => expect(mocks.getHedge).toHaveBeenCalledTimes(2));
+  });
+
+  it('Liberar reserva con monto lo envía con el signo del saldo, aunque se teclee sin signo', async () => {
+    setup(PARTLY_RELEASED); // saldo -85,000
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Liberar reserva' });
+    fireEvent.change(within(form).getByLabelText('Causa de la liberación'), { target: { value: 'flow_occurred' } });
+    fireEvent.change(within(form).getByLabelText('Monto a liberar'), { target: { value: '25,000.50' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
+    await waitFor(() =>
+      expect(mocks.releaseHedgeReserve).toHaveBeenCalledWith(1, {
+        snapshot: 'MX-DEMO',
+        cause: 'flow_occurred',
+        amount: -25000.5,
+      }),
+    );
+  });
+
+  it('con saldo positivo el monto liberado también lleva el signo del saldo', async () => {
+    setup({ ...PARTLY_RELEASED, oci_balance: 60000 });
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Liberar reserva' });
+    fireEvent.change(within(form).getByLabelText('Causa de la liberación'), { target: { value: 'flow_occurred' } });
+    fireEvent.change(within(form).getByLabelText('Monto a liberar'), { target: { value: '-10000' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
+    await waitFor(() =>
+      expect(mocks.releaseHedgeReserve).toHaveBeenCalledWith(1, {
+        snapshot: 'MX-DEMO',
+        cause: 'flow_occurred',
+        amount: 10000,
+      }),
+    );
+  });
+
+  it('Liberar reserva sin causa o con un monto ilegible no llama al backend', async () => {
+    setup(PARTLY_RELEASED);
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Liberar reserva' });
+    fireEvent.change(within(form).getByLabelText('Monto a liberar'), { target: { value: 'mucho' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
+    const alerts = await within(form).findAllByRole('alert');
+    expect(alerts.map((a) => a.textContent)).toEqual(['Indica la causa', 'Indica un número']);
+    expect(mocks.releaseHedgeReserve).not.toHaveBeenCalled();
+  });
+
+  it('los errores del backend al liberar van bajo su campo, con el nombre de la pantalla', async () => {
+    setup(PARTLY_RELEASED);
+    mocks.releaseHedgeReserve.mockRejectedValue(
+      new ApiError(409, 'El monto excede el saldo de la reserva (-85000.00)', 'amount'),
+    );
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Liberar reserva' });
+    fireEvent.change(within(form).getByLabelText('Causa de la liberación'), { target: { value: 'flow_occurred' } });
+    fireEvent.change(within(form).getByLabelText('Monto a liberar'), { target: { value: '999999' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
+    const alert = await within(form).findByRole('alert');
+    expect(alert.textContent).toBe('El monto excede el saldo de la reserva (-85000.00)');
+    expect(within(form).getByLabelText('Monto a liberar').getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('un 409 al liberar por snapshot anterior al último evento aparece bajo el select', async () => {
+    setup(PARTLY_RELEASED);
+    mocks.releaseHedgeReserve.mockRejectedValue(
+      new ApiError(409, 'El snapshot (2027-01-01) no puede ser anterior al último evento de la cobertura (2027-01-20)', 'snapshot'),
+    );
+    renderScreen();
+    const form = await screen.findByRole('form', { name: 'Liberar reserva' });
+    fireEvent.change(within(form).getByLabelText('Causa de la liberación'), { target: { value: 'flow_occurred' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Liberar reserva' }));
+    expect((await within(form).findByRole('alert')).textContent).toContain('anterior al último evento');
+    expect(within(form).getByLabelText('Snapshot de la liberación').getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('con la reserva liberada por completo no hay formulario y el asiento de la liberación aparece', async () => {
+    setup(FULLY_RELEASED);
+    renderScreen();
+    await screen.findByText('Reserva congelada');
+    expect(screen.queryByRole('form', { name: 'Liberar reserva' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Acciones' })).toBeNull();
+    const table = screen.getByRole('table', { name: 'Asientos de liberación 2027-01-20' });
+    expect(within(table).getByText('ORI — reserva de cobertura')).toBeTruthy();
+    expect(within(table).getByText('Resultados — partida cubierta (reciclaje)')).toBeTruthy();
+    const total = within(table).getByText('Total de la liberación').closest('tr')!;
+    expect(total.textContent).toContain('MXN 40,000.00');
+    expect(screen.getByText('Liberación de reserva al 2027-01-20')).toBeTruthy();
+    expect(screen.getByText(/El flujo cubierto ocurrió · Monto MXN -40,000.00 · Reserva restante MXN -85,000.00/)).toBeTruthy();
+  });
+
+  it('una relación activa no ofrece Liberar reserva', async () => {
+    setup();
+    renderScreen();
+    await screen.findByRole('form', { name: 'Desdesignar' });
+    expect(screen.queryByRole('form', { name: 'Liberar reserva' })).toBeNull();
+  });
+
+  it('los avisos de la designación se muestran en el detalle, y sin avisos no hay bloque', async () => {
+    setup({
+      ...HEDGE,
+      warnings: [
+        { code: 'instrument_off_market', message: 'El instrumento vale MXN 12,500.00 al designar: ese valor ya está en libros y es fuente de inefectividad' },
+        { code: 'forecast_date_weekend', message: 'La fecha del flujo cae en fin de semana: se liquidará con el spot del snapshot' },
+      ],
+    });
+    const { unmount } = renderScreen();
+    const block = await screen.findByRole('region', { name: 'Avisos de designación' });
+    const items = within(block).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items[0]).toContain('vale MXN 12,500.00 al designar');
+    expect(items[1]).toContain('fin de semana');
+    unmount();
+
+    setup();
+    renderScreen();
+    await screen.findByRole('heading', { name: 'Escenarios' });
+    expect(screen.queryByRole('region', { name: 'Avisos de designación' })).toBeNull();
+  });
+
+  it('el término Sentido de un crédito rotula el lado del swap y el de la partida', async () => {
+    setup();
+    mocks.hedgeEffectiveness.mockResolvedValue({
+      ...EFF,
+      critical_terms: [
+        ...EFF.critical_terms,
+        { term: 'side', label: 'Sentido', instrument: 'receiver', item: 'pays_floating', result: 'mismatch' },
+      ],
+    });
+    renderScreen();
+    const terms = await screen.findByRole('table', { name: 'Términos críticos' });
+    const row = within(terms).getAllByRole('row').slice(1)[3];
+    expect(row.textContent).toContain('Sentido');
+    expect(row.textContent).toContain('Cobra fija');
+    expect(row.textContent).toContain('Paga variable');
+    expect(row.textContent).toContain('No coincide');
   });
 
   it('el enlace de exportación apunta al CSV y la vista imprimible a su ruta', async () => {

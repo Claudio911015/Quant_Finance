@@ -23,3 +23,21 @@ export function fmtRate(dec: number): string {
 export function fmtDate(iso: string): string {
   return iso;
 }
+
+/**
+ * Marca de tiempo ISO (`2026-11-11T18:00:00+00:00`) como `2026-11-11 18:00 UTC`: fecha ISO, hora y la zona
+ * explícita (el backend las emite en UTC). Lo que no se pueda leer se devuelve tal cual.
+ */
+export function fmtDateTime(iso: string): string {
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return iso;
+  return `${t.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
+/** Número tecleado (acepta comas y espacios); `null` si está vacío o no es finito. */
+export function parseNumber(raw: string): number | null {
+  const cleaned = raw.replace(/[,\s]/g, '');
+  if (cleaned === '') return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}

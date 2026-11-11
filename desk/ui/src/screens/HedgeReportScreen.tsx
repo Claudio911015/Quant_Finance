@@ -10,15 +10,18 @@ import type {
   JournalEntry,
 } from '../api/types';
 import { AccountingNotice } from '../components/AccountingNotice';
+import { HEDGE_DECLARATIONS } from '../lib/hedgeDeclarations';
 import {
+  DEDESIGNATION_CAUSE_LABEL,
   DOC_FIELD_LABEL,
   HEDGE_EVENT_LABEL,
   HEDGE_TYPE_LABEL,
   ITEM_KIND_LABEL,
+  RELEASE_CAUSE_LABEL,
   SIDE_LABEL,
   TERM_RESULT_LABEL,
 } from '../lib/hedgeLabels';
-import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
+import { fmtDate, fmtDateTime, fmtMoney, fmtNumber } from '../lib/format';
 import { qualityText } from '../lib/provenance';
 import { productTitle } from './pricers/registry';
 import './HedgeReportScreen.css';
@@ -149,11 +152,13 @@ function Prospective({ data }: { data: HedgeReport['prospective'] }) {
           ))}
         </tbody>
       </Table>
-      <p>Relación económica: {p.economic_relationship ? 'sí' : 'no'}</p>
-      <p>
-        En 80 %–125 %: {p.in_reference_range} de {p.scenarios_counted}
-      </p>
-      <p className="hedge-report__dim">{p.reference_note}</p>
+      <div className="hedge-report__summary">
+        <p>Relación económica: {p.economic_relationship ? 'sí' : 'no'}</p>
+        <p>
+          En 80 %–125 %: {p.in_reference_range} de {p.scenarios_counted}
+        </p>
+        <p className="hedge-report__dim">{p.reference_note}</p>
+      </div>
     </>
   );
 }
@@ -216,6 +221,7 @@ function Periods({ report }: { report: HedgeReport }) {
 function ReportBody({ report }: { report: HedgeReport }) {
   const { documentation: doc, relationship: rel, fair_value_hierarchy: hier, reserve } = report;
   const inst = doc.hedging_instrument;
+  const ded = rel.dedesignation;
   return (
     <>
       <Section title="Documentación de designación">
@@ -240,6 +246,32 @@ function ReportBody({ report }: { report: HedgeReport }) {
           <dd>{doc.effectiveness_method}</dd>
           <dt>{DOC_FIELD_LABEL.ineffectiveness_sources}</dt>
           <dd>{doc.ineffectiveness_sources}</dd>
+          {rel.warnings.length > 0 && (
+            <>
+              <dt>Avisos de la designación</dt>
+              <dd>
+                <ul className="hedge-report__list">
+                  {rel.warnings.map((w) => (
+                    <li key={w.code}>{w.message}</li>
+                  ))}
+                </ul>
+              </dd>
+            </>
+          )}
+          {ded && (
+            <>
+              <dt>Desdesignación</dt>
+              <dd>
+                {[
+                  fmtDate(ded.date),
+                  ded.cause ? DEDESIGNATION_CAUSE_LABEL[ded.cause] : null,
+                  ded.reason,
+                ]
+                  .filter((part) => part != null)
+                  .join(' · ')}
+              </dd>
+            </>
+          )}
         </dl>
       </Section>
 
@@ -263,6 +295,20 @@ function ReportBody({ report }: { report: HedgeReport }) {
           ))
         )}
       </Section>
+
+      {report.reserve_releases.length > 0 && (
+        <Section title="Liberaciones de reserva">
+          {report.reserve_releases.map((r) => (
+            <div key={r.id} className="hedge-report__period">
+              <h3>Liberación al {fmtDate(r.as_of)}</h3>
+              <p className="hedge-report__dim">
+                {`${RELEASE_CAUSE_LABEL[r.cause]} · Snapshot ${r.snapshot} · Monto ${fmtMoney(r.amount, 'MXN')} · Reserva restante ${fmtMoney(r.reserve_after, 'MXN')}`}
+              </p>
+              <JournalTable rows={r.entries} memo />
+            </div>
+          ))}
+        </Section>
+      )}
 
       <Section title="Acumulado">
         {report.entries_total.length === 0 ? (
@@ -301,10 +347,19 @@ function ReportBody({ report }: { report: HedgeReport }) {
 
       <Section title="Reserva">
         <p>Saldo de la reserva de cobertura: {fmtMoney(reserve.balance, 'MXN')}</p>
-        {reserve.frozen && <p className="hedge-report__frozen">{reserve.note ?? 'Reserva congelada'}</p>}
+        {Math.abs(reserve.released) >= 0.005 && <p>Reserva liberada: {fmtMoney(reserve.released, 'MXN')}</p>}
+        {reserve.frozen && reserve.note && <p className="hedge-report__frozen">{reserve.note}</p>}
       </Section>
 
-      <p className="hedge-report__dim">Generado: {report.generated_at}</p>
+      <Section title="Supuestos de la metodología">
+        <ul className="hedge-report__list">
+          {HEDGE_DECLARATIONS.map((text) => (
+            <li key={text}>{text}</li>
+          ))}
+        </ul>
+      </Section>
+
+      <p className="hedge-report__dim">Generado: {fmtDateTime(report.generated_at)}</p>
     </>
   );
 }

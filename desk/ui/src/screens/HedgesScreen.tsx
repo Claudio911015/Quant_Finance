@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ApiError, createHedge, listHedges, listTrades } from '../api/client';
 import type {
   CreateHedgeBody,
+  HedgeDetail,
   HedgeDocumentation,
   HedgeSummary,
   HedgeType,
@@ -21,7 +22,7 @@ import {
   VALID_ITEM_KINDS,
   localizeMessage,
 } from '../lib/hedgeLabels';
-import { fmtDate, fmtMoney, fmtNumber } from '../lib/format';
+import { fmtDate, fmtMoney, fmtNumber, parseNumber } from '../lib/format';
 import { useSnapshot } from '../state/SnapshotContext';
 import { productTitle } from './pricers/registry';
 import './HedgesScreen.css';
@@ -51,14 +52,6 @@ function visibleFields(kind: ItemKind): string[] {
     ? ['index', 'notional', 'start_date', 'maturity_date', 'side']
     : ['amount_usd', 'date', 'side'];
   return ['trade_id', 'hedge_type', 'item_kind', ...terms, 'fraction', 'hedge_ratio', ...DOC_KEYS];
-}
-
-/** Número tecleado (acepta comas y espacios); `null` si está vacío o no es finito. */
-function parseNumber(raw: string): number | null {
-  const cleaned = raw.replace(/[,\s]/g, '');
-  if (cleaned === '') return null;
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : null;
 }
 
 interface FormValues {
@@ -130,7 +123,13 @@ function Field({ id, label, error, suffix, children }: FieldProps) {
   );
 }
 
-function NewHedgeForm({ snapshotId }: { snapshotId: string }) {
+interface NewHedgeFormProps {
+  snapshotId: string;
+  /** La relación se creó con avisos: la pantalla los muestra antes de seguir (sin avisos se va al detalle). */
+  onCreatedWithWarnings(created: HedgeDetail): void;
+}
+
+function NewHedgeForm({ snapshotId, onCreatedWithWarnings }: NewHedgeFormProps) {
   const navigate = useNavigate();
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradesError, setTradesError] = useState<string | null>(null);
@@ -227,7 +226,8 @@ function NewHedgeForm({ snapshotId }: { snapshotId: string }) {
     setBusy(true);
     try {
       const created = await createHedge(body);
-      navigate(`/coberturas/${created.id}`);
+      if (created.warnings.length > 0) onCreatedWithWarnings(created);
+      else navigate(`/coberturas/${created.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.field != null && visibleFields(v.itemKind).includes(err.field)) {
         setErrors({ [err.field]: localizeMessage(err.message) });
@@ -479,6 +479,7 @@ export default function HedgesScreen() {
   const [hedges, setHedges] = useState<HedgeSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [created, setCreated] = useState<HedgeDetail | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -502,7 +503,10 @@ export default function HedgesScreen() {
           type="button"
           className="hedges__btn"
           aria-expanded={formOpen}
-          onClick={() => setFormOpen((open) => !open)}
+          onClick={() => {
+            setCreated(null);
+            setFormOpen((open) => !open);
+          }}
         >
           Nueva relación
         </button>
@@ -515,7 +519,29 @@ export default function HedgesScreen() {
         </div>
       )}
 
-      {formOpen && <NewHedgeForm snapshotId={snapshotId} />}
+      {created && (
+        <section className="hedges__created" aria-label="Relación creada">
+          <h2>{`Cobertura ${created.id} creada con avisos`}</h2>
+          <ul>
+            {created.warnings.map((w) => (
+              <li key={w.code}>{w.message}</li>
+            ))}
+          </ul>
+          <Link to={`/coberturas/${created.id}`}>{`Ver la cobertura ${created.id}`}</Link>
+        </section>
+      )}
+
+      {formOpen && (
+        <NewHedgeForm
+          snapshotId={snapshotId}
+          onCreatedWithWarnings={(c) => {
+            // Los avisos no bloquean: la relación ya existe. Se cierra el formulario y se refresca la lista.
+            setCreated(c);
+            setFormOpen(false);
+            void load();
+          }}
+        />
+      )}
 
       {hedges == null && !error && <p className="hedges__meta">Cargando…</p>}
       {hedges != null && hedges.length === 0 && <p className="hedges__meta">Sin relaciones de cobertura</p>}

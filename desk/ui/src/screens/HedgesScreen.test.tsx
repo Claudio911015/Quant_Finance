@@ -105,7 +105,7 @@ function setup(hedges: HedgeSummary[] = HEDGES) {
   );
   mocks.listHedges.mockResolvedValue(hedges);
   mocks.listTrades.mockResolvedValue(TRADES);
-  mocks.createHedge.mockResolvedValue({ id: 5 } as HedgeDetail);
+  mocks.createHedge.mockResolvedValue({ id: 5, warnings: [] } as unknown as HedgeDetail);
 }
 
 function renderScreen() {
@@ -232,6 +232,62 @@ describe('HedgesScreen', () => {
       }),
     );
     await screen.findByText('detalle de cobertura');
+  });
+
+  it('si el alta trae avisos los muestra con un enlace a la cobertura, sin navegar', async () => {
+    setup();
+    mocks.createHedge.mockResolvedValue({
+      id: 5,
+      warnings: [
+        { code: 'no_economic_relationship', message: 'La prueba prospectiva no muestra relación económica entre el instrumento y la partida' },
+        { code: 'instrument_off_market', message: 'El instrumento vale MXN 12,500.00 al designar: ese valor ya está en libros y es fuente de inefectividad' },
+      ],
+    } as unknown as HedgeDetail);
+    renderScreen();
+    const form = await openForm();
+    fillFloatingLoan(form);
+    fireEvent.click(within(form).getByRole('button', { name: 'Crear relación' }));
+
+    const panel = await screen.findByRole('region', { name: 'Relación creada' });
+    expect(within(panel).getByRole('heading', { name: 'Cobertura 5 creada con avisos' })).toBeTruthy();
+    const items = within(panel).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items[0]).toContain('no muestra relación económica');
+    expect(items[1]).toContain('fuente de inefectividad');
+    expect(within(panel).getByRole('link', { name: 'Ver la cobertura 5' }).getAttribute('href')).toBe('/coberturas/5');
+    expect(screen.queryByText('detalle de cobertura')).toBeNull();
+    // El formulario se cierra y la lista se refresca para incluir la relación nueva.
+    expect(screen.queryByRole('form', { name: 'Nueva relación de cobertura' })).toBeNull();
+    await waitFor(() => expect(mocks.listHedges).toHaveBeenCalledTimes(2));
+  });
+
+  it('abrir de nuevo el formulario quita el panel de avisos de la relación anterior', async () => {
+    setup();
+    mocks.createHedge.mockResolvedValue({
+      id: 5,
+      warnings: [{ code: 'forecast_date_weekend', message: 'La fecha del flujo cae en fin de semana' }],
+    } as unknown as HedgeDetail);
+    renderScreen();
+    const form = await openForm();
+    fillFloatingLoan(form);
+    fireEvent.click(within(form).getByRole('button', { name: 'Crear relación' }));
+    await screen.findByRole('region', { name: 'Relación creada' });
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva relación' }));
+    expect(screen.queryByRole('region', { name: 'Relación creada' })).toBeNull();
+    expect(await screen.findByRole('form', { name: 'Nueva relación de cobertura' })).toBeTruthy();
+  });
+
+  it('un 409 de designación anterior al último evento (campo snapshot) se muestra como banda del formulario', async () => {
+    setup();
+    mocks.createHedge.mockRejectedValue(
+      new ApiError(409, 'La designación (2026-11-10) es anterior al último evento (2027-01-29) de la cobertura 3 de esta operación', 'snapshot'),
+    );
+    renderScreen();
+    const form = await openForm();
+    fillFloatingLoan(form);
+    fireEvent.click(within(form).getByRole('button', { name: 'Crear relación' }));
+    const alert = await within(form).findByRole('alert');
+    expect(alert.textContent).toContain('es anterior al último evento (2027-01-29) de la cobertura 3');
+    expect(screen.queryByText('detalle de cobertura')).toBeNull();
   });
 
   it('cambiar la partida a forecast_fx muestra sus campos y quita los del crédito', async () => {

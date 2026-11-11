@@ -14,6 +14,7 @@ import {
   postEvent,
   price,
   refreshMarket,
+  releaseHedgeReserve,
   riskVar,
   valuation,
 } from './client';
@@ -180,14 +181,30 @@ describe('cliente API: coberturas', () => {
     expect(init.body).toBe('{"snapshot":"D1"}');
   });
 
-  it('dedesignateHedge hace POST a /api/hedges/1/dedesignate con fecha y motivo', async () => {
+  it('dedesignateHedge hace POST a /api/hedges/1/dedesignate con snapshot, motivo y causa', async () => {
     const fn = mockFetch(201, { id: 1 });
-    const body = { date: '2027-01-10', reason: 'Prepago del crédito' };
+    const body = { snapshot: 'D2', reason: 'Prepago del crédito', cause: 'instrument_ended' as const };
     await dedesignateHedge(1, body);
     const [url, init] = fn.mock.calls[0];
     expect(url).toBe('/api/hedges/1/dedesignate');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual(body);
+  });
+
+  it('releaseHedgeReserve hace POST a /api/hedges/1/release con snapshot, monto y causa', async () => {
+    const fn = mockFetch(201, { id: 1 });
+    const body = { snapshot: 'D2', amount: -1000, cause: 'flow_occurred' as const };
+    await releaseHedgeReserve(1, body);
+    const [url, init] = fn.mock.calls[0];
+    expect(url).toBe('/api/hedges/1/release');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual(body);
+  });
+
+  it('releaseHedgeReserve sin monto no lo envía (libera todo el saldo)', async () => {
+    const fn = mockFetch(201, { id: 1 });
+    await releaseHedgeReserve(1, { snapshot: 'D2', cause: 'flow_no_longer_expected' });
+    expect(JSON.parse(fn.mock.calls[0][1].body)).toEqual({ snapshot: 'D2', cause: 'flow_no_longer_expected' });
   });
 
   it('hedgeEffectiveness pasa el snapshot en la consulta', async () => {

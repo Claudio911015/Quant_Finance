@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtDate, fmtMoney, fmtNumber, fmtRate } from './format';
+import { fmtDate, fmtDateTime, fmtMoney, fmtNumber, fmtRate, parseNumber } from './format';
 
 describe('format', () => {
   it('fmtRate muestra la tasa en % con 4 decimales', () => {
@@ -30,5 +30,20 @@ describe('format', () => {
 
   it('fmtDate devuelve el ISO tal cual', () => {
     expect(fmtDate('2026-11-10')).toBe('2026-11-10');
+  });
+
+  it('fmtDateTime muestra fecha ISO, hora y zona, y devuelve tal cual lo que no puede leer', () => {
+    expect(fmtDateTime('2026-11-11T18:00:00+00:00')).toBe('2026-11-11 18:00 UTC');
+    // una marca con otra zona se lleva a UTC para que la etiqueta no mienta
+    expect(fmtDateTime('2026-11-11T12:30:45-06:00')).toBe('2026-11-11 18:30 UTC');
+    expect(fmtDateTime('no es una fecha')).toBe('no es una fecha');
+  });
+
+  it('parseNumber acepta comas y espacios y rechaza lo vacío o no finito', () => {
+    expect(parseNumber('1,250,000.5')).toBe(1250000.5);
+    expect(parseNumber(' 50 ')).toBe(50);
+    expect(parseNumber('')).toBeNull();
+    expect(parseNumber('abc')).toBeNull();
+    expect(parseNumber('Infinity')).toBeNull();
   });
 });

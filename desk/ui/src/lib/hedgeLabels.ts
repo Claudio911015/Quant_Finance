@@ -1,4 +1,4 @@
-import type { HedgeEvent, HedgeStatus, HedgeType, ItemKind } from '../api/types';
+import type { DedesignationCause, HedgeEvent, HedgeStatus, HedgeType, ItemKind, ReleaseCause } from '../api/types';
 
 export const HEDGE_TYPE_LABEL: Record<HedgeType, string> = {
   cash_flow: 'Flujo de efectivo',
@@ -20,6 +20,9 @@ export const SIDE_LABEL: Record<string, string> = {
   sell_usd: 'Venta de USD',
   buy: 'Compra',
   sell: 'Venta',
+  // Lado del swap en el término crítico "Sentido": paga o cobra la tasa fija.
+  payer: 'Paga fija',
+  receiver: 'Cobra fija',
 };
 
 /** Partidas cubiertas admitidas por tipo de cobertura (el backend rechaza el resto con 400). */
@@ -37,6 +40,18 @@ export const HEDGE_EVENT_LABEL: Record<HedgeEvent['type'], string> = {
   designation: 'Designación',
   period_close: 'Cierre de periodo',
   dedesignation: 'Desdesignación',
+  reserve_release: 'Liberación de reserva',
+};
+
+export const DEDESIGNATION_CAUSE_LABEL: Record<DedesignationCause, string> = {
+  instrument_ended: 'El instrumento venció, se vendió o se terminó',
+  criteria_not_met: 'La relación deja de cumplir los criterios',
+  risk_objective_changed: 'Cambió el objetivo de gestión de riesgo',
+};
+
+export const RELEASE_CAUSE_LABEL: Record<ReleaseCause, string> = {
+  flow_occurred: 'El flujo cubierto ocurrió',
+  flow_no_longer_expected: 'El flujo cubierto ya no se espera',
 };
 
 export const TERM_RESULT_LABEL = {
@@ -69,6 +84,9 @@ const KEY_LABEL: Record<string, string> = {
   fraction: 'Fracción',
   hedge_ratio: 'Razón de cobertura',
   reason: 'Motivo',
+  snapshot: 'Snapshot',
+  cause: 'Causa',
+  amount: 'Monto',
   ...DOC_FIELD_LABEL,
 };
 

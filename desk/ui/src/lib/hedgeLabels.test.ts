@@ -13,6 +13,12 @@ describe('localizeMessage', () => {
     );
   });
 
+  it('rotula las claves de desdesignar y liberar la reserva', () => {
+    expect(localizeMessage("'amount' debe ser de al menos un centavo")).toBe('Monto debe ser de al menos un centavo');
+    expect(localizeMessage("'cause' debe ser texto")).toBe('Causa debe ser texto');
+    expect(localizeMessage("'snapshot' no puede estar vacío")).toBe('Snapshot no puede estar vacío');
+  });
+
   it('cambia los identificadores sueltos por su nombre en español', () => {
     expect(localizeMessage('La partida floating_loan se cubre con un irs, no con un fx_forward')).toBe(
       'La partida crédito a tasa variable se cubre con un swap de tasas, no con un forward FX',
