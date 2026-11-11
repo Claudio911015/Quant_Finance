@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-11-11T17:39:51+00:00",
+  "generated_at": "2026-11-11T18:00:55+00:00",
   "snapshot": {
     "id": "MX-DEMO",
     "as_of": "2026-11-10",
     "spot": 18.6
   },
-  "desk_commit": "02d9dd3f228a71e9222b1510c962ab9f0992ffa7",
+  "desk_commit": "78e098d2f272bb472765a7bf487627b5422cfbab",
   "desk_dirty": false,
   "hw": {
     "TIIE-F": {
@@ -453,7 +453,7 @@
       "product": "irs",
       "source": "battery",
       "trade_id": null,
-      "label": "Paga fija TIIE-F · 1 periodos de 28 días · fija 6.5000 %",
+      "label": "Paga fija TIIE-F · 1 periodo de 28 días · fija 6.5000 %",
       "params": {
         "curve": "TIIE-F",
         "side": "payer",
@@ -650,7 +650,7 @@
       "product": "irs",
       "source": "battery",
       "trade_id": null,
-      "label": "Recibe fija SOFR · 1 periodos de 365 días · fija 3.8000 %",
+      "label": "Recibe fija SOFR · 1 periodo de 365 días · fija 3.8000 %",
       "params": {
         "curve": "SOFR",
         "side": "receiver",
@@ -1469,7 +1469,7 @@
       "product": "bond",
       "source": "battery",
       "trade_id": null,
-      "label": "Bono TIIE-F · cupón 0.00 % · 1 cupones cada 365 días",
+      "label": "Bono TIIE-F · cupón 0.00 % · 1 cupón cada 365 días",
       "params": {
         "curve": "TIIE-F",
         "face": 50000000.0,
@@ -1987,7 +1987,7 @@
       "product": "swaption",
       "source": "battery",
       "trade_id": null,
-      "label": "Receptora TIIE-F · expira en 182 días · swap de 1 años · strike 6.50 %",
+      "label": "Receptora TIIE-F · expira en 182 días · swap de 1 año · strike 6.50 %",
       "params": {
         "curve": "TIIE-F",
         "swaption_type": "receiver",
