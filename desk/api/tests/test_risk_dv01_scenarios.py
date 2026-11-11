@@ -82,6 +82,36 @@ def test_key_rates_add_up_to_parallel(irs_client):
     assert all(p["dv01_mxn"] == 0 for p in d["curves"]["SOFR"]["points"])
 
 
+# Un producto solo en el portafolio: R4 exige que la escalera sume el DV01 paralelo de cada curva.
+# Las diferencias unilaterales de +1 pb en un solo pilar sobreestiman la convexidad del cap/floor
+# (la suma de pilares se separaba 4.0 % del paralelo); las centrales ±1 pb la cancelan.
+ADDITIVITY_CASES = {
+    "irs TIIE-F": ("irs", IRS_PAYER),
+    "irs SOFR": ("irs", {"curve": "SOFR", "side": "payer", "notional": 20e6, "periods": 5, "fixed_rate": 0.036}),
+    "cap": ("cap_floor", {"curve": "TIIE-F", "cap_type": "cap", "notional": 300e6, "periods": 39, "strike": 0.075}),
+    "floor": ("cap_floor", {"curve": "TIIE-F", "cap_type": "floor", "notional": 300e6, "periods": 39, "strike": 0.065}),
+    "swaption": ("swaption", {"curve": "TIIE-F", "swaption_type": "payer", "notional": 200e6, "strike": 0.07,
+                              "expiry_years": 1.0, "swap_tenor_years": 5.0}),
+    "bond": ("bond", {"curve": "TIIE-F", "face": 100e6, "coupon_rate": 0.08, "periods": 20, "frequency": 2}),
+    "fx_forward": ("fx_forward", FWD),
+    "fx_option": ("fx_option", {"side": "buy", "option_type": "call", "notional_usd": 5e6, "days": 91,
+                                "strike": 19.0}),
+}
+
+
+@pytest.mark.parametrize("case", list(ADDITIVITY_CASES))
+def test_key_rates_add_up_to_parallel_per_product(client, case):
+    product, params = ADDITIVITY_CASES[case]
+    _clear(client)
+    _add(client, product, params)
+    d = _dv01(client)
+    assert d["errors"] == []
+    assert any(c["parallel_mxn"] != 0 for c in d["curves"].values())
+    for name, curve in d["curves"].items():
+        key_rates = sum(p["dv01_mxn"] for p in curve["points"])
+        assert abs(key_rates - curve["parallel_mxn"]) <= 0.02 * abs(curve["parallel_mxn"]), (name, key_rates)
+
+
 def test_dv01_sign_convention_payer_loses_when_rates_fall(client):
     _clear(client)
     _add(client, "irs", IRS_PAYER)

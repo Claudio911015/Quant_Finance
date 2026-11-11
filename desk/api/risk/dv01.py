@@ -3,6 +3,13 @@
 Convención del desk: `DV01 = PV(base) − PV(curva +1 pb)`, positivo si el PV sube cuando bajan
 las tasas. La revaluación la hace cada `Product` (vía `portfolio.trade_pv_mxn`); aquí solo se
 arman los choques, se restan PV y se agregan.
+
+El paralelo sigue esa convención (coincide con `/api/price`, la exposición del VaR y el escenario
++1 pb). El DV01 por pilar usa en cambio la diferencia central `(PV(−1 pb) − PV(+1 pb)) / 2`: un
+cap/floor es convexo y un choque en un solo pilar mueve las tasas forward varios pb (la rampa de
+tasa cero se amplifica por T/Δpilar), así que la diferencia unilateral de cada pilar arrastra un
+término de segundo orden que no suma al del paralelo (la escalera de un cap quedaba 4.0 % lejos
+del paralelo). La central lo cancela y las rampas suman exactamente un desplazamiento paralelo.
 """
 import sqlite3
 from typing import Any, Dict, List
@@ -12,16 +19,17 @@ from desk.api.market import MarketContext
 
 
 def _shocked_contexts(mkt: MarketContext) -> Dict[str, Dict[str, Any]]:
-    """Por curva: el contexto con +1 pb paralelo y uno por pilar con +1 pb solo en ese pilar."""
+    """Por curva: el contexto con +1 pb paralelo y, por pilar, el par (−1 pb, +1 pb) solo en ese pilar."""
     shocked = {}
     for curve in market.CURVES:
         n = len(mkt.pillars[curve])
+
+        def at_pillar(i: int, bp: float) -> MarketContext:
+            return mkt.shifted(curve=curve, pillar_shifts_bp=[bp if j == i else 0.0 for j in range(n)])
+
         shocked[curve] = {
             "parallel": mkt.shifted(curve=curve, parallel_bp=1.0),
-            "pillars": [
-                mkt.shifted(curve=curve, pillar_shifts_bp=[1.0 if j == i else 0.0 for j in range(n)])
-                for i in range(n)
-            ],
+            "pillars": [(at_pillar(i, -1.0), at_pillar(i, 1.0)) for i in range(n)],
         }
     return shocked
 
@@ -51,7 +59,10 @@ def compute_dv01(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
             contrib = {
                 c: {
                     "parallel": base - portfolio.trade_pv_mxn(trade, s["parallel"]),
-                    "points": [base - portfolio.trade_pv_mxn(trade, m) for m in s["pillars"]],
+                    "points": [
+                        (portfolio.trade_pv_mxn(trade, down) - portfolio.trade_pv_mxn(trade, up)) / 2.0
+                        for down, up in s["pillars"]
+                    ],
                 }
                 for c, s in shocked.items()
             }
