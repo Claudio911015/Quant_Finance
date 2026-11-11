@@ -438,3 +438,64 @@ describe('MarketScreen', () => {
     expect((screen.getByRole('button', { name: 'Actualizar datos' }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+describe('MarketScreen · Rodar', () => {
+  const ROLLED: Snapshot = { ...SNAPSHOT, id: 'D1', label: 'México demo (sintético) · rodado al 2026-12-08', as_of: '2026-12-08' };
+
+  /** Backend para rodar: POST /market/MX-DEMO/roll responde `roll`; después D1 existe en la lista. */
+  function mockRoll(roll: () => Response) {
+    let hasD1 = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).replace(/^\/api/, '');
+      if (init?.method === 'POST' && path === '/market/MX-DEMO/roll') {
+        const res = roll();
+        if (res.status === 201) hasD1 = true;
+        return res;
+      }
+      if (path === '/market/snapshots') {
+        return json({ snapshots: hasD1 ? [SNAPSHOT, ROLLED] : [SNAPSHOT] });
+      }
+      if (path === '/market/snapshots/MX-DEMO') return json(SNAPSHOT);
+      if (path === '/market/snapshots/D1' && hasD1) return json(ROLLED);
+      return json({ error: 'Snapshot no encontrado', field: null }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const rollPosts = (fetchMock: ReturnType<typeof mockRoll>) =>
+    fetchMock.mock.calls.filter(([url, init]) => url === '/api/market/MX-DEMO/roll' && init?.method === 'POST');
+
+  it('Rodar… abre el formulario; enviarlo hace POST del roll y selecciona el nuevo snapshot', async () => {
+    const fetchMock = mockRoll(() => json(ROLLED, 201));
+    renderScreen();
+    await screen.findByLabelText('Spot USDMXN');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rodar…' }));
+    fireEvent.change(screen.getByLabelText('Id nuevo'), { target: { value: 'D1' } });
+    fireEvent.change(screen.getByLabelText('Fecha de valuación'), { target: { value: '2026-12-08' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rodar' }));
+
+    await waitFor(() => expect(rollPosts(fetchMock)).toHaveLength(1));
+    expect(JSON.parse(String(rollPosts(fetchMock)[0][1]?.body))).toEqual({ id: 'D1', as_of: '2026-12-08' });
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Mercado' })).toBeTruthy());
+    await waitFor(() => expect(gets(fetchMock, '/market/snapshots/D1')).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.queryByLabelText('Id nuevo')).toBeNull());
+  });
+
+  it('un 409 con field "id" aparece bajo "Id nuevo" y no cambia de snapshot', async () => {
+    mockRoll(() => json({ error: 'Ya existe un snapshot con ese id', field: 'id' }, 409));
+    renderScreen();
+    await screen.findByLabelText('Spot USDMXN');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rodar…' }));
+    fireEvent.change(screen.getByLabelText('Id nuevo'), { target: { value: 'MX-DEMO' } });
+    fireEvent.change(screen.getByLabelText('Fecha de valuación'), { target: { value: '2026-12-08' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rodar' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('Ya existe un snapshot con ese id');
+    expect(alert.previousElementSibling?.textContent).toContain('Id nuevo');
+    expect((screen.getByLabelText('Id nuevo') as HTMLInputElement).value).toBe('MX-DEMO');
+  });
+});

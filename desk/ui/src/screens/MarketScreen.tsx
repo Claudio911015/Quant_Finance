@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   AllCommunityModule,
   ModuleRegistry,
@@ -9,7 +9,7 @@ import {
   type GridApi,
 } from 'ag-grid-community';
 import type { EChartsCoreOption } from 'echarts/core';
-import { ApiError, refreshMarket, updateSnapshot } from '../api/client';
+import { ApiError, refreshMarket, rollSnapshot, updateSnapshot } from '../api/client';
 import type { CurvePoint, Quote, Snapshot, Source, SourceKey } from '../api/types';
 import { EChart, cssColor } from '../components/EChart';
 import { fmtNumber } from '../lib/format';
@@ -356,6 +356,94 @@ function SpotField({ snapshot, onSave }: { snapshot: Snapshot; onSave: (n: numbe
   );
 }
 
+/* ---------- Rodar ---------- */
+
+/** Copia el snapshot activo a uno nuevo con otra fecha de valuación y lo selecciona. */
+function RollControl({ sourceId }: { sourceId: string }) {
+  const { setSnapshotId, reload } = useSnapshot();
+  const [open, setOpen] = useState(false);
+  const [newId, setNewId] = useState('');
+  const [asOf, setAsOf] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState<{ id?: string; as_of?: string; form?: string }>({});
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true);
+    setErrors({});
+    try {
+      const rolled = await rollSnapshot(sourceId, { id: newId, as_of: asOf });
+      setSnapshotId(rolled.id);
+      setOpen(false);
+      setNewId('');
+      setAsOf('');
+      await reload();
+    } catch (err) {
+      const message = describeError(err);
+      if (err instanceof ApiError && err.field === 'id') setErrors({ id: message });
+      else if (err instanceof ApiError && err.field === 'as_of') setErrors({ as_of: message });
+      else setErrors({ form: message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="market__roll-box">
+      <button
+        type="button"
+        className="market__btn"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        Rodar…
+      </button>
+      {open && (
+        <form className="market__roll" aria-label="Rodar snapshot" onSubmit={(e) => void submit(e)}>
+          <label className="market__field">
+            <span>Id nuevo</span>
+            <input
+              className="market__input"
+              type="text"
+              value={newId}
+              disabled={busy}
+              onChange={(e) => setNewId(e.target.value)}
+            />
+          </label>
+          {errors.id && (
+            <p role="alert" className="market__error">
+              {errors.id}
+            </p>
+          )}
+          <label className="market__field">
+            <span>Fecha de valuación</span>
+            <input
+              className="market__input"
+              type="date"
+              value={asOf}
+              disabled={busy}
+              onChange={(e) => setAsOf(e.target.value)}
+            />
+          </label>
+          {errors.as_of && (
+            <p role="alert" className="market__error">
+              {errors.as_of}
+            </p>
+          )}
+          <button type="submit" className="market__btn" disabled={busy}>
+            {busy ? 'Rodando…' : 'Rodar'}
+          </button>
+          {errors.form && (
+            <p role="alert" className="market__error">
+              {errors.form}
+            </p>
+          )}
+        </form>
+      )}
+    </div>
+  );
+}
+
 export function MarketScreen() {
   const { snapshot, snapshots, setSnapshot, setSnapshotId, reload, error } = useSnapshot();
   const [quoteError, setQuoteError] = useState<{ curve: string; message: string } | null>(null);
@@ -454,6 +542,7 @@ export function MarketScreen() {
         <h1>Mercado</h1>
         <div className="market__actions">
           <SpotField snapshot={snapshot} onSave={saveSpot} />
+          <RollControl sourceId={snapshot.id} />
           {refreshControl}
         </div>
       </header>
