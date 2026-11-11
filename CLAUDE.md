@@ -11,7 +11,7 @@ cmake -S . -B build
 # Build everything
 cmake --build build --target all 2>&1
 
-# Run C++ tests (GoogleTest) — 153 tests, must all pass before commit
+# Run C++ tests (GoogleTest) — 402 tests, must all pass before commit
 cd build && ctest --output-on-failure 2>&1
 
 # Single test file
@@ -65,6 +65,25 @@ Web UI (`python_web/app.py`, Flask port 5001) imports `qfpy` from `build/src/`. 
 ### Web UI pages
 
 2 pages, 8 JSON endpoints: Options (BS/MC/BT/FDM) and Bonds/Swaps/IRS tab.
+
+## QF Desk (`desk/`)
+
+Workstation local de valuación y riesgo sobre `qfpy` (rama `feat/qf-desk`): backend Flask + SQLite en `desk/api` (Python 3.8 de Anaconda: sin `match` ni `X | Y`) y UI React + TypeScript + Vite en `desk/ui`. Toda la matemática financiera vive en C++ y se llama por `qfpy`; Python valida, orquesta fechas y fijaciones, y persiste.
+
+```bash
+./desk/run.sh   # compila qfpy si falta, construye la UI y sirve en http://localhost:5070
+```
+
+Las cuatro suites (todas verdes antes de commit; `desk/api` y vitest crecen con cada corte, la cuenta vigente la da su propia salida):
+
+```bash
+cmake --build build -j4 && (cd build && ctest --output-on-failure)   # C++ (402)
+cmake --build build --target pytests                                  # bindings qfpy (unittest)
+/home/claudio/anaconda3/bin/python -m pytest desk/api/tests -q        # backend
+cd desk/ui && npm test && npm run build                               # UI (vitest + tsc -b && vite build)
+```
+
+Diseño, plan y hoja de ruta: `docs/superpowers/qf-desk/` (`design.md`, `plan.md`, `roadmap.md`) y, por corte, `corte2/` (`design.md`, `plan.md`). Para pruebas con servidor, usar otro puerto que 5070 y una base temporal.
 
 ## File Conventions
 
