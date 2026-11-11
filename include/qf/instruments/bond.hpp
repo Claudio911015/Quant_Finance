@@ -1,4 +1,5 @@
 #pragma once
+#include <utility>
 #include <vector>
 #include <qf/instruments/instrument.hpp>
 #include <qf/core/market_environment.hpp>
@@ -25,6 +26,11 @@ public:
     double yield(double marketPrice) const;  // YTM via root-finding
     double duration(const termstructure::YieldCurve& curve) const;
     double convexity(const termstructure::YieldCurve& curve) const;
+
+    /// @brief Coupon and principal schedule used by price().
+    /// @return Pairs (time in years, cash flow amount), one per coupon period;
+    ///         the last amount includes the principal.
+    std::vector<std::pair<double, double>> cashFlowSchedule() const;
 
     math::DayCountConvention dayCount() const { return dcc_; }
 

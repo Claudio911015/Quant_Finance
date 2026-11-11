@@ -40,6 +40,17 @@ std::vector<double> Bond::maturities() const
     return t;
 }
 
+std::vector<std::pair<double, double>> Bond::cashFlowSchedule() const
+{
+    auto cf = cashflows();
+    auto t  = maturities();
+    std::vector<std::pair<double, double>> schedule;
+    schedule.reserve(cf.size());
+    for (std::size_t i = 0; i < cf.size(); ++i)
+        schedule.emplace_back(t[i], cf[i]);
+    return schedule;
+}
+
 double Bond::price(const termstructure::YieldCurve& curve) const
 {
     auto cf = cashflows();

@@ -30,6 +30,8 @@ if(GTest_FOUND)
         test_ois_swap.cpp
         test_fx_forward.cpp
         test_fx_option.cpp
+        test_delta_normal_var.cpp
+        test_bond_cashflows.cpp
     )
 
     target_link_libraries(qf_tests PRIVATE qf GTest::gtest_main)
