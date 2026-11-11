@@ -12,8 +12,8 @@ from desk.api.tests.test_valuation_aged import AS_OF, FWD, _book, _event, _iso
 
 EXPLAIN = "/api/pnl/explain?from=%s&to=%s"
 PNL = "/api/pnl?from=%s&to=%s"
-KEYS = ["carry", "curve:TIIE-F", "curve:SOFR", "fx", "vol", "new_trades", "events", "residual"]
-ZERO_KEYS = ["curve:TIIE-F", "curve:SOFR", "fx", "vol", "new_trades", "events"]
+KEYS = ["carry", "curve:TIIE-F", "curve:SOFR", "curve:MXN-USD", "fx", "vol", "new_trades", "events", "residual"]
+ZERO_KEYS = ["curve:TIIE-F", "curve:SOFR", "curve:MXN-USD", "fx", "vol", "new_trades", "events"]
 
 
 def _get(client, url, src, dst):

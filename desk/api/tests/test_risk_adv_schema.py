@@ -86,7 +86,7 @@ def test_corte6_schema_is_recreated_on_an_existing_database(app, client):
 
 def test_contract_constants():
     assert [k for k, _ in explain.STEPS] == [
-        "carry", "curve:TIIE-F", "curve:SOFR", "fx", "vol", "new_trades", "events", "residual"]
+        "carry", "curve:TIIE-F", "curve:SOFR", "curve:MXN-USD", "fx", "vol", "new_trades", "events", "residual"]
     assert [s["name"] for s in scenario_sets.BUILTIN_SETS] == [
         "Por omisión", "Depreciación 2008", "2016 elecciones EE. UU.", "Marzo 2020"]
     assert len(scenario_sets.BUILTIN_SETS[0]["scenarios"]) == 8

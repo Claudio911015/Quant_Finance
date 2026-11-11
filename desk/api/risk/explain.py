@@ -18,11 +18,17 @@ from desk.api.validation import NON_FINITE_MESSAGE, has_non_finite
 
 # "TIIE-F" primero y luego las demás curvas de `market.CURVES` en orden alfabético.
 _CURVE_ORDER = ["TIIE-F"] + sorted(c for c in market.CURVES if c != "TIIE-F")
+# La curva `MXN-USD` (corte 3) es dependiente: no trae cotizaciones propias en `quotes`, sino los puntos
+# forward y la base de `fx_forwards`/`xccy_basis`. Tiene su propio paso, después de las curvas de las que
+# depende y antes del tipo de cambio; sin él, un cambio de esos puntos acabaría en "Eventos".
+CSA_KEY = "curve:%s" % market.CSA_CURVE
+CSA_QUOTES = ("fx_forwards", "xccy_basis")
 
 STEPS = (
     [("carry", "Paso del tiempo y liquidaciones")]
     + [("curve:%s" % c, "Tasas %s" % c) for c in _CURVE_ORDER]
     + [
+        (CSA_KEY, "Puntos forward y base (%s)" % market.CSA_CURVE),
         ("fx", "Tipo de cambio"),
         ("vol", "Volatilidad"),
         ("new_trades", "Operaciones nuevas"),
@@ -32,7 +38,7 @@ STEPS = (
 )
 
 
-_CURVE_KEYS = [key for key, _ in STEPS if key.startswith("curve:")]
+_CURVE_KEYS = [key for key, _ in STEPS if key.startswith("curve:") and key != CSA_KEY]
 
 
 def _replace_curve(quotes: List[Dict[str, Any]], curve: str, new: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -51,7 +57,7 @@ def _replace_curve(quotes: List[Dict[str, Any]], curve: str, new: List[Dict[str,
 
 
 def _hybrid_contexts(conn: sqlite3.Connection, from_id: str, to_id: str, to_as_of: str) -> List[Any]:
-    """Contextos `[H0, H1 (+TIIE-F), …, +cada curva, +fx, +vol/hw]`, todos con `as_of = to.as_of`.
+    """Contextos `[H0, H1 (+TIIE-F), …, +cada curva, +puntos MXN-USD, +fx, +vol/hw]`, todos con `as_of = to.as_of`.
 
     Si un paso no cambia ningún dato respecto al anterior se reutiliza el mismo objeto: así su
     diferencia de valuación es 0.0 exacto y no se valúa dos veces.
@@ -65,6 +71,12 @@ def _hybrid_contexts(conn: sqlite3.Connection, from_id: str, to_id: str, to_as_o
         curve = key.split(":", 1)[1]
         data["quotes"] = _replace_curve(data["quotes"], curve, [q for q in d_to["quotes"] if q["curve"] == curve])
         stages.append(copy.deepcopy(data))
+    for name in CSA_QUOTES:
+        if name in d_to:
+            data[name] = copy.deepcopy(d_to[name])
+        else:
+            data.pop(name, None)
+    stages.append(copy.deepcopy(data))
     data["fx"] = copy.deepcopy(d_to["fx"])
     stages.append(copy.deepcopy(data))
     data["vol_surface"] = copy.deepcopy(d_to["vol_surface"])
@@ -102,7 +114,7 @@ def _components(
     flows, _ = settlement.settled_flows(t0, fixings, from_as_of, mkt_to.as_of, mkt_to.spot, mkt_to)
     s0 = sum((f["amount_mxn"] for f in flows), 0.0)
     comps["carry"] = values[0] - row["pv_from"] + s0
-    for key, before, after in zip(_CURVE_KEYS + ["fx", "vol"], values, values[1:]):
+    for key, before, after in zip(_CURVE_KEYS + [CSA_KEY, "fx", "vol"], values, values[1:]):
         comps[key] = after - before
     comps["events"] = (row["pv_to"] + row["settled"]) - (values[-1] + s0)
     if has_non_finite(list(comps.values())):
