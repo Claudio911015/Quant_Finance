@@ -22,6 +22,14 @@
 #include <qf/models/heston_calibrator.hpp>
 #include <qf/instruments/swap.hpp>
 #include <qf/risk/scenario.hpp>
+#include <qf/risk/delta_normal_var.hpp>
+#include <qf/math/daycount.hpp>
+#include <qf/termstructure/ois_bootstrap.hpp>
+#include <qf/instruments/ois_swap.hpp>
+#include <qf/instruments/fx_forward.hpp>
+#include <qf/instruments/fx_option.hpp>
+#include <qf/instruments/capfloor.hpp>
+#include <qf/instruments/swaption.hpp>
 
 namespace py = pybind11;
 
@@ -162,10 +170,24 @@ PYBIND11_MODULE(qfpy, m) {
              py::arg("env"), "Present value against a MarketEnvironment.")
         .def("maturity", &qf::instruments::Instrument::maturity);
 
+    // Registered before Bond/CapFloor/Swaption/OisSwap: their constructors take it as a
+    // defaulted argument, and pybind11 converts the default when the binding is defined.
+    // Values are not exported to module scope (ACT_360 etc. are reached as
+    // DayCountConvention.ACT_360) so new enums cannot shadow each other's names.
+    py::enum_<qf::math::DayCountConvention>(m, "DayCountConvention")
+        .value("ACT_360",      qf::math::DayCountConvention::ACT_360)
+        .value("ACT_365",      qf::math::DayCountConvention::ACT_365)
+        .value("ACT_ACT_ISDA", qf::math::DayCountConvention::ACT_ACT_ISDA)
+        .value("THIRTY_360",   qf::math::DayCountConvention::THIRTY_360);
+
     py::class_<qf::instruments::Bond, qf::instruments::Instrument>(m, "Bond")
-        .def(py::init<double, double, int, double>(),
-             py::arg("faceValue"), py::arg("couponRate"), py::arg("periods"), py::arg("frequency") = 2.0)
+        .def(py::init<double, double, int, double, qf::math::DayCountConvention>(),
+             py::arg("faceValue"), py::arg("couponRate"), py::arg("periods"), py::arg("frequency") = 2.0,
+             py::arg("dcc") = qf::math::DayCountConvention::ACT_365)
         .def("price", &qf::instruments::Bond::price)
+        .def("cash_flow_schedule", &qf::instruments::Bond::cashFlowSchedule,
+             "List of (time in years, cash flow amount) per coupon period; the last "
+             "amount includes the principal.")
         .def("yield", &qf::instruments::Bond::yield)
         .def("duration", &qf::instruments::Bond::duration)
         .def("convexity", &qf::instruments::Bond::convexity);
@@ -579,4 +601,141 @@ PYBIND11_MODULE(qfpy, m) {
           py::arg("engine"), py::arg("instrument"), py::arg("env"),
           "Return the key-rate DV01 ladder as a pandas DataFrame with columns "
           "maturity, dv01 (follows CVAResult.to_dataframe() precedent).");
+
+    // ------------------------------------------------------------------ //
+    // OIS bootstrap and OIS swap (TIIE de Fondeo 28d, SOFR annual)        //
+    // ------------------------------------------------------------------ //
+    py::enum_<qf::termstructure::OisQuote::Type>(m, "OisQuoteType")
+        .value("Deposit", qf::termstructure::OisQuote::Deposit)
+        .value("Ois",     qf::termstructure::OisQuote::Ois);
+
+    py::class_<qf::termstructure::OisQuote>(m, "OisQuote")
+        .def(py::init([](int days, double rate, qf::termstructure::OisQuote::Type type) {
+                 return qf::termstructure::OisQuote{days, rate, type};
+             }),
+             py::arg("days"), py::arg("rate"), py::arg("type"),
+             "Market quote in calendar days: a simple deposit rate or a par OIS fixed rate.")
+        .def_readwrite("days", &qf::termstructure::OisQuote::days)
+        .def_readwrite("rate", &qf::termstructure::OisQuote::rate)
+        .def_readwrite("type", &qf::termstructure::OisQuote::type);
+
+    m.def("bootstrap_ois", &qf::termstructure::bootstrapOis,
+          py::arg("quotes"), py::arg("period_days"),
+          py::arg("accrual_dcc") = qf::math::DayCountConvention::ACT_360,
+          py::arg("method") = qf::math::InterpolationMethod::Linear,
+          "Bootstrap a zero curve (t = days/365, continuous zeros) from deposits and par OIS "
+          "swaps sorted by strictly increasing days. Needs at least two quotes.");
+    m.def("ois_payment_days", &qf::termstructure::oisPaymentDays,
+          py::arg("maturity_days"), py::arg("period_days"),
+          "Payment days k*period_days up to maturity_days, which is always the last one.");
+
+    py::class_<qf::instruments::OisCashFlow>(m, "OisCashFlow")
+        .def_readonly("pay_days",        &qf::instruments::OisCashFlow::payDays)
+        .def_readonly("pay_time",        &qf::instruments::OisCashFlow::payTime)
+        .def_readonly("accrual",         &qf::instruments::OisCashFlow::accrual)
+        .def_readonly("fixed_amount",    &qf::instruments::OisCashFlow::fixedAmount)
+        .def_readonly("float_amount",    &qf::instruments::OisCashFlow::floatAmount)
+        .def_readonly("net_amount",      &qf::instruments::OisCashFlow::netAmount)
+        .def_readonly("discount_factor", &qf::instruments::OisCashFlow::discountFactor)
+        .def_readonly("present_value",   &qf::instruments::OisCashFlow::presentValue);
+
+    py::class_<qf::instruments::OisSwap, qf::instruments::Instrument>(m, "OisSwap")
+        .def(py::init<double, double, int, int, qf::instruments::SwapType, std::string,
+                      qf::math::DayCountConvention>(),
+             py::arg("notional"), py::arg("fixed_rate"), py::arg("maturity_days"),
+             py::arg("period_days"), py::arg("swap_type"), py::arg("curve_key"),
+             py::arg("dcc") = qf::math::DayCountConvention::ACT_360,
+             "Overnight-index swap with a day-based schedule, projected and discounted "
+             "off the curve named curve_key.")
+        .def("npv", &qf::instruments::OisSwap::npv, py::arg("env"),
+             "Net present value from the swap_type perspective.")
+        .def("par_rate", &qf::instruments::OisSwap::parRate, py::arg("env"),
+             "Fixed rate that makes the NPV zero.")
+        .def("annuity", &qf::instruments::OisSwap::annuity, py::arg("env"),
+             "Sum of notional * accrual * DF over the schedule.")
+        .def("cash_flows", &qf::instruments::OisSwap::cashFlows, py::arg("env"),
+             "One OisCashFlow per period; the sum of present_value equals npv().");
+
+    // ------------------------------------------------------------------ //
+    // FX forward and FX option (Garman-Kohlhagen)                         //
+    // ------------------------------------------------------------------ //
+    py::enum_<qf::instruments::FxSide>(m, "FxSide")
+        .value("Buy",  qf::instruments::FxSide::Buy)
+        .value("Sell", qf::instruments::FxSide::Sell);
+
+    py::class_<qf::instruments::FxForward, qf::instruments::Instrument>(m, "FxForward")
+        .def(py::init<double, double, int, qf::instruments::FxSide,
+                      std::string, std::string, std::string>(),
+             py::arg("notional_foreign"), py::arg("strike"), py::arg("maturity_days"),
+             py::arg("side"), py::arg("pair") = "USDMXN",
+             py::arg("domestic_curve") = "TIIE-F", py::arg("foreign_curve") = "SOFR",
+             "FX forward by covered interest parity; spot is read from the environment "
+             "under pair and the two curves under their own keys.")
+        .def("npv", &qf::instruments::FxForward::npv, py::arg("env"),
+             "Present value in domestic currency from the holder's side.")
+        .def("forward_rate", &qf::instruments::FxForward::forwardRate, py::arg("env"),
+             "Fair forward rate S * DF_f / DF_d.")
+        .def("delta", &qf::instruments::FxForward::delta, py::arg("env"),
+             "d npv / d spot.");
+
+    py::class_<qf::instruments::FxOptionGreeks>(m, "FxOptionGreeks")
+        .def_readonly("price",   &qf::instruments::FxOptionGreeks::price)
+        .def_readonly("delta",   &qf::instruments::FxOptionGreeks::delta)
+        .def_readonly("gamma",   &qf::instruments::FxOptionGreeks::gamma)
+        .def_readonly("vega",    &qf::instruments::FxOptionGreeks::vega)
+        .def_readonly("forward", &qf::instruments::FxOptionGreeks::forward)
+        .def_readonly("vol",     &qf::instruments::FxOptionGreeks::vol);
+
+    py::class_<qf::instruments::FxOption, qf::instruments::Instrument>(m, "FxOption")
+        .def(py::init<double, double, int, qf::instruments::OptionType, qf::instruments::FxSide,
+                      std::string, std::string, std::string>(),
+             py::arg("notional_foreign"), py::arg("strike"), py::arg("maturity_days"),
+             py::arg("option_type"), py::arg("side"), py::arg("pair") = "USDMXN",
+             py::arg("domestic_curve") = "TIIE-F", py::arg("foreign_curve") = "SOFR",
+             "European FX option (Garman-Kohlhagen) on the foreign currency; spot, curves "
+             "and volatility are read from the environment by name.")
+        .def("npv", &qf::instruments::FxOption::npv, py::arg("env"),
+             "Position value in domestic currency.")
+        .def("greeks", &qf::instruments::FxOption::greeks, py::arg("env"),
+             "FxOptionGreeks: price, delta, gamma, vega (per 1 vol point), forward, vol.");
+
+    // ------------------------------------------------------------------ //
+    // Hull-White cap/floor and swaption                                   //
+    // ------------------------------------------------------------------ //
+    py::enum_<qf::instruments::CapFloorType>(m, "CapFloorType")
+        .value("Cap",   qf::instruments::CapFloorType::Cap)
+        .value("Floor", qf::instruments::CapFloorType::Floor);
+
+    py::class_<qf::instruments::CapFloor, qf::instruments::Instrument>(m, "CapFloor")
+        .def(py::init<qf::instruments::CapFloorType, double, double, double, double,
+                      double, double, qf::math::DayCountConvention>(),
+             py::arg("type"), py::arg("notional"), py::arg("strike"), py::arg("maturity"),
+             py::arg("frequency"), py::arg("hw_a"), py::arg("hw_sigma"),
+             py::arg("dcc") = qf::math::DayCountConvention::ACT_365,
+             "Cap or floor priced analytically under Hull-White.")
+        .def("price", &qf::instruments::CapFloor::price, py::arg("curve"),
+             "Present value against a YieldCurve.");
+
+    py::enum_<qf::instruments::SwaptionType>(m, "SwaptionType")
+        .value("Payer",    qf::instruments::SwaptionType::Payer)
+        .value("Receiver", qf::instruments::SwaptionType::Receiver);
+
+    py::class_<qf::instruments::Swaption, qf::instruments::Instrument>(m, "Swaption")
+        .def(py::init<qf::instruments::SwaptionType, double, double, double, double, double,
+                      double, double, qf::math::DayCountConvention>(),
+             py::arg("type"), py::arg("notional"), py::arg("strike"), py::arg("expiry"),
+             py::arg("swap_tenor"), py::arg("frequency"), py::arg("hw_a"), py::arg("hw_sigma"),
+             py::arg("dcc") = qf::math::DayCountConvention::ACT_365,
+             "European swaption priced under Hull-White (Jamshidian decomposition).")
+        .def("price", &qf::instruments::Swaption::price, py::arg("curve"),
+             "Present value against a YieldCurve.");
+
+    // ------------------------------------------------------------------ //
+    // Delta-normal VaR over signed factor exposures                       //
+    // ------------------------------------------------------------------ //
+    m.def("delta_normal_var", &qf::risk::deltaNormalVaR,
+          py::arg("exposures"), py::arg("daily_vols"), py::arg("correlations"),
+          py::arg("confidence"), py::arg("horizon_days"),
+          "Delta-normal VaR: Phi^-1(confidence) * sqrt(horizon_days) * sqrt(e' C e) with "
+          "C_ij = s_i s_j rho_ij. Exposures may be negative.");
 }
