@@ -226,7 +226,6 @@ STUB_ROUTES = [
     ("T5", "get", "/api/fixings", None),
     ("T5", "post", "/api/fixings", {"index": "SOFR", "date": "2026-11-10", "value": 0.04}),
     ("T5", "post", "/api/fixings/csv", {"csv": "index,date,value\n"}),
-    ("T6", "post", "/api/market/MX-DEMO/roll", {"id": "D1", "as_of": "2026-12-08"}),
     ("T9", "get", "/api/trades/1/flows?snapshot=MX-DEMO", None),
     ("T9", "get", "/api/pnl?from=MX-DEMO&to=MX-DEMO", None),
 ]

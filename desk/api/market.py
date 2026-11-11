@@ -5,13 +5,14 @@ El snapshot vive en SQLite como JSON (`data`); las curvas se arman con
 financieras: solo se arman objetos de qfpy y se leen sus resultados.
 """
 import json
+import re
 import sqlite3
 from datetime import date
 from typing import Any, Dict, List, Optional
 
 from desk.api.errors import ApiError
 from desk.api.qf import qfpy
-from desk.api.validation import MAX_PRICE, finite_number, number
+from desk.api.validation import MAX_PRICE, finite_number, iso_date, number, text
 
 CURVES = {
     "TIIE-F": {"currency": "MXN", "period_days": 28},
@@ -329,9 +330,34 @@ def update_snapshot(
     return _payload(row, data, ctx)
 
 
+_ROLL_ID = re.compile(r"[A-Za-z0-9_-]{1,40}")
+
+
 def roll_snapshot(conn: sqlite3.Connection, source_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """Copia el snapshot `source_id` con otro `id` y `as_of` (`body`); devuelve el payload del nuevo.
 
-    Se implementa en T6.
+    El copia es editable aunque el origen sea `MKT-LIVE`. Errores: 400 `id`/`as_of`,
+    404 `snapshot` si el origen no existe, 409 `id` si el nuevo ya existe.
     """
-    raise NotImplementedError("market.roll_snapshot se implementa en T6")
+    new_id = text(body, "id")
+    if new_id != body["id"] or new_id == LIVE_ID or not _ROLL_ID.fullmatch(new_id):
+        raise ApiError(
+            400,
+            "El id debe tener de 1 a 40 caracteres: letras, dígitos, '_' o '-' (MKT-LIVE está reservado)",
+            "id",
+        )
+    as_of = iso_date(body, "as_of").isoformat()
+    row = _fetch(conn, source_id)
+    if conn.execute("SELECT 1 FROM snapshots WHERE id = ?", (new_id,)).fetchone():
+        raise ApiError(409, "Ya existe un snapshot con id %s" % new_id, "id")
+    conn.execute(
+        "INSERT INTO snapshots (id, label, synthetic, as_of, data) VALUES (?, ?, ?, ?, ?)",
+        (
+            new_id,
+            "%s · rodado al %s" % (row["label"], as_of),
+            row["synthetic"],
+            as_of,
+            row["data"],
+        ),
+    )
+    return snapshot_payload(conn, new_id)
