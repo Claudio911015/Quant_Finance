@@ -126,6 +126,20 @@
   white-space: nowrap;
 }
 
+/* A 1280 px la tabla de flujos (con la columna de la acción) pedía desplazamiento y la columna fija tapaba «Monto MXN»,
+   «Confirmado» y «Diferencia». Para que quepa sin desplazar: menos relleno lateral y producto y tipo (rótulos largos como
+   «Cross currency swap USDMXN» o «Intercambio de nocional») parten línea en vez de ensanchar la tabla. */
+.ops-cash__scroll .ops-cash__table th,
+.ops-cash__scroll .ops-cash__table td {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.ops-cash__table td:nth-child(4),
+.ops-cash__table td:nth-child(5) {
+  white-space: normal;
+}
+
 /* Botón compacto dentro de la tabla: a 1280 px las doce columnas caben sin desplazar. */
 .ops-cash__table .ops-cash__btn {
   height: 24px;
