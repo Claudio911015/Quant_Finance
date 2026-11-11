@@ -1,0 +1,122 @@
+.pnl {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.pnl__controls {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.pnl__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pnl__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.pnl__select {
+  height: 28px;
+  max-width: 320px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.pnl__select:hover {
+  border-color: var(--text-dim);
+}
+
+.pnl__select[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.pnl__btn {
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pnl__btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.pnl__btn:disabled {
+  background: var(--bg);
+  border-color: var(--border-strong);
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.pnl__meta {
+  align-self: center;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.pnl__warn {
+  color: var(--warn);
+}
+
+.pnl__error {
+  margin: 0;
+  color: var(--neg);
+  font-size: var(--fs-sm);
+}
+
+.pnl__banner {
+  padding: var(--space-2) var(--space-3);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  color: var(--warn);
+  font-size: var(--fs-sm);
+}
+
+.pnl__grid {
+  flex: 1;
+  min-height: 240px;
+}
+
+/* Filas con error: se marcan y el texto va en el tooltip; las que solo traen avisos, con una marca al borde. */
+.pnl__grid .ag-row.row-error {
+  background: var(--warn-soft);
+}
+
+.pnl__grid .ag-row.row-warn {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.pnl__grid .ag-row.row-total {
+  font-weight: 600;
+}
+
+.pnl__grid .pnl__neg {
+  color: var(--neg);
+}
+
+.pnl__grid .pnl__cell-error {
+  color: var(--warn);
+  font-weight: 600;
+}
