@@ -335,7 +335,7 @@ const RISK_ADV_SECTIONS: Section[] = [
       },
       {
         label: 'Exposición y CVA',
-        text: 'Simulación Hull-White de 500 trayectorias con semilla fija sobre una rejilla mensual hasta el último vencimiento. EE = exposición esperada; PFE = percentil 95 % de la exposición positiva, nunca menor que la EE; CVA = (1 − recuperación) × Σ EE × probabilidad de incumplimiento en cada intervalo.',
+        text: 'Simulación Hull-White de 500 trayectorias con semilla fija sobre una rejilla mensual hasta el último vencimiento. EE = exposición esperada; PFE = percentil 95 % de la exposición positiva, nunca menor que la EE; CVA = (1 − recuperación) × Σ EE × probabilidad de incumplimiento en cada intervalo. En t = 0, EE y PFE son el máximo entre el PV de la contraparte y cero, con la valuación del desk.',
       },
       {
         label: 'Supuestos de crédito',
@@ -343,7 +343,11 @@ const RISK_ADV_SECTIONS: Section[] = [
       },
       {
         label: 'Alcance del crédito',
-        text: 'Solo swaps de tasa; forwards, opciones FX y caps/floors se excluyen con aviso. Un conjunto de compensación por contraparte y curva, sin compensación entre monedas. Sin colateral.',
+        text: 'Solo swaps de tasa; forwards, opciones FX y caps/floors se excluyen con aviso. Un conjunto de compensación por contraparte y curva: los puntos mensuales no compensan entre monedas (suman los conjuntos, una cota superior), mientras que el punto de t = 0 sí, porque es el valor de hoy de la contraparte; con swaps en dos monedas el primer punto mensual puede quedar por encima del de t = 0. Sin colateral.',
+      },
+      {
+        label: 'Coherencia con la valuación',
+        text: 'El modelo de exposición revalúa un swap de pagos regulares, distinto del swap del desk (base de días ACT/360, calendario por fechas, periodo en curso con su devengo). Para que ambos coincidan, cada swap se entrega al modelo con pagos diarios, que aproximan la acumulación continua, y con una tasa fija efectiva calibrada para que valga hoy exactamente el PV del desk. Así el perfil arranca en el PV del desk y no tiene escalón en el primer mes; el error que queda es del orden de un cupón diario.',
       },
       {
         label: 'CVA informativo',

@@ -191,7 +191,7 @@ describe('CreditTab: contrapartes y CVA', () => {
     await screen.findByRole('note');
     expect(
       screen.getByText(
-        '500 trayectorias Hull-White, semilla fija; solo swaps de tasa; sin colateral ni compensación entre monedas.',
+        '500 trayectorias Hull-White, semilla fija; solo swaps de tasa; sin colateral; los puntos mensuales no compensan entre monedas (el de hoy sí).',
       ),
     ).toBeTruthy();
   });

@@ -131,6 +131,9 @@ describe('MethodologyScreen', () => {
       render(<MethodologyScreen />);
       expect(riskRow('Historia sintética de MX-DEMO')).toContain('20261110');
       expect(riskRow('CVA informativo')).toContain('no entra al PV');
+      expect(riskRow('Coherencia con la valuación')).toContain('PV del desk');
+      expect(riskRow('Alcance del crédito')).toContain('t = 0');
+      expect(riskRow('Exposición y CVA')).toContain('máximo entre el PV de la contraparte y cero');
     });
 
     it('lista los escenarios históricos con sus choques y excluye DVA del alcance', () => {

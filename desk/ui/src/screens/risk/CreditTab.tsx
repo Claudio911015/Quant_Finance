@@ -420,8 +420,8 @@ export function CreditTab() {
             </>
           )}
           <p className="credittab-foot">
-            {fmtNumber(data.n_paths, 0)} trayectorias Hull-White, semilla fija; solo swaps de tasa; sin colateral ni
-            compensación entre monedas.
+            {fmtNumber(data.n_paths, 0)} trayectorias Hull-White, semilla fija; solo swaps de tasa; sin colateral; los
+            puntos mensuales no compensan entre monedas (el de hoy sí).
           </p>
         </div>
       )}
