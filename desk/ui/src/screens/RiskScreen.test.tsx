@@ -166,6 +166,16 @@ describe('RiskScreen: tarjeta VaR', () => {
     await waitFor(() => expect(mocks.riskVar).toHaveBeenLastCalledWith('MX-DEMO', 5, 0.99));
   });
 
+  it('el encabezado dice "1 día" en singular y "días" en cualquier otro horizonte', async () => {
+    renderScreen();
+    expect(await within(varCard()).findByText('VaR 99 % a 10 días')).toBeTruthy();
+    mocks.riskVar.mockResolvedValueOnce({ ...VAR, horizon_days: 1 });
+
+    fireEvent.change(screen.getByLabelText('Horizonte (días)'), { target: { value: '1' } });
+
+    expect(await within(varCard()).findByText('VaR 99 % a 1 día')).toBeTruthy();
+  });
+
   it('la confianza se captura en % y se envía en decimal', async () => {
     renderScreen();
     await within(varCard()).findByText('MXN 1,234,567.89');

@@ -381,7 +381,8 @@ function VarSection() {
         <>
           <div className="risk-var__total">
             <span className="risk-caption">
-              VaR {parseFloat((data.confidence * 100).toFixed(4))} % a {data.horizon_days} días
+              VaR {parseFloat((data.confidence * 100).toFixed(4))} % a {data.horizon_days}{' '}
+              {data.horizon_days === 1 ? 'día' : 'días'}
             </span>
             <span className="risk-var__value num">{fmtMoney(data.var_mxn, 'MXN')}</span>
           </div>
