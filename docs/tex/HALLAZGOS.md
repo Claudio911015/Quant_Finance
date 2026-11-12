@@ -119,3 +119,19 @@ Qué hace el código: el residuo de redondeo se absorbe en la última línea de 
 Qué declara la Metodología/el diseño: Metodología, «Coberturas», «Asientos sugeridos»: «el residuo del periodo va a resultados por inefectividad», sin distinguir el tipo.
 Impacto: solo la redacción: en valor razonable el residuo (a lo más unos centavos) queda mezclado con el resultado de cobertura, no en una línea de inefectividad.
 Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+
+## H13 — El cupón del bono no devenga ACT/360: es nominal × tasa / frecuencia y el corrido es lineal en días/365
+Archivo: `src/instruments/bond.cpp` y `desk/api/pricing/rates.py`
+Símbolo: `Bond::cashflows`; `_bond_instrument`
+Qué hace el código: `_bond_instrument` construye `qfpy.Bond(face, coupon_rate, periods, frequency)` sin base de días, con la ACT/365 por omisión: el cupón de cada periodo es `face × coupon_rate / frequency` (`periodFraction(frequency, ACT_365) = 1/frequency`) y el corrido del bono envejecido es `face × coupon_rate × (tiempo transcurrido desde el último cupón, en años de i/frecuencia y días/365)`. No hay base ACT/360 ni conteo de los días reales de cada periodo.
+Qué declara la Metodología/el diseño: Metodología, «Ciclo de vida y valuación a fecha», «Convención de días»: «Días naturales, t = días/365, devengo ACT/360, fijaciones diarias capitalizadas»; «Bono»: «Flujos fijos descontados con la curva elegida»; «Límites», «Bono»: «Periodos uniformes; la convención M-Bono de 182 días queda fuera».
+Impacto: un bono de nominal 10^8 y cupón 7.5 % semestral paga 3 750 000 por periodo; con devengo ACT/360 sobre 182.5 días pagaría 3 802 083.33 (+1.4 %). La frase «devengo ACT/360» rige para los swaps y las opciones de tasa, no para el bono. La validación contra QuantLib usa ACT/365 y coincide a 6e-8 del nocional (caso bond-08), de modo que el cálculo es coherente con lo que el código hace, no con la frase general de la Metodología.
+Capítulo: 6 (Bonos)
+
+## H14 — Docstring y ramas de `valuation.shortened` describen un envejecimiento de cap/floor y bono que `value_trade` ya no usa
+Archivo: `desk/api/valuation.py`
+Símbolo: docstring del módulo y `shortened`
+Qué hace el código: `value_trade` valúa el bono y el cap/floor con `aging.bond_pv_mxn` y `aging.cap_floor_pv_mxn` (calendario exacto, cupón corrido, caplet fijado fuera del valor) y solo pasa por `shortened` la swaption, las opciones FX y la opción sobre acción. Las ramas `cap_floor` (`periods = ceil(días / días del periodo)`) y bono (`periods = ceil((días − 0.5)·frecuencia / 365)`) de `shortened` no tienen llamador, y el docstring del módulo sigue presentándolas como «aproximación declarada» que acorta los periodos con `ceil`.
+Qué declara la Metodología/el diseño: Metodología, «Ciclo de vida y valuación a fecha», «Bono y cap/floor envejecidos»: calendario exacto de i/frecuencia años con cupón corrido y caplet ya fijado fuera del valor; no habla de periodos enteros.
+Impacto: ninguno en el cálculo; un lector que solo vea `valuation.py` puede creer que el bono y el cap/floor se envejecen por periodos enteros.
+Capítulo: 5 (Hull–White) y 6 (Bonos)
