@@ -65,7 +65,7 @@ QuantLib.
 ## Tolerancias
 
 Diferencia relativa al nocional (para `fx_*` es `notional_usd × spot` en MXN; para `equity_option`, `quantity × spot`):
-`irs` 1e-6, `fx_forward` 1e-8, `fx_option` 1e-6, `equity_option` 1e-6, `bond` 1e-6, `cap_floor` 5e-4, `swaption` 5e-4.
+`irs` 1e-6, `fx_forward` 1e-8, `fx_option` 1e-6, `equity_option` 1e-6, `bond` 1e-6, `cap_floor` 1e-6, `swaption` 1e-6.
 Curvas: 1e-12 en pilares y 1e-8 en fechas intermedias (diferencia absoluta de DF). Están en `common.py`.
 
 Veredicto por caso: `ok` (dentro de tolerancia), `explained` (la excede pero la acota una entrada de

@@ -290,10 +290,10 @@ def _reescribir_a_mano(report: dict, case_id: str, delta: float) -> dict:
 
 
 def test_un_pv_editado_dentro_de_tolerancia_con_diferencias_recalculadas_falla_el_cruce(report, known, sources):
-    # swaption-01 mueve su PV 1e-5 del nocional (tolerancia 5e-4, sigue dentro) y el resumen de swaption se recalcula
+    # swaption-01 mueve su PV 5e-7 del nocional (tolerancia 1e-6, sigue dentro) y el resumen de swaption se recalcula
     # con ese caso como el peor: el reporte queda coherente consigo mismo, así que _problems no lo ve...
     case = next(c for c in report["cases"] if c["id"] == "swaption-01")
-    altered = _reescribir_a_mano(report, "swaption-01", 1e-5 * case["notional"])
+    altered = _reescribir_a_mano(report, "swaption-01", 5e-7 * case["notional"])
     assert _problems(altered, known) == []
     # ...pero el cruce con cases.json lo detecta.
     problems = _source_problems(altered, *sources)

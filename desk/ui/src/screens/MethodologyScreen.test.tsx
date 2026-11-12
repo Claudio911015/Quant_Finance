@@ -348,7 +348,8 @@ describe('MethodologyScreen', () => {
   describe('validación contra QuantLib', () => {
     it('da las tolerancias y la regla de curvas idénticas', () => {
       renderScreen();
-      expect(row('Tolerancias')).toContain('5e-4');
+      expect(row('Tolerancias')).not.toContain('5e-4'); // H05: cap/floor y swaption bajaron a 1e-6
+      expect(row('Tolerancias')).toContain('caps/floors y swaptions con Hull-White 1e-6');
       expect(row('Tolerancias')).toContain('1e-8');
       expect(row('Curvas idénticas')).toContain('lineal en tasa cero');
     });

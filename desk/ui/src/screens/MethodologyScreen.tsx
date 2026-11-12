@@ -503,7 +503,7 @@ const VALIDATION_SECTIONS: Section[] = [
       },
       {
         label: 'Tolerancias',
-        text: 'Relativas al nocional: swaps OIS 1e-6; forwards 1e-8; opciones FX y sobre acción 1e-6; bonos 1e-6; caps/floors y swaptions con Hull-White 5e-4, porque las implementaciones y convenciones del modelo difieren.',
+        text: 'Relativas al nocional: swaps OIS 1e-6; forwards 1e-8; opciones FX y sobre acción 1e-6; bonos 1e-6; caps/floors y swaptions con Hull-White 1e-6. Con los mismos insumos y el mismo modelo la diferencia observada en esos dos productos es de redondeo (a lo más 3e-9 del nocional), así que la tolerancia sí acota la discrepancia real.',
       },
       {
         label: 'Diferencias conocidas',

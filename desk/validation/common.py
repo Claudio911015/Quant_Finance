@@ -25,8 +25,8 @@ TOLERANCES = {
     "fx_option": 1e-6,
     "equity_option": 1e-6,
     "bond": 1e-6,
-    "cap_floor": 5e-4,
-    "swaption": 5e-4,
+    "cap_floor": 1e-6,
+    "swaption": 1e-6,
 }
 PILLAR_TOLERANCE = 1e-12  # |DF_desk - DF_ql| en pilares
 CHECK_TOLERANCE = 1e-8  # |DF_desk - DF_ql| en fechas intermedias

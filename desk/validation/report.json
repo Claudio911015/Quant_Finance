@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-11-12T02:18:00+00:00",
+  "generated_at": "2026-11-12T03:15:53+00:00",
   "snapshot": {
     "id": "MX-DEMO",
     "as_of": "2026-11-10",
     "spot": 18.6
   },
-  "desk_commit": "645c6e26f4a4096e0013783f4e1cbc571649b0da",
+  "desk_commit": "ea8d1cf135d239f6f5c784d921d8b50bbfea4c64",
   "desk_dirty": false,
   "reference": {
     "library": "QuantLib",
@@ -29,8 +29,8 @@
     "fx_option": 1e-06,
     "equity_option": 1e-06,
     "bond": 1e-06,
-    "cap_floor": 0.0005,
-    "swaption": 0.0005
+    "cap_floor": 1e-06,
+    "swaption": 1e-06
   },
   "totals": {
     "cases": 62,
@@ -108,7 +108,7 @@
       "product": "cap_floor",
       "label": "Cap/floor (Hull-White)",
       "method": "ql.Cap / ql.Floor sobre una pierna ql.IborLeg (NullCalendar, ACT/360, sin rezago de fijación, fechas today + i·period_days) con ql.AnalyticCapFloorEngine y ql.HullWhite(a, sigma) ajustado a la curva del desk. El primer caplet fija hoy y vale su intrínseco, como en el desk.",
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "cases": 8,
       "within": 8,
       "explained": 0,
@@ -121,7 +121,7 @@
       "product": "swaption",
       "label": "Swaption (Hull-White)",
       "method": "ql.Swaption europea (ejercicio en today + round(expiry_years·365) días) sobre un ql.VanillaSwap (fija y flotante con fechas expiración + i·period_days, NullCalendar, ACT/360, spread 0) con ql.JamshidianSwaptionEngine y ql.HullWhite(a, sigma) ajustado a la curva del desk.",
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "cases": 8,
       "within": 8,
       "explained": 0,
@@ -906,7 +906,7 @@
       "pv_ref": 1257727.3902223143,
       "abs_diff": 3.259629011154175e-08,
       "rel_diff": 1.0865430037180583e-16,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -922,7 +922,7 @@
       "pv_ref": 133184.95501357966,
       "abs_diff": 2.7910573408007622e-08,
       "rel_diff": 2.791057340800762e-16,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -938,7 +938,7 @@
       "pv_ref": 155043.99259166408,
       "abs_diff": 1.8131686374545097e-08,
       "rel_diff": 1.8131686374545096e-16,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -954,7 +954,7 @@
       "pv_ref": 196995.638738752,
       "abs_diff": 9.778887033462524e-09,
       "rel_diff": 1.955777406692505e-16,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -970,7 +970,7 @@
       "pv_ref": 3149903.7437113672,
       "abs_diff": 6.05359673500061e-09,
       "rel_diff": 3.026798367500305e-17,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -986,7 +986,7 @@
       "pv_ref": 196648.07148137002,
       "abs_diff": 0.0,
       "rel_diff": 0.0,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1002,7 +1002,7 @@
       "pv_ref": 160654.94431247393,
       "abs_diff": 0.0,
       "rel_diff": 0.0,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1018,7 +1018,7 @@
       "pv_ref": 884927.6454483259,
       "abs_diff": 0.0,
       "rel_diff": 0.0,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1034,7 +1034,7 @@
       "pv_ref": 419948.5001329944,
       "abs_diff": 0.00018643727526068687,
       "rel_diff": 1.8643727526068686e-12,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1050,7 +1050,7 @@
       "pv_ref": 942340.5154467019,
       "abs_diff": 0.00030788767617195845,
       "rel_diff": 3.0788767617195846e-12,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1066,7 +1066,7 @@
       "pv_ref": 4322877.686651961,
       "abs_diff": 0.5957110328599811,
       "rel_diff": 2.9785551642999053e-09,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1082,7 +1082,7 @@
       "pv_ref": 92158.6331759701,
       "abs_diff": 0.000929802525206469,
       "rel_diff": 1.859605050412938e-11,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1098,7 +1098,7 @@
       "pv_ref": 825695.6430399076,
       "abs_diff": 0.0002844455884769559,
       "rel_diff": 2.844455884769559e-12,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1114,7 +1114,7 @@
       "pv_ref": 253388.50780963528,
       "abs_diff": 1.311709638684988e-07,
       "rel_diff": 6.55854819342494e-15,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1130,7 +1130,7 @@
       "pv_ref": 213314.79598886293,
       "abs_diff": 6.693881005048752e-08,
       "rel_diff": 3.346940502524376e-15,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     },
@@ -1146,7 +1146,7 @@
       "pv_ref": 258443.5428750828,
       "abs_diff": 1.8015271052718163e-08,
       "rel_diff": 1.8015271052718163e-15,
-      "tolerance": 0.0005,
+      "tolerance": 1e-06,
       "verdict": "ok",
       "error": null
     }

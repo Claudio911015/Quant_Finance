@@ -32,8 +32,8 @@ export const VALIDATION_REPORT: ValidationReport = {
     fx_option: 1e-6,
     equity_option: 1e-6,
     bond: 1e-6,
-    cap_floor: 0.0005,
-    swaption: 0.0005
+    cap_floor: 1e-6,
+    swaption: 1e-6
   },
   totals: {
     cases: 10,
@@ -111,7 +111,7 @@ export const VALIDATION_REPORT: ValidationReport = {
       product: 'cap_floor',
       label: 'Cap y floor (Hull-White)',
       method: 'Cap/Floor + AnalyticCapFloorEngine con HullWhite',
-      tolerance: 0.0005,
+      tolerance: 1e-6,
       cases: 1,
       within: 1,
       explained: 0,
@@ -124,7 +124,7 @@ export const VALIDATION_REPORT: ValidationReport = {
       product: 'swaption',
       label: 'Swaption (Hull-White)',
       method: 'Swaption + JamshidianSwaptionEngine con HullWhite',
-      tolerance: 0.0005,
+      tolerance: 1e-6,
       cases: 2,
       within: 2,
       explained: 0,
@@ -285,7 +285,7 @@ export const VALIDATION_REPORT: ValidationReport = {
       pv_ref: 412348.3364,
       abs_diff: 17.46,
       rel_diff: 1.746e-7,
-      tolerance: 0.0005,
+      tolerance: 1e-6,
       verdict: 'ok',
       error: null
     },
@@ -301,7 +301,7 @@ export const VALIDATION_REPORT: ValidationReport = {
       pv_ref: 731891.3917,
       abs_diff: 12.83,
       rel_diff: 1.283e-7,
-      tolerance: 0.0005,
+      tolerance: 1e-6,
       verdict: 'ok',
       error: null
     },
@@ -317,7 +317,7 @@ export const VALIDATION_REPORT: ValidationReport = {
       pv_ref: 2951747.2382,
       abs_diff: 41.2,
       rel_diff: 2.060e-7,
-      tolerance: 0.0005,
+      tolerance: 1e-6,
       verdict: 'ok',
       error: null
     }
