@@ -197,8 +197,8 @@ export interface CreditProfilePoint {
 }
 
 export interface CreditNettingSet {
+  /** Desde el corte 9 siempre `"multimoneda"`: un solo conjunto por contraparte. */
   curve: string;
-  currency: string;
   trades: number[];
   pv_mxn: number;
   cva_mxn: number;
@@ -219,6 +219,8 @@ export interface CreditCounterparty {
   assumed: boolean;
   /** `null` si `assumed` es falso. */
   assumed_note: string | null;
+  /** Curva de CDS de la contraparte o intensidad plana (también cuando es un supuesto). */
+  credit_source: 'curve' | 'flat';
   pv_mxn: number;
   cva_mxn: number;
   netting_sets: CreditNettingSet[];

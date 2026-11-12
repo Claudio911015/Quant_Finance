@@ -15,6 +15,7 @@ import './XvaScreen.css';
 const FX_VOL_SOURCE: Record<XvaModel['fx_vol_source'], string> = {
   surface_atm_1y: 'ATM a 1 año de la superficie',
   factor_daily_vol: 'volatilidad diaria de los factores × √252',
+  default: 'valor por omisión (el snapshot no trae superficie ni volatilidades de factores)',
 };
 
 const pct = (dec: number) => `${fmtNumber(dec * 100, 2)} %`;

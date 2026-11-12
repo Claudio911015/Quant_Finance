@@ -126,6 +126,19 @@ describe('XvaScreen: tabla y avisos', () => {
     expect(within(card).getByText(/propia/i)).toBeTruthy();
   });
 
+  it('rotula la volatilidad USDMXN por omisión en vez de dejar el campo vacío', async () => {
+    mocks.getXva.mockImplementation(async (id: string) => ({
+      ...XVA_FIXTURE,
+      snapshot: id,
+      model: { ...XVA_FIXTURE.model, fx_vol_source: 'default' as const },
+    }));
+    renderScreen();
+    await screen.findByRole('table', { name: 'XVA por contraparte' });
+    const card = screen.getByRole('region', { name: 'Supuestos y modelo' });
+    expect(within(card).getByText(/valor por omisión/)).toBeTruthy();
+    expect(within(card).queryByText(/ATM a 1 año de la superficie/)).toBeNull();
+  });
+
   it('si el XVA falla muestra el error y deja a la vista el aviso', async () => {
     mocks.getXva.mockRejectedValue(new ApiError(500, 'No se pudo calcular el XVA'));
     renderScreen();

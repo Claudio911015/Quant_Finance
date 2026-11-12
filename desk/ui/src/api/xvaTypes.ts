@@ -102,7 +102,7 @@ export interface XvaCounterparty {
 export interface XvaModel {
   hw: Record<string, { a: number; sigma: number }>;
   fx_vol: number;
-  fx_vol_source: 'surface_atm_1y' | 'factor_daily_vol';
+  fx_vol_source: 'surface_atm_1y' | 'factor_daily_vol' | 'default';
   correlations: { mxn_usd: number; mxn_fx: number; usd_fx: number };
 }
 
