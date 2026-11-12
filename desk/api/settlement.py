@@ -6,8 +6,9 @@ Los flujos ya fijados no se guardan: se derivan de términos + fijaciones + even
   `N·(factor − 1)` con el factor de las fijaciones diarias del periodo (`qfpy.compound_overnight`).
 * `fx_forward`: al vencimiento, `notional_usd × (FIX − strike)` en MXN con el FIX `USDMXN`.
 * `transfer` (terminación o ejercicio): su importe en MXN.
-* `cap_floor`, `swaption`, `bond`: sin flujo derivado al vencer, solo el aviso `no_settlement`
-  (el bono lo despacha a `aging`; T9 lo hará liquidar).
+* `bond`: lo despacha a `aging.bond_settled`, que emite los cupones (`coupon`) y la amortización
+  (`redemption`) en `(d0, d1]` con la misma regla de «viva el día anterior» que el `irs`.
+* `cap_floor`, `swaption`: sin flujo derivado, solo el aviso `no_settlement`.
 * `xccy_swap`: lo despacha a `xccy.settled` (gancho del corte 3).
 
 Un pago con fecha `P` está liquidado si la operación seguía `viva` el día `P − 1`: así el último
