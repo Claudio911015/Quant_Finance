@@ -20,8 +20,11 @@ namespace qf::termstructure {
 ///  1. **Strike (smile):** interpolate each maturity pillar's smile in strike using
 ///     qf::math::Interpolator (linear or cubic, flat extrapolation beyond the pillars).
 ///  2. **Maturity (term structure):** convert the per-pillar smile vols at the requested
-///     strike to **total variance** w = σ²·T and interpolate w **linearly in T** (flat
-///     extrapolation on w), returning σ = √(w(T)/T).
+///     strike to **total variance** w = σ²·T and interpolate w **linearly in T**, anchored
+///     at (T = 0, w = 0), returning σ = √(w(T)/T). Extrapolation is **flat in volatility**,
+///     not in variance: before the first maturity pillar σ is the first pillar's vol (the
+///     anchor makes w/T constant there) and beyond the last pillar σ is the last pillar's
+///     vol (w keeps growing as σ_n²·T).
 ///
 /// Interpolating in total variance rather than raw vol is the standard choice that avoids
 /// the calendar-arbitrage artifacts of interpolating vols directly, so an interpolated
