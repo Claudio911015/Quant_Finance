@@ -49,50 +49,90 @@ constexpr double kDaysPerYear = 365.0;
 constexpr int kMxn = 0;
 constexpr int kUsd = 1;
 
-using Mat5 = std::array<std::array<double, 5>, 5>;
+// The numbers the model depends on (curves, spot, volatilities, mean reversions) live in `Real`: double for
+// simulate() and friends, an XAD scalar when the same code is differentiated. Everything that is not an
+// input (days, notionals, rates of the trades, correlations, the normals) stays double. The math functions
+// are called unqualified so XAD finds its own overloads by ADL; for double they are the std ones.
+using std::exp;
+using std::expm1;
+using std::log;
+using std::max;
+using std::sqrt;
+
+template <class Real>
+struct ModelT {
+    Real aMxn, sigmaMxn, aUsd, sigmaUsd, fxVol;
+    double rhoMxnUsd, rhoMxnFx, rhoUsdFx;
+};
+
+// A curve is YieldCurve for double and PillarCurve<Real> when its zero rates are inputs.
+template <class Real, class Curve>
+struct MarketT {
+    const Curve* tiie;
+    const Curve* sofr;
+    const Curve* mxnUsd;     // nullptr without basis
+    Real spot;
+};
+
+ModelT<double> modelOf(const ExposureModel& m)
+{
+    return {m.aMxn, m.sigmaMxn, m.aUsd, m.sigmaUsd, m.fxVol, m.rhoMxnUsd, m.rhoMxnFx, m.rhoUsdFx};
+}
+
+MarketT<double, termstructure::YieldCurve> marketOf(const ExposureMarket& m)
+{
+    return {&m.tiie, &m.sofr, m.mxnUsd ? &*m.mxnUsd : nullptr, m.spot};
+}
+
+template <class Real>
+using Mat5 = std::array<std::array<Real, 5>, 5>;
 
 // int_0^dt e^{-k tau} dtau
-double expIntegral(double k, double dt)
+template <class Real>
+Real expIntegral(Real k, double dt)
 {
-    return k == 0.0 ? dt : -std::expm1(-k * dt) / k;
+    return k == 0.0 ? Real(dt) : Real(-expm1(-k * dt) / k);
 }
 
 // A kernel f(tau) = c0 + c1 e^{-a tau} on tau in [0, dt] (tau = time to the end of the step).
+template <class Real>
 struct Kernel {
-    double c0;
-    double c1;
-    double a;
+    Real c0;
+    Real c1;
+    Real a;
 };
 
-Kernel uKernel(double a) { return {0.0, 1.0, a}; }                       // e^{-a tau}
-Kernel vKernel(double a) { return {1.0 / a, -1.0 / a, a}; }              // (1 - e^{-a tau}) / a
-Kernel oneKernel() { return {1.0, 0.0, 0.0}; }                           // 1
+template <class Real> Kernel<Real> uKernel(Real a) { return {0.0, 1.0, a}; }              // e^{-a tau}
+template <class Real> Kernel<Real> vKernel(Real a) { return {1.0 / a, -1.0 / a, a}; }     // (1 - e^{-a tau}) / a
+template <class Real> Kernel<Real> oneKernel() { return {1.0, 0.0, 0.0}; }                // 1
 
-double kernelIntegral(const Kernel& f, const Kernel& g, double dt)
+template <class Real>
+Real kernelIntegral(const Kernel<Real>& f, const Kernel<Real>& g, double dt)
 {
-    double s = f.c0 * g.c0 * dt;
+    Real s = f.c0 * g.c0 * dt;
     if (g.c1 != 0.0) s += f.c0 * g.c1 * expIntegral(g.a, dt);
     if (f.c1 != 0.0) s += f.c1 * g.c0 * expIntegral(f.a, dt);
-    if (f.c1 != 0.0 && g.c1 != 0.0) s += f.c1 * g.c1 * expIntegral(f.a + g.a, dt);
+    if (f.c1 != 0.0 && g.c1 != 0.0) s += f.c1 * g.c1 * expIntegral(Real(f.a + g.a), dt);
     return s;
 }
 
 // Lower Cholesky factor of a positive semidefinite matrix; a zero pivot gives a zero column
 // (a zero volatility removes that factor instead of failing).
-Mat5 choleskySemidefinite(const Mat5& A)
+template <class Real>
+Mat5<Real> choleskySemidefinite(const Mat5<Real>& A)
 {
-    Mat5 L{};
+    Mat5<Real> L{};
     for (std::size_t j = 0; j < 5; ++j) {
-        double s = A[j][j];
+        Real s = A[j][j];
         for (std::size_t k = 0; k < j; ++k) s -= L[j][k] * L[j][k];
-        const double scale = std::max(A[j][j], 0.0);
+        const Real scale = max(A[j][j], 0.0);
         if (!(s > 1e-12 * scale) || scale == 0.0) {
             L[j][j] = 0.0;
             continue;
         }
-        L[j][j] = std::sqrt(s);
+        L[j][j] = sqrt(s);
         for (std::size_t i = j + 1; i < 5; ++i) {
-            double t = A[i][j];
+            Real t = A[i][j];
             for (std::size_t k = 0; k < j; ++k) t -= L[i][k] * L[j][k];
             L[i][j] = t / L[j][j];
         }
@@ -233,38 +273,109 @@ struct CompiledSet {
 // Per-day tables
 // ---------------------------------------------------------------------------------------------
 
+template <class Real>
 struct CurrencyGrid {
-    double a = 0.0;
-    double sigma = 0.0;
-    double eStep = 0.0;               // e^{-a dt}
-    double vStep = 0.0;               // (1 - e^{-a dt}) / a
-    std::vector<double> p0;           // P(0, d/365)
-    std::vector<double> lnP0;
-    std::vector<double> expAt;        // e^{-a d/365}
-    std::vector<double> y;            // y(d/365)
-    std::vector<double> m;            // mean of x
-    std::vector<double> mInt;         // mean of int x
+    Real a = 0.0;
+    Real sigma = 0.0;
+    Real eStep = 0.0;                 // e^{-a dt}
+    Real vStep = 0.0;                 // (1 - e^{-a dt}) / a
+    std::vector<Real> p0;             // P(0, d/365)
+    std::vector<Real> lnP0;
+    std::vector<Real> expAt;          // e^{-a d/365}
+    std::vector<Real> y;              // y(d/365)
+    std::vector<Real> m;              // mean of x
+    std::vector<Real> mInt;           // mean of int x
 };
 
+template <class Real>
 struct Grid {
     int horizon = 0;
     double dt = 1.0 / kDaysPerYear;
-    double spot = 0.0;
-    double fxVar = 0.0;
-    CurrencyGrid ccy[2];
-    std::vector<double> q;
-    std::vector<double> lnq;
-    Mat5 chol{};
+    Real spot = 0.0;
+    Real fxVar = 0.0;
+    CurrencyGrid<Real> ccy[2];
+    std::vector<Real> q;
+    std::vector<Real> lnq;
+    Mat5<Real> chol{};
 };
 
-void fillCurrencyGrid(CurrencyGrid& g, const termstructure::YieldCurve& curve, double a, double sigma,
-                      double mu, int horizon)
+// Moments of the Hull-White factor (see detail::ouMoments), on Real.
+template <class Real>
+struct OuMomentsT {
+    Real y;
+    Real m;
+    Real mInt;
+};
+
+template <class Real>
+OuMomentsT<Real> ouMomentsT(Real a, Real sigma, Real mu, double t)
+{
+    const Real s2 = sigma * sigma;
+    const Real em = -expm1(-a * t);                          // 1 - e^{-a t}
+    const Real e2 = -expm1(-2.0 * a * t);                    // 1 - e^{-2 a t}
+    OuMomentsT<Real> out;
+    out.y = s2 * e2 / (2.0 * a);
+    out.m = s2 / (2.0 * a * a) * em * em + mu * em / a;
+    out.mInt = s2 / (2.0 * a * a) * (t - 2.0 * em / a + e2 / (2.0 * a)) + mu / a * (t - em / a);
+    return out;
+}
+
+// Covariance of the stochastic integrals of one step dt (see detail::stepCovariance), on Real.
+template <class Real>
+Mat5<Real> stepCovarianceT(const ModelT<Real>& model, double dt)
+{
+    const std::array<Kernel<Real>, 5> kernel = {uKernel(model.aMxn), vKernel(model.aMxn), uKernel(model.aUsd),
+                                                vKernel(model.aUsd), oneKernel<Real>()};
+    const std::array<Real, 5> vol = {model.sigmaMxn, model.sigmaMxn, model.sigmaUsd, model.sigmaUsd,
+                                     model.fxVol};
+    const std::array<int, 5> factor = {0, 0, 1, 1, 2};   // which Brownian drives each integral
+    const double rho[3][3] = {{1.0, model.rhoMxnUsd, model.rhoMxnFx},
+                              {model.rhoMxnUsd, 1.0, model.rhoUsdFx},
+                              {model.rhoMxnFx, model.rhoUsdFx, 1.0}};
+    Mat5<Real> cov{};
+    for (std::size_t i = 0; i < 5; ++i)
+        for (std::size_t j = 0; j < 5; ++j)
+            cov[i][j] = rho[factor[i]][factor[j]] * vol[i] * vol[j] * kernelIntegral(kernel[i], kernel[j], dt);
+    return cov;
+}
+
+// P(0,T) of a curve. For double the curve is a YieldCurve, whatever its interpolation.
+inline double discountAt(const termstructure::YieldCurve& curve, double T) { return curve.discountFactor(T); }
+
+// Zero-rate pillars as differentiable inputs. discountAt replicates the Linear branch of math::Interpolator
+// (flat outside the range, y[i](1-t) + y[i+1]t on the bracketing pillars, then exp(-r T)) instead of templating
+// Interpolator/YieldCurve, which the whole repository uses; it only stands in for curves built with Linear.
+template <class Real>
+struct PillarCurve {
+    std::vector<double> t;   // pillar maturities, years
+    std::vector<Real> z;     // pillar zero rates
+};
+
+template <class Real>
+Real discountAt(const PillarCurve<Real>& curve, double T)
+{
+    Real r;
+    if (T <= curve.t.front()) {
+        r = curve.z.front();
+    } else if (T >= curve.t.back()) {
+        r = curve.z.back();
+    } else {
+        const std::size_t i = static_cast<std::size_t>(std::lower_bound(curve.t.begin(), curve.t.end(), T) -
+                                                       curve.t.begin()) - 1;
+        const double w = (T - curve.t[i]) / (curve.t[i + 1] - curve.t[i]);
+        r = curve.z[i] * (1.0 - w) + curve.z[i + 1] * w;
+    }
+    return exp(-r * T);
+}
+
+template <class Real, class Curve>
+void fillCurrencyGrid(CurrencyGrid<Real>& g, const Curve& curve, Real a, Real sigma, Real mu, int horizon)
 {
     g.a = a;
     g.sigma = sigma;
     const double dt = 1.0 / kDaysPerYear;
-    g.eStep = std::exp(-a * dt);
-    g.vStep = -std::expm1(-a * dt) / a;
+    g.eStep = exp(-a * dt);
+    g.vStep = -expm1(-a * dt) / a;
     const std::size_t n = static_cast<std::size_t>(horizon) + 1;
     g.p0.assign(n, 1.0);
     g.lnP0.assign(n, 0.0);
@@ -275,27 +386,28 @@ void fillCurrencyGrid(CurrencyGrid& g, const termstructure::YieldCurve& curve, d
     for (std::size_t d = 0; d < n; ++d) {
         const double t = static_cast<double>(d) / kDaysPerYear;
         if (d > 0) {
-            g.p0[d] = curve.discountFactor(t);
-            g.lnP0[d] = std::log(g.p0[d]);
+            g.p0[d] = discountAt(curve, t);
+            g.lnP0[d] = log(g.p0[d]);
         }
-        g.expAt[d] = std::exp(-a * t);
-        const detail::OuMoments mo = detail::ouMoments(a, sigma, mu, t);
+        g.expAt[d] = exp(-a * t);
+        const OuMomentsT<Real> mo = ouMomentsT(a, sigma, mu, t);
         g.y[d] = mo.y;
         g.m[d] = mo.m;
         g.mInt[d] = mo.mInt;
     }
 }
 
-Grid buildGrid(const ExposureMarket& market, const ExposureModel& model, int horizon)
+template <class Real, class Curve>
+Grid<Real> buildGrid(const MarketT<Real, Curve>& market, const ModelT<Real>& model, int horizon)
 {
-    Grid g;
+    Grid<Real> g;
     g.horizon = horizon;
     g.spot = market.spot;
     g.fxVar = model.fxVol * model.fxVol;
     // Quanto drift of the USD short rate under the MXN measure.
-    const double muUsd = -model.rhoUsdFx * model.sigmaUsd * model.fxVol;
-    fillCurrencyGrid(g.ccy[kMxn], market.tiie, model.aMxn, model.sigmaMxn, 0.0, horizon);
-    fillCurrencyGrid(g.ccy[kUsd], market.sofr, model.aUsd, model.sigmaUsd, muUsd, horizon);
+    const Real muUsd = -model.rhoUsdFx * model.sigmaUsd * model.fxVol;
+    fillCurrencyGrid(g.ccy[kMxn], *market.tiie, model.aMxn, model.sigmaMxn, Real(0.0), horizon);
+    fillCurrencyGrid(g.ccy[kUsd], *market.sofr, model.aUsd, model.sigmaUsd, muUsd, horizon);
 
     const std::size_t n = static_cast<std::size_t>(horizon) + 1;
     g.q.assign(n, 1.0);
@@ -303,12 +415,12 @@ Grid buildGrid(const ExposureMarket& market, const ExposureModel& model, int hor
     if (market.mxnUsd) {
         for (std::size_t d = 1; d < n; ++d) {
             const double t = static_cast<double>(d) / kDaysPerYear;
-            g.q[d] = market.mxnUsd->discountFactor(t) / g.ccy[kMxn].p0[d];
-            g.lnq[d] = std::log(g.q[d]);
+            g.q[d] = discountAt(*market.mxnUsd, t) / g.ccy[kMxn].p0[d];
+            g.lnq[d] = log(g.q[d]);
         }
     }
 
-    const Mat5 cov = detail::stepCovariance(model, g.dt);
+    const Mat5<Real> cov = stepCovarianceT(model, g.dt);
     g.chol = choleskySemidefinite(cov);
     return g;
 }
@@ -317,12 +429,13 @@ Grid buildGrid(const ExposureMarket& market, const ExposureModel& model, int hor
 // Context: grid + sorted day table + compiled sets
 // ---------------------------------------------------------------------------------------------
 
+template <class Real>
 struct Context {
-    Grid grid;
+    Grid<Real> grid;
     std::vector<int> days;                    // sorted unique days (0 included) any instrument refers to
-    std::vector<double> p0[2];                // P_c(0, day) per table entry
-    std::vector<double> expAt[2];             // e^{-a_c day/365} per table entry
-    std::vector<double> qAt;                  // q(day) per table entry
+    std::vector<Real> p0[2];                  // P_c(0, day) per table entry
+    std::vector<Real> expAt[2];               // e^{-a_c day/365} per table entry
+    std::vector<Real> qAt;                    // q(day) per table entry
     std::vector<char> need[2];                // bond of currency c needed at this entry
     bool anyNeed[2] = {false, false};
     std::vector<CompiledSet> sets;
@@ -353,13 +466,15 @@ std::size_t indexOf(const std::vector<int>& days, int day)
     return static_cast<std::size_t>(std::lower_bound(days.begin(), days.end(), day) - days.begin());
 }
 
-void markNeed(Context& c, int ccy, std::size_t idx)
+template <class Real>
+void markNeed(Context<Real>& c, int ccy, std::size_t idx)
 {
     c.need[ccy][idx] = 1;
     c.anyNeed[ccy] = true;
 }
 
-Leg makeLeg(Context& c, int proj, int disc, bool toMxn, double notional, double floatSign, double rate,
+template <class Real>
+Leg makeLeg(Context<Real>& c, int proj, int disc, bool toMxn, double notional, double floatSign, double rate,
             double rateSign, double accrued, double exSign, int startDays, const std::vector<int>& payDays,
             double dayBase, bool initEx, bool finalEx)
 {
@@ -399,7 +514,8 @@ Leg makeLeg(Context& c, int proj, int disc, bool toMxn, double notional, double 
     return leg;
 }
 
-CompiledSet compileSet(Context& c, const NettingSetSpec& set)
+template <class Real>
+CompiledSet compileSet(Context<Real>& c, const NettingSetSpec& set)
 {
     CompiledSet out;
     for (const auto& s : set.swaps) {
@@ -425,8 +541,9 @@ CompiledSet compileSet(Context& c, const NettingSetSpec& set)
     return out;
 }
 
-Context buildContext(const ExposureMarket& market, const ExposureModel& model,
-                     const std::vector<NettingSetSpec>& sets, int minHorizon)
+template <class Real, class Curve>
+Context<Real> buildContext(const MarketT<Real, Curve>& market, const ModelT<Real>& model,
+                           const std::vector<NettingSetSpec>& sets, int minHorizon)
 {
     bool needsBasis = false;
     int horizon = std::max(minHorizon, 0);
@@ -448,7 +565,7 @@ Context buildContext(const ExposureMarket& market, const ExposureModel& model,
     std::sort(days.begin(), days.end());
     days.erase(std::unique(days.begin(), days.end()), days.end());
 
-    Context c;
+    Context<Real> c;
     c.grid = buildGrid(market, model, horizon);
     c.days = std::move(days);
     const std::size_t n = c.days.size();
@@ -472,10 +589,11 @@ Context buildContext(const ExposureMarket& market, const ExposureModel& model,
 // One simulated path
 // ---------------------------------------------------------------------------------------------
 
+template <class Real>
 struct PathData {
-    std::vector<double> x[2];   // short-rate factor x_c(d)
-    std::vector<double> I[2];   // int_0^t r_c
-    std::vector<double> X;      // MXN per USD
+    std::vector<Real> x[2];     // short-rate factor x_c(d)
+    std::vector<Real> I[2];     // int_0^t r_c
+    std::vector<Real> X;        // MXN per USD
 
     void resize(int horizon)
     {
@@ -490,16 +608,17 @@ struct PathData {
 
 // Path p draws its normals from a generator seeded with (seed, p), day after day, so a path never
 // depends on the instruments or on how far the horizon goes: a longer horizon only appends normals.
-void simulatePath(const Grid& g, unsigned seed, std::uint64_t p, PathData& path)
+template <class Real>
+void simulatePath(const Grid<Real>& g, unsigned seed, std::uint64_t p, PathData<Real>& path)
 {
     std::seed_seq seq{static_cast<std::uint32_t>(seed), static_cast<std::uint32_t>(p & 0xffffffffu),
                       static_cast<std::uint32_t>(p >> 32)};
     std::mt19937_64 gen(seq);
     std::normal_distribution<double> normal(0.0, 1.0);
 
-    const CurrencyGrid& cm = g.ccy[kMxn];
-    const CurrencyGrid& cu = g.ccy[kUsd];
-    double xtM = 0.0, xtU = 0.0, jtM = 0.0, jtU = 0.0;   // centred OU states and their integrals
+    const CurrencyGrid<Real>& cm = g.ccy[kMxn];
+    const CurrencyGrid<Real>& cu = g.ccy[kUsd];
+    Real xtM = 0.0, xtU = 0.0, jtM = 0.0, jtU = 0.0;   // centred OU states and their integrals
     path.x[kMxn][0] = 0.0;
     path.x[kUsd][0] = 0.0;
     path.I[kMxn][0] = 0.0;
@@ -509,9 +628,9 @@ void simulatePath(const Grid& g, unsigned seed, std::uint64_t p, PathData& path)
     for (int d = 0; d < g.horizon; ++d) {
         double z[5];
         for (double& v : z) v = normal(gen);
-        double w[5];
+        Real w[5];
         for (std::size_t i = 0; i < 5; ++i) {
-            double s = 0.0;
+            Real s = 0.0;
             for (std::size_t k = 0; k <= i; ++k) s += g.chol[i][k] * z[k];
             w[i] = s;
         }
@@ -524,9 +643,9 @@ void simulatePath(const Grid& g, unsigned seed, std::uint64_t p, PathData& path)
         path.x[kUsd][n] = xtU + cu.m[n];
         path.I[kMxn][n] = -cm.lnP0[n] + jtM + cm.mInt[n];
         path.I[kUsd][n] = -cu.lnP0[n] + jtU + cu.mInt[n];
-        const double dlnX = (path.I[kMxn][n] - path.I[kMxn][n - 1]) - (path.I[kUsd][n] - path.I[kUsd][n - 1])
+        const Real dlnX = (path.I[kMxn][n] - path.I[kMxn][n - 1]) - (path.I[kUsd][n] - path.I[kUsd][n - 1])
                           + (g.lnq[n - 1] - g.lnq[n]) - 0.5 * g.fxVar * g.dt + w[4];
-        path.X[n] = path.X[n - 1] * std::exp(dlnX);
+        path.X[n] = path.X[n - 1] * exp(dlnX);
     }
 }
 
@@ -534,8 +653,9 @@ void simulatePath(const Grid& g, unsigned seed, std::uint64_t p, PathData& path)
 // Valuation of compiled instruments at (path, day)
 // ---------------------------------------------------------------------------------------------
 
+template <class Real>
 struct Bonds {
-    std::vector<double> P[2];   // P_c(t, day) per table entry (valid for entries with day >= t)
+    std::vector<Real> P[2];     // P_c(t, day) per table entry (valid for entries with day >= t)
     void resize(std::size_t n)
     {
         P[0].assign(n, 0.0);
@@ -544,30 +664,32 @@ struct Bonds {
 };
 
 // P_c(t,T) = P_c(0,T)/P_c(0,t) exp(-B x - B^2 y / 2), B = (1 - e^{-a(T-t)}) / a
-void computeBonds(const Context& c, int d, double xMxn, double xUsd, Bonds& b)
+template <class Real>
+void computeBonds(const Context<Real>& c, int d, Real xMxn, Real xUsd, Bonds<Real>& b)
 {
     const std::size_t first = indexOf(c.days, d);
     const std::size_t n = c.days.size();
     const std::size_t dd = static_cast<std::size_t>(d);
     for (int k = 0; k < 2; ++k) {
         if (!c.anyNeed[k]) continue;
-        const CurrencyGrid& cg = c.grid.ccy[k];
-        const double invP0d = 1.0 / cg.p0[dd];
-        const double ed = cg.expAt[dd];
-        const double yd = cg.y[dd];
-        const double invA = 1.0 / cg.a;
-        const double x = k == kMxn ? xMxn : xUsd;
+        const CurrencyGrid<Real>& cg = c.grid.ccy[k];
+        const Real invP0d = 1.0 / cg.p0[dd];
+        const Real ed = cg.expAt[dd];
+        const Real yd = cg.y[dd];
+        const Real invA = 1.0 / cg.a;
+        const Real x = k == kMxn ? xMxn : xUsd;
         for (std::size_t i = first; i < n; ++i) {
             if (!c.need[k][i]) continue;
-            const double B = (1.0 - c.expAt[k][i] / ed) * invA;
-            b.P[k][i] = c.p0[k][i] * invP0d * std::exp(-B * x - 0.5 * B * B * yd);
+            const Real B = (1.0 - c.expAt[k][i] / ed) * invA;
+            b.P[k][i] = c.p0[k][i] * invP0d * exp(-B * x - 0.5 * B * B * yd);
         }
     }
 }
 
+template <class Real>
 struct PathView {
-    const double* I[2];
-    double        X;
+    const Real* I[2];
+    Real        X;
 };
 
 // A cash flow at `day` is still unpaid at d if it falls strictly after d; today (d = 0) a flow dated
@@ -575,7 +697,8 @@ struct PathView {
 inline bool unpaid(int day, int d) { return day > d || (d == 0 && day == 0); }
 
 // Discount factor of the leg's discount curve at table entry idx.
-inline double discountAt(const Leg& L, const Context& c, const Bonds& b, std::size_t idx, double qd)
+template <class Real>
+inline Real discountAt(const Leg& L, const Context<Real>& c, const Bonds<Real>& b, std::size_t idx, Real qd)
 {
     switch (L.disc) {
         case DiscTiie: return b.P[kMxn][idx];
@@ -584,22 +707,23 @@ inline double discountAt(const Leg& L, const Context& c, const Bonds& b, std::si
     }
 }
 
-double legValue(const Leg& L, const Context& c, int d, const Bonds& b, double qd, const PathView& pv)
+template <class Real>
+Real legValue(const Leg& L, const Context<Real>& c, int d, const Bonds<Real>& b, Real qd, const PathView<Real>& pv)
 {
-    const std::vector<double>& proj = b.P[L.proj];
-    double v = 0.0;
+    const std::vector<Real>& proj = b.P[L.proj];
+    Real v = 0.0;
     for (std::size_t i = 0; i < L.periods.size(); ++i) {
         const LegPeriod& per = L.periods[i];
         if (per.payDay <= d) continue;                            // already paid
-        double fa;                                                // compounded factor of the period
+        Real fa;                                                  // compounded factor of the period
         if (per.prevDay <= d) {
-            const double a0 = i == 0 ? L.accrued : 1.0;
-            fa = a0 * std::exp(pv.I[L.proj][d] - pv.I[L.proj][std::max(per.prevDay, 0)]);
+            const Real a0 = i == 0 ? Real(L.accrued) : Real(1.0);
+            fa = a0 * exp(pv.I[L.proj][d] - pv.I[L.proj][std::max(per.prevDay, 0)]);
         } else {
             fa = proj[per.prevIdx];
         }
-        const double pd = discountAt(L, c, b, per.payIdx, qd);
-        const double g = L.disc == DiscCsa ? c.qAt[per.payIdx] / qd : 1.0;
+        const Real pd = discountAt(L, c, b, per.payIdx, qd);
+        const Real g = L.disc == DiscCsa ? Real(c.qAt[per.payIdx] / qd) : Real(1.0);
         v += L.floatSign * L.notional * (fa - proj[per.payIdx]) * g
            + L.rateSign * L.notional * L.rate * per.tau * pd;
     }
@@ -610,19 +734,22 @@ double legValue(const Leg& L, const Context& c, int d, const Bonds& b, double qd
     return v;
 }
 
-double setValue(const CompiledSet& set, const Context& c, int d, const Bonds& b, double qd, const PathView& pv)
+template <class Real>
+Real setValue(const CompiledSet& set, const Context<Real>& c, int d, const Bonds<Real>& b, Real qd,
+              const PathView<Real>& pv)
 {
-    double total = 0.0;
+    Real total = 0.0;
     for (const Trade& t : set.trades) {
-        double tv = 0.0;
-        for (const Leg& L : t.legs) tv += legValue(L, c, d, b, qd, pv) * (L.toMxn ? pv.X : 1.0);
+        Real tv = 0.0;
+        for (const Leg& L : t.legs) tv += legValue(L, c, d, b, qd, pv) * (L.toMxn ? pv.X : Real(1.0));
         total += tv;
     }
     return total;
 }
 
-// Cash flows paid in (0, d], deflated by D(day), for the martingale statistic.
-double paidFlowsDeflated(const CompiledSet& set, int d, const PathData& path, Deflator deflator, const Grid& g)
+// Cash flows paid in (0, d], deflated by D(day), for the martingale statistic (double only).
+double paidFlowsDeflated(const CompiledSet& set, int d, const PathData<double>& path, Deflator deflator,
+                         const Grid<double>& g)
 {
     const auto deflate = [&](int day) {
         const double bank = std::exp(path.I[kMxn][static_cast<std::size_t>(day)]);
@@ -685,31 +812,13 @@ namespace detail {
 
 OuMoments ouMoments(double a, double sigma, double mu, double t)
 {
-    const double s2 = sigma * sigma;
-    const double em = -std::expm1(-a * t);                   // 1 - e^{-a t}
-    const double e2 = -std::expm1(-2.0 * a * t);             // 1 - e^{-2 a t}
-    OuMoments out;
-    out.y = s2 * e2 / (2.0 * a);
-    out.m = s2 / (2.0 * a * a) * em * em + mu * em / a;
-    out.mInt = s2 / (2.0 * a * a) * (t - 2.0 * em / a + e2 / (2.0 * a)) + mu / a * (t - em / a);
-    return out;
+    const OuMomentsT<double> m = ouMomentsT(a, sigma, mu, t);
+    return {m.y, m.m, m.mInt};
 }
 
 std::array<std::array<double, 5>, 5> stepCovariance(const ExposureModel& model, double dt)
 {
-    const std::array<Kernel, 5> kernel = {uKernel(model.aMxn), vKernel(model.aMxn), uKernel(model.aUsd),
-                                          vKernel(model.aUsd), oneKernel()};
-    const std::array<double, 5> vol = {model.sigmaMxn, model.sigmaMxn, model.sigmaUsd, model.sigmaUsd,
-                                       model.fxVol};
-    const std::array<int, 5> factor = {0, 0, 1, 1, 2};   // which Brownian drives each integral
-    const double rho[3][3] = {{1.0, model.rhoMxnUsd, model.rhoMxnFx},
-                              {model.rhoMxnUsd, 1.0, model.rhoUsdFx},
-                              {model.rhoMxnFx, model.rhoUsdFx, 1.0}};
-    std::array<std::array<double, 5>, 5> cov{};
-    for (std::size_t i = 0; i < 5; ++i)
-        for (std::size_t j = 0; j < 5; ++j)
-            cov[i][j] = rho[factor[i]][factor[j]] * vol[i] * vol[j] * kernelIntegral(kernel[i], kernel[j], dt);
-    return cov;
+    return stepCovarianceT(modelOf(model), dt);
 }
 
 } // namespace detail
@@ -729,12 +838,12 @@ ExposureEngine::ExposureEngine(ExposureMarket market, ExposureModel model, SimCo
 
 std::vector<double> ExposureEngine::tradeValuesAtZero(const NettingSetSpec& set) const
 {
-    const Context c = buildContext(market_, model_, {set}, 0);
-    Bonds bonds;
+    const Context<double> c = buildContext(marketOf(market_), modelOf(model_), {set}, 0);
+    Bonds<double> bonds;
     bonds.resize(c.days.size());
     computeBonds(c, 0, 0.0, 0.0, bonds);
     const double zero[1] = {0.0};
-    const PathView pv{{zero, zero}, market_.spot};
+    const PathView<double> pv{{zero, zero}, market_.spot};
     std::vector<double> out;
     for (const Trade& t : c.sets[0].trades) {
         double tv = 0.0;
@@ -750,7 +859,7 @@ std::vector<ExposureProfile> ExposureEngine::simulate(const std::vector<NettingS
     if (sets.empty()) return out;
 
     const std::vector<int>& report = config_.reportDays;
-    const Context c = buildContext(market_, model_, sets, report.back());
+    const Context<double> c = buildContext(marketOf(market_), modelOf(model_), sets, report.back());
     const std::size_t nPaths = config_.nPaths;
     const std::size_t nDays = report.size();
     const std::size_t nSets = sets.size();
@@ -760,18 +869,18 @@ std::vector<ExposureProfile> ExposureEngine::simulate(const std::vector<NettingS
     std::vector<double> invBank(nPaths * nDays);
 
     forEachPathChunk(nPaths, [&](std::size_t first, std::size_t last) {
-        PathData path;
+        PathData<double> path;
         path.resize(c.grid.horizon);
-        Bonds bonds;
+        Bonds<double> bonds;
         bonds.resize(c.days.size());
         for (std::size_t p = first; p < last; ++p) {
             simulatePath(c.grid, config_.seed, p, path);
-            const PathView pv0{{path.I[kMxn].data(), path.I[kUsd].data()}, 0.0};
+            const PathView<double> pv0{{path.I[kMxn].data(), path.I[kUsd].data()}, 0.0};
             for (std::size_t j = 0; j < nDays; ++j) {
                 const int d = report[j];
                 const std::size_t dd = static_cast<std::size_t>(d);
                 computeBonds(c, d, path.x[kMxn][dd], path.x[kUsd][dd], bonds);
-                PathView pv = pv0;
+                PathView<double> pv = pv0;
                 pv.X = path.X[dd];
                 const double qd = c.grid.q[dd];
                 for (std::size_t s = 0; s < nSets; ++s)
@@ -843,13 +952,13 @@ std::vector<DeflatedStat> ExposureEngine::deflatedValueStats(const NettingSetSpe
     for (int d : days)
         if (d < 0) throw std::invalid_argument("ExposureEngine: deflatedValueStats days must be >= 0");
     const int last = *std::max_element(days.begin(), days.end());
-    const Context c = buildContext(market_, model_, {set}, last);
+    const Context<double> c = buildContext(marketOf(market_), modelOf(model_), {set}, last);
     const std::size_t nPaths = config_.nPaths;
 
     std::vector<std::vector<double>> samples(days.size(), std::vector<double>(nPaths));
-    PathData path;
+    PathData<double> path;
     path.resize(c.grid.horizon);
-    Bonds bonds;
+    Bonds<double> bonds;
     bonds.resize(c.days.size());
     for (std::size_t p = 0; p < nPaths; ++p) {
         simulatePath(c.grid, config_.seed, p, path);
@@ -857,7 +966,7 @@ std::vector<DeflatedStat> ExposureEngine::deflatedValueStats(const NettingSetSpe
             const int d = days[k];
             const std::size_t dd = static_cast<std::size_t>(d);
             computeBonds(c, d, path.x[kMxn][dd], path.x[kUsd][dd], bonds);
-            const PathView pv{{path.I[kMxn].data(), path.I[kUsd].data()}, path.X[dd]};
+            const PathView<double> pv{{path.I[kMxn].data(), path.I[kUsd].data()}, path.X[dd]};
             const double value = setValue(c.sets[0], c, d, bonds, c.grid.q[dd], pv);
             const double bank = std::exp(path.I[kMxn][dd]);
             const double deflate = deflator == Deflator::CollateralAccount ? bank / c.grid.q[dd] : bank;

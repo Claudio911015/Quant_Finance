@@ -1,9 +1,34 @@
 #pragma once
+#include <cmath>
+#include <cstddef>
 #include <vector>
 #include <qf/xva/credit_curve.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
 
 namespace qf::xva {
+
+/// @brief Supervivencia exp(-∫_0^t h) de intensidades constantes por tramos, sobre el escalar `Real`
+/// (double, o un escalar de diferenciación automática cuando las intensidades son insumos).
+/// @param times    Vértices de los tramos en años, crecientes y > 0.
+/// @param hazards  Intensidad de cada tramo; mismo tamaño que `times`, >= 1. Extrapolación plana del último.
+/// @param t        Tiempo en años.
+/// @return         1 para t <= 0.
+template <class Real>
+Real survivalFromHazards(const std::vector<double>& times, const std::vector<Real>& hazards, double t)
+{
+    using std::exp;
+    if (t <= 0.0)
+        return Real(1.0);
+    Real integral = 0.0;
+    double prev = 0.0;
+    for (std::size_t i = 0; i < times.size(); ++i) {
+        if (t <= times[i])
+            return exp(-(integral + hazards[i] * (t - prev)));
+        integral += hazards[i] * (times[i] - prev);
+        prev = times[i];
+    }
+    return exp(-(integral + hazards.back() * (t - prev)));
+}
 
 /// @brief Curva de intensidad constante por tramos (curva de crédito con bootstrap de CDS).
 /// hazards[i] rige en (times[i-1], times[i]] con times[-1] = 0; extrapolación plana del último tramo.

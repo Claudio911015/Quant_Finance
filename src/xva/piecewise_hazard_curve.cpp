@@ -65,17 +65,7 @@ PiecewiseHazardCurve::PiecewiseHazardCurve(std::vector<double> times, std::vecto
 
 double PiecewiseHazardCurve::survivalProbability(double t) const
 {
-    if (t <= 0.0)
-        return 1.0;
-    double integral = 0.0;
-    double prev = 0.0;
-    for (std::size_t i = 0; i < times_.size(); ++i) {
-        if (t <= times_[i])
-            return std::exp(-(integral + hazards_[i] * (t - prev)));
-        integral += hazards_[i] * (times_[i] - prev);
-        prev = times_[i];
-    }
-    return std::exp(-(integral + hazards_.back() * (t - prev)));
+    return survivalFromHazards(times_, hazards_, t);
 }
 
 double PiecewiseHazardCurve::hazardRate(double t) const
