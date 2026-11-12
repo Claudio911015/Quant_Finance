@@ -88,6 +88,12 @@ CREATE TABLE IF NOT EXISTS scenario_set_events (id INTEGER PRIMARY KEY AUTOINCRE
 CREATE TRIGGER IF NOT EXISTS scenario_set_events_no_update BEFORE UPDATE ON scenario_set_events BEGIN SELECT RAISE(ABORT, 'scenario_set_events es solo de inserción'); END;
 CREATE TRIGGER IF NOT EXISTS scenario_set_events_no_delete BEFORE DELETE ON scenario_set_events BEGIN SELECT RAISE(ABORT, 'scenario_set_events es solo de inserción'); END;
 -- --- fin corte 6 ---
+-- --- corte 9: curvas de crédito por CDS (solo inserción; vigente = mayor id por entidad) ---
+CREATE TABLE IF NOT EXISTS credit_curves (id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL,
+  as_of TEXT NOT NULL, recovery REAL NOT NULL, quotes TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS credit_curves_no_update BEFORE UPDATE ON credit_curves BEGIN SELECT RAISE(ABORT, 'credit_curves es solo de inserción'); END;
+CREATE TRIGGER IF NOT EXISTS credit_curves_no_delete BEFORE DELETE ON credit_curves BEGIN SELECT RAISE(ABORT, 'credit_curves es solo de inserción'); END;
+-- --- fin corte 9 ---
 """
 
 

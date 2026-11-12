@@ -7,7 +7,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from desk.api.db import get_conn
 from desk.api.errors import ApiError
-from desk.api.risk import credit, explain, factor_history, limits, scenario_sets
+from desk.api.risk import credit, credit_curves, explain, factor_history, limits, scenario_sets
 from desk.api.validation import body_object, choice, ensure_finite
 
 bp = Blueprint("risk_adv", __name__)
@@ -132,6 +132,22 @@ def credit_set_params():
 @bp.get("/api/credit/exposure")
 def credit_exposure():
     return jsonify(ensure_finite(credit.exposure(get_conn(), _arg("snapshot"))))
+
+
+# ------------------------------------------------------------------ curvas de crédito (corte 9)
+
+@bp.get("/api/credit/curves")
+def credit_curves_list():
+    return jsonify(ensure_finite(credit_curves.list_curves(get_conn(), _arg("snapshot"))))
+
+
+@bp.put("/api/credit/curves/<path:entity>")
+def credit_curves_put(entity):
+    body = body_object()
+    conn = get_conn()
+    saved = credit_curves.put_curve(conn, entity, body)
+    conn.commit()
+    return jsonify(ensure_finite(saved))
 
 
 # ------------------------------------------------------------------ conjuntos de escenarios

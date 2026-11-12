@@ -12,6 +12,7 @@ from desk.api.errors import register_error_handlers
 from desk.api.routes import fixings, hedges, market, pnl, price, risk, trades, counterparties, calendars
 from desk.api.seed_market import ensure_csa_quotes, seed_market
 from desk.api.routes import ops  # corte 5
+from desk.api.risk import credit_curves  # corte 9
 from desk.api.seed_trades import ensure_xva_trades, seed_trades
 
 UI_DIST = Path(__file__).resolve().parents[1] / "ui" / "dist"
@@ -51,6 +52,8 @@ def create_app(db_path: Optional[Union[str, Path]] = None, seed: bool = True) ->
         # --- corte 9: swaps y cross currency swaps adicionales por contraparte, una sola vez ---
         if seed:
             ensure_xva_trades(conn)
+            conn.commit()
+            credit_curves.seed_synthetic(conn)  # curvas de crédito sintéticas, una sola vez
             conn.commit()
         # --- fin corte 9 ---
     finally:
