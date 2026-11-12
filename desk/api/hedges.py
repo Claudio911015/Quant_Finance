@@ -56,6 +56,7 @@ FAIR_VALUE_BASIS = "Nivel 2: insumos observables (curvas, tipo de cambio y volat
 FROZEN_NOTE = "Reserva congelada al desdesignar: se reciclará a resultados cuando ocurra el flujo cubierto"
 CONCLUDED_NOTE = "Instrumento vencido antes que la partida: la reserva se reciclará a resultados cuando ocurra el flujo cubierto"
 BACKDATED_DAYS = 1  # días de holgura entre la fecha de designación y la de alta antes de avisar (F5)
+HEDGE_RATIO_TOLERANCE = 0.01  # diferencia relativa entre la razón capturada y la de los nocionales antes de avisar (H07)
 
 _TERM_DATE_KEYS = ("start_date", "maturity_date", "date")
 
@@ -460,6 +461,23 @@ def _designation_warnings(
                 "code": "instrument_off_market",
                 "message": "El instrumento no está a mercado al designar (valor %.2f MXN): su valor inicial ya está "
                 "en libros, no genera asiento y es fuente de inefectividad" % v_inst["pv_mxn"],
+            }
+        )
+    # H07: la medición compara la fracción designada del instrumento contra la partida completa y no usa la razón
+    # capturada (solo entra al término crítico de nocional): si no es la de los nocionales, se avisa.
+    notional = next(
+        t for t in hedge_effectiveness.critical_terms(rel, trade, mkt.as_of) if t["term"] == "notional"
+    )
+    instrument, item_scaled = notional["instrument"], notional["item"]  # fracción × nocional; razón × partida
+    if abs(item_scaled - instrument) > HEDGE_RATIO_TOLERANCE * abs(instrument):
+        item = item_scaled / rel["hedge_ratio"]
+        out.append(
+            {
+                "code": "hedge_ratio_mismatch",
+                "message": "La razón de cobertura capturada (%.4g) difiere de la que implican los nocionales "
+                "(%.4g = %.2f de la fracción designada del instrumento / %.2f de la partida): la medición usa la "
+                "fracción designada del instrumento contra la partida completa y la razón capturada es solo "
+                "informativa" % (rel["hedge_ratio"], instrument / item, instrument, item),
             }
         )
     if rel["item_kind"] == "forecast_fx" and rel["item_terms"]["date"].weekday() >= 5:

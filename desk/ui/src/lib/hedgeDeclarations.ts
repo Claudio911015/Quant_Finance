@@ -24,6 +24,9 @@ export const DECL_DESIGNATION_DATE =
 export const DECL_OFF_MARKET =
   'Un derivado fuera de mercado al designar trae un valor inicial que ya está en libros y no genera asiento; es fuente de inefectividad.';
 
+export const DECL_HEDGE_RATIO =
+  'La medición compara la fracción designada del instrumento completo contra la partida completa, sin escalar ninguno por la razón de cobertura: la razón capturada (unidades de instrumento por unidad de partida) es informativa, solo entra a la comparación de nocional de los términos críticos y, si difiere de la que implican los nocionales en más de 1 %, el alta avisa. Una razón distinta de la de los nocionales no cambia la inefectividad.';
+
 export const HEDGE_DECLARATIONS: string[] = [
   DECL_RECYCLING,
   DECL_FV_COMPONENT,
@@ -32,4 +35,5 @@ export const HEDGE_DECLARATIONS: string[] = [
   DECL_DEDESIGNATION,
   DECL_DESIGNATION_DATE,
   DECL_OFF_MARKET,
+  DECL_HEDGE_RATIO,
 ];

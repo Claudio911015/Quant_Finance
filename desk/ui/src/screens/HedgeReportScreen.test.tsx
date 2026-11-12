@@ -216,6 +216,7 @@ describe('HedgeReportScreen', () => {
     expect(text).toContain('fuente de inefectividad');
     expect(text).toContain('devengo del cupón en curso'); // el ajuste de valor razonable no es un valor limpio
     expect(text).toContain('no puede comprobar que la documentación existiera');
+    expect(text).toContain('la razón capturada (unidades de instrumento por unidad de partida) es informativa'); // H07
   });
 
   it('muestra la fecha de designación y la de documentación', async () => {

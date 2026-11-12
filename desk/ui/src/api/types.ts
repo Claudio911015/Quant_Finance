@@ -329,7 +329,13 @@ export interface HedgeEvent {
 
 /** Aviso que el alta devuelve y guarda en el evento de designación; `message` ya viene en español. */
 export interface HedgeWarning {
-  code: 'no_economic_relationship' | 'instrument_off_market' | 'forecast_date_weekend' | 'designation_backdated';
+  code:
+    | 'no_economic_relationship'
+    | 'instrument_off_market'
+    | 'hedge_ratio_mismatch'
+    | 'forecast_date_weekend'
+    | 'forecast_date_holiday'
+    | 'designation_backdated';
   message: string;
 }
 

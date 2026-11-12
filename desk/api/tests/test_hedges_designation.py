@@ -426,6 +426,49 @@ def _clock(monkeypatch, iso):
     monkeypatch.setattr("desk.api.hedges.now_iso", lambda: iso)
 
 
+# H07: la razón de cobertura capturada no entra en la medición (compara la fracción designada del instrumento contra
+# la partida completa); si difiere de lo que implican los nocionales en más de 1 %, el alta avisa.
+
+def test_a_hedge_ratio_that_differs_from_the_notionals_warns_and_is_stored_as_given(client, loan_trade):
+    r = designate(client, loan_trade["id"], "floating_loan", _loan(), hedge_ratio=1.2)  # 500 contra 500: implica 1
+    assert r.status_code == 201, r.get_json()
+    d = r.get_json()
+    assert _codes(d) == ["hedge_ratio_mismatch"]
+    message = d["warnings"][0]["message"]
+    assert "capturada (1.2)" in message and "implican los nocionales (1 = " in message
+    assert "fracción designada del instrumento contra la partida completa" in message and "informativa" in message
+    assert d["hedge_ratio"] == 1.2 and d["events"][0]["data"]["warnings"] == d["warnings"]
+
+
+def test_a_hedge_ratio_equal_to_the_notional_ratio_does_not_warn(client):
+    swap = par_irs(client, "TIIE-F", 600e6, D0, LOAN_END)  # 600 contra 500: la razón 1.2 es la de los nocionales
+    r = designate(client, swap["id"], "floating_loan", _loan(), hedge_ratio=1.2)
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["warnings"] == []
+
+
+def test_the_hedge_ratio_tolerance_is_one_percent_of_the_implied_ratio(client):
+    swap = par_irs(client, "TIIE-F", 500e6, D0, LOAN_END)
+    inside = designate(client, swap["id"], "floating_loan", _loan(), hedge_ratio=1.0099)
+    assert inside.status_code == 201 and inside.get_json()["warnings"] == []
+    other = par_irs(client, "TIIE-F", 500e6, D0, LOAN_END)
+    outside = designate(client, other["id"], "floating_loan", _loan(), hedge_ratio=1.0101)
+    assert _codes(outside.get_json()) == ["hedge_ratio_mismatch"]
+
+
+def test_the_implied_hedge_ratio_uses_the_designated_fraction_of_the_instrument(client):
+    swap = par_irs(client, "TIIE-F", 500e6, D0, LOAN_END)  # la mitad cubre un crédito de 250: la razón implícita es 1
+    r = designate(client, swap["id"], "floating_loan", _loan(notional=250e6), fraction=0.5)
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["warnings"] == []
+
+
+def test_a_forecast_flow_hedge_ratio_mismatch_warns_too(client, fx_trade):
+    r = designate(client, fx_trade["id"], "forecast_fx", _fx(), hedge_ratio=0.9)  # 10 M contra 10 M implica 1
+    assert r.status_code == 201, r.get_json()
+    assert "hedge_ratio_mismatch" in _codes(r.get_json())
+
+
 def test_documenting_more_than_a_day_after_the_designation_date_warns_with_both_dates(monkeypatch, client, loan_trade):
     _clock(monkeypatch, "2026-11-13T09:30:00+00:00")  # tres días después del as_of de MX-DEMO
 

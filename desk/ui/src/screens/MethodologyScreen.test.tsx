@@ -190,6 +190,15 @@ describe('MethodologyScreen', () => {
       expect(hedgeRow('Efectividad prospectiva')).toContain('sentido');
     });
 
+    it('declara que la razón de cobertura capturada es informativa y que el alta avisa si difiere (H07)', () => {
+      renderScreen();
+      const ratio = hedgeRow('Razón de cobertura');
+      expect(ratio).toContain('fracción designada del instrumento completo contra la partida completa');
+      expect(ratio).toContain('es informativa');
+      expect(ratio).toContain('más de 1 %');
+      expect(hedgeRow('Derivado fuera de mercado')).toContain('razón de cobertura que difiere de la de los nocionales');
+    });
+
     it('ya no deja fuera de alcance la designación de componentes de riesgo', () => {
       renderScreen();
       expect(hedgeRow('Fuera de alcance')).not.toContain('componentes de riesgo');
