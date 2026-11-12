@@ -131,6 +131,9 @@ describe('MethodologyScreen', () => {
       expect(recycling).toContain('misma fecha');
       expect(recycling).toContain('reserva queda en 0');
       expect(hedgeRow('Asientos sugeridos')).toContain('saldos acumulados ya redondeados');
+      // H12: el residuo de redondeo va a la cuenta principal de resultados del tipo, no siempre a inefectividad
+      expect(hedgeRow('Asientos sugeridos')).toContain('Resultados — cobertura de valor razonable en valor razonable');
+      expect(hedgeRow('Asientos sugeridos')).not.toContain('va a resultados por inefectividad');
     });
 
     it('declara el componente de tasa, la presentación del cupón y que el ajuste no se amortiza', () => {

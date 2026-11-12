@@ -280,7 +280,7 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Asientos sugeridos',
-        text: 'El sistema no es el libro mayor ni sustituye al contador. Cuentas fijas; redondeo a centavos. Las cuentas de balance se asientan como la diferencia entre saldos acumulados ya redondeados, de modo que el acumulado de asientos coincide al centavo con el saldo; el residuo del periodo va a resultados por inefectividad.',
+        text: 'El sistema no es el libro mayor ni sustituye al contador. Cuentas fijas; redondeo a centavos. Las cuentas de balance se asientan como la diferencia entre saldos acumulados ya redondeados, de modo que el acumulado de asientos coincide al centavo con el saldo; el residuo de redondeo del periodo (a lo más unos centavos) se absorbe en la cuenta principal de resultados del tipo de cobertura (en su última línea o, si no la hay, en una línea de redondeo): Resultados — inefectividad de cobertura en flujo de efectivo y Resultados — cobertura de valor razonable en valor razonable, donde no hay una cuenta de inefectividad separada.',
       },
       {
         label: 'Derivado hipotético',
