@@ -1,0 +1,817 @@
+\chapter{Sensibilidades del XVA por diferenciación adjunta}\label{cap:xva-aad}
+
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap16-proposito}
+
+El capítulo~\ref{cap:xva} calcula el CVA, el DVA y el FVA de una contraparte con una simulación de Monte Carlo. Una
+mesa que quiera cubrir ese número necesita saber cuánto cambia si se mueve cada insumo: cada pilar de la curva
+TIIE-F, de la curva SOFR y de la curva MXN-USD, el tipo de cambio, las volatilidades, la intensidad de cada tramo de
+la curva de crédito de la contraparte y de la propia, y el diferencial de fondeo. En el snapshot sembrado son
+48 insumos. Por choque y reprecio cada sensibilidad cuesta dos valuaciones completas; por \emph{diferenciación
+adjunta} (AAD, \emph{adjoint algorithmic differentiation}) salen todas juntas por el costo de unas pocas
+valuaciones, que es lo que este capítulo documenta.
+
+El código calcula tres cosas. Primero, las derivadas de CVA, DVA y FVA (y, por combinación lineal, del total) respecto
+de los 48 insumos, con la biblioteca XAD, sobre \emph{las mismas trayectorias, malla y semilla} que el XVA del
+capítulo~\ref{cap:xva} (secciones~\ref{sec:cap16-insumos}--\ref{sec:cap16-cinta}). Segundo, el paso de las
+intensidades de crédito a la sensibilidad a \emph{cada cotización de CDS} con el jacobiano del bootstrap
+(sección~\ref{sec:cap16-credito}). Tercero, la conversión de unidades que publica la ruta
+\texttt{GET /api/xva/sensitivities} (sección~\ref{sec:cap16-implementacion}) y que alimenta la sección
+«Sensibilidades» de la pantalla XVA. El cálculo es informativo, como todo el XVA: no entra al valor presente ni a
+la contabilidad.
+
+Lo que \emph{no} hace importa tanto como lo que hace, y se repite en la sección~\ref{sec:cap16-limites}: las
+derivadas son \textbf{parciales} (al mover un pilar no se recalibran ni la curva MXN-USD ni el crédito;
+sección~\ref{sec:cap16-parcial}), de primer orden, sin sensibilidad a correlaciones ni al PFE, y su costo
+(sección~\ref{sec:cap16-costo}) es de unas 9 valuaciones con un hilo y de decenas de segundos en conjuntos largos
+con los dos hilos que usa la API.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap16-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}, y los del XVA ($t_j$, $V$, $\mathcal B$, $S_c$, $S_o$,
+$\mathrm{LGD}$, $s_f$, $\mathrm{EPE}^*$, $\mathrm{ENE}^*$, $n$, $\mathcal G$) son los del capítulo~\ref{cap:xva}. Los
+símbolos propios de este capítulo son:
+\begin{itemize}
+  \item $\boldsymbol\vartheta=(\vartheta_1,\dots,\vartheta_m)$: vector de \emph{insumos activos}, los que se derivan
+        (tabla~\ref{tab:cap16-insumos}); $m=48$ en MX-DEMO. Se usa $\vartheta$ y no $\theta$ porque este último es la
+        deriva $\hwtheta$ de Hull--White del capítulo~\ref{cap:hull-white}.
+  \item $z^{\mathrm M}_k$, $z^{\mathrm U}_k$, $z^{\mathrm{col}}_k$: tasa cero (anual, composición continua) del pilar
+        $k$ de las curvas TIIE-F, SOFR y MXN-USD (la curva de descuento con colateral \USD, subíndice \emph{col}).
+  \item $h^{\mathrm c}_i$, $h^{\mathrm o}_i$: intensidad del tramo $i$ de la curva de crédito de la contraparte y de la
+        propia; $v_i$ el vértice donde termina (años) y $J$ el número de tramos (en el capítulo~\ref{cap:xva} son
+        $h_j$ y $v_j$). $\ell_i(t)$: tiempo vivido en el tramo $i$ hasta $t$.
+  \item $\omega_p$: las normales de la trayectoria $p$ (cinco por día, de un \texttt{mt19937\_64} sembrado con
+        (semilla, $p$)); \emph{no dependen de $\boldsymbol\vartheta$}. $V_{pj}$ y $\mathcal B_{pj}$: valor del
+        conjunto y cuenta bancaria en la trayectoria $p$ y la fecha $t_j$ de la malla de integración $\mathcal G$.
+  \item $w^{\mathrm c}_j$, $w^{\mathrm o}_j$, $w^{\mathrm f}_j$: pesos de la fecha $t_j$ en CVA, DVA y FVA
+        (ecuación~\eqref{eq:cap16-pesos}); $\widehat{\mathrm{CVA}}_p$, $\widehat{\mathrm{DVA}}_p$,
+        $\widehat{\mathrm{FVA}}_p$: aporte de la trayectoria $p$ (suman, divididos entre $n$, a las medidas).
+  \item $\mathbf 1_{\{\cdot\}}$: indicador. $u_k$, $\bar u_k$: variable intermedia del programa y su adjunto
+        ($\bar u_k=\partial\Phi/\partial u_k$ para la salida que se siembra). $\boldsymbol\kappa$: \emph{parte común}
+        (variables que dependen de $\boldsymbol\vartheta$ y no de $\omega_p$).
+  \item $s_k$, $J_{ki}=\partial h_i/\partial s_k$: cotización del CDS de plazo $T_k$ y jacobiano del bootstrap
+        (adimensional).
+  \item $\Delta_i$, $\widetilde D^{X}_i$: escala que lleva una derivada a la unidad del reporte y derivada reportada
+        (ecuación~\eqref{eq:cap16-unidades}); $\DVO^{\mathrm{par}}_X$: DV01 paralelo de una curva.
+  \item $C_{\mathrm{adj}}$, $C_{\mathrm{ef}}$: constante del costo de una pasada adjunta frente a la evaluación del
+        programa y su valor medido aquí (la AAD frente a una valuación); $M_{\boldsymbol\kappa}$, $M_{\mathrm{tray}}$:
+        memoria de la cinta de la parte común y de una trayectoria (bytes).
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap16-modelo}
+
+\begin{sloppypar}
+\subsection{Qué se deriva y respecto de qué}\label{sec:cap16-insumos}
+
+Se derivan el CVA, el DVA y el FVA del conjunto de compensación de una contraparte,
+ecuaciones~(\ref{eq:cap16-pesos}) y (\ref{eq:cap16-contribuciones}), respecto de los insumos de la
+tabla~\ref{tab:cap16-insumos}. El total es $\mathrm{CVA}-\mathrm{DVA}+\mathrm{FVA}$ y se deriva por linealidad:
+\begin{equation}\label{eq:cap16-total-lineal}
+  \frac{\partial\,\mathrm{Total}}{\partial\vartheta_i}=\frac{\partial\,\mathrm{CVA}}{\partial\vartheta_i}
+  -\frac{\partial\,\mathrm{DVA}}{\partial\vartheta_i}+\frac{\partial\,\mathrm{FVA}}{\partial\vartheta_i}.
+\end{equation}
+La columna \texttt{dva} de la API es $\partial\mathrm{DVA}/\partial\vartheta_i$ (positiva cuando el DVA crece con el
+insumo) y la \texttt{total} resta esa columna, como en la ecuación~\eqref{eq:cap16-total-lineal}.
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{4.4cm}r>{\raggedright\arraybackslash}p{3.6cm}@{}}
+\toprule
+Grupo & Insumo $\vartheta_i$ & Cantidad & Unidad del reporte \\
+\midrule
+Curva TIIE-F & $z^{\mathrm M}_k$, un pilar por cotización & 10 & \MXN\ por \pb \\
+Curva SOFR & $z^{\mathrm U}_k$ & 10 & \MXN\ por \pb \\
+Curva MXN-USD (si el snapshot la trae) & $z^{\mathrm{col}}_k$ & 9 & \MXN\ por \pb \\
+Tipo de cambio & $\Spot$ & 1 & \MXN\ por 1~\% del spot \\
+Volatilidad de \USD/\MXN & $\sigma_X$ & 1 & \MXN\ por punto ($0.01$) \\
+Hull--White & $\sigma_{\mathrm M}$, $\sigma_{\mathrm U}$ & 2 & \MXN\ por \pb\ de volatilidad normal \\
+Hull--White & $a_{\mathrm M}$, $a_{\mathrm U}$ & 2 & \MXN\ por $0.01$ \\
+Crédito de la contraparte & $h^{\mathrm c}_i$ (y cotizaciones $s_k$) & 6 & \MXN\ por \pb \\
+Crédito propio & $h^{\mathrm o}_i$ (y cotizaciones $s_k$) & 6 & \MXN\ por \pb \\
+Fondeo & $s_f$ & 1 & \MXN\ por \pb \\
+\bottomrule
+\end{tabular}
+\caption{Insumos activos de \codigo{include/qf/xva/exposure_engine.hpp}{XvaGreeks} (cantidades de MX-DEMO, $m=48$) y
+unidad en que la API los reporta.}\label{tab:cap16-insumos}
+\end{table}
+
+\emph{No son insumos}: las correlaciones $\rho_{\mathrm{MU}},\rho_{\mathrm{MX}},\rho_{\mathrm{UX}}$ (el modelo las usa solo
+en la factorización de Cholesky, que no se deriva respecto de ellas), las LGD, los nocionales, las tasas fijas, las
+fechas y las bases de días de las operaciones, las normales $\omega_p$, el número de trayectorias, la semilla y la
+malla. Las tasas cero de la tabla~\ref{tab:cap16-insumos} son las tasas del \emph{pilar} (una por cotización de
+depósito u OIS del snapshot, o por punto forward y base en MXN-USD), no las cotizaciones mismas
+(sección~\ref{sec:cap16-parcial}).
+
+El reporte multiplica cada derivada por la escala $\Delta_i$ que la lleva a su unidad,
+\begin{equation}\label{eq:cap16-unidades}
+  \widetilde D^{X}_i=\Delta_i\,\frac{\partial X}{\partial\vartheta_i},\qquad
+  \Delta_i=\begin{cases}
+    10^{-4} & \text{tasas cero, }\sigma_{\mathrm M},\sigma_{\mathrm U},\ h^{\mathrm c}_i,\ h^{\mathrm o}_i,\ s_f\ (1~\pb),\\
+    0.01\,\Spot & \text{spot (1~\% del spot, en \MXN\ por \USD)},\\
+    0.01 & \sigma_X\ (\text{un punto de volatilidad}),\ a_{\mathrm M},\ a_{\mathrm U},
+  \end{cases}
+\end{equation}
+con $X\in\{\mathrm{CVA},\mathrm{DVA},\mathrm{FVA}\}$ y $\widetilde D^{\mathrm{Total}}=\widetilde D^{\mathrm{CVA}}-\widetilde D^{\mathrm{DVA}}+\widetilde D^{\mathrm{FVA}}$. El DV01 paralelo de una curva es
+la suma de sus pilares, $\DVO^{\mathrm{par}}_X=\sum_k\widetilde D^{X}_{z_k}$, porque con interpolación lineal y
+extrapolación plana desplazar todos los pilares la misma cantidad desplaza toda la curva esa cantidad. Las
+conversiones están en \codigo{desk/api/risk/xva_sens.py}{_row}, \codigo{desk/api/risk/xva_sens.py}{_curves} y
+\codigo{desk/api/risk/xva_sens.py}{VOLS}, y las unidades que publica la ruta en
+\codigo{desk/api/risk/xva_sens.py}{UNITS}.
+
+\subsection{Modo adjunto}\label{sec:cap16-adjunto}
+
+Sea $\Phi:\mathbb R^m\to\mathbb R^q$ el programa que calcula las salidas, descompuesto en operaciones elementales
+$u_k=\varphi_k(u_j:\ j\prec k)$ con $u_i=\vartheta_i$ para $i\le m$ y salidas $\Phi_l=u_{L_l}$. El modo
+\emph{directo} propaga una dirección de entrada por pasada: un insumo, una pasada. El modo \emph{adjunto} recorre el
+programa grabado hacia atrás y entrega la derivada de una salida respecto de \emph{todos} los insumos en una sola
+pasada \citep{griewank2008,naumann2011}:
+\begin{equation}\label{eq:cap16-adjunto}
+  \bar u_{L_l}=1,\qquad
+  \bar u_j=\sum_{k:\ j\prec k}\bar u_k\,\frac{\partial\varphi_k}{\partial u_j},\qquad
+  \frac{\partial\Phi_l}{\partial\vartheta_i}=\bar u_i\quad(i\le m).
+\end{equation}
+Una pasada hacia atrás cuesta una constante $C_{\mathrm{adj}}$ pequeña, independiente de $m$, por la evaluación de $\Phi$
+\citep{griewank2008}, mientras que la diferencia central cuesta $2m$ evaluaciones:
+\begin{equation}\label{eq:cap16-costo}
+  \mathrm{coste}(\nabla\Phi_l)\ \le\ C_{\mathrm{adj}}\,\mathrm{coste}(\Phi)\qquad\text{frente a}\qquad
+  \mathrm{coste}(\text{choque central})=2m\,\mathrm{coste}(\Phi).
+\end{equation}
+Es la razón por la que el modo adjunto domina cuando hay pocas salidas y muchos insumos
+\citep{giles2005,capriotti2011}, que es exactamente el caso del XVA, y por la que se ha aplicado a la
+gestión del riesgo de crédito de contraparte \citep{capriotti2011b} (\citealp{capriotti2024} revisa los quince años de
+uso de la AAD en finanzas). Aquí hay $q=3$ salidas (CVA, DVA y FVA) y la biblioteca (XAD) las propaga a la vez: cada variable
+activa lleva un \emph{vector} de adjuntos de tamaño 4 (\texttt{xad::AReal<double, 4>}, el alias \texttt{AD} de
+\codigo{src/xva/exposure_engine.cpp}{ExposureEngine::xvaSensitivities}; la biblioteca solo trae instancias de
+tamaño 1, 2 y 4, así que la cuarta componente queda libre), y una pasada hacia atrás con las semillas $(1,0,0)$, $(0,1,0)$ y
+$(0,0,1)$ en las tres primeras componentes entrega los tres gradientes. Con un adjunto de tamaño 1 (solo el total) la
+cinta es un 20~\% más rápida, medido en la sonda del diseño, pero no separa CVA, DVA y FVA y no se usó.
+
+La razón de costo medida del programa completo es $C_{\mathrm{ef}}\approx9.3$ con un solo hilo
+(sección~\ref{sec:cap16-costo}); no es el $C_{\mathrm{adj}}$ teórico porque incluye grabar la cinta y el tráfico de memoria. Con
+ella, el modo adjunto gana a los choques cuando $2m>9.3$, es decir, desde 5 insumos \emph{a igual número de hilos};
+con los 48 insumos del snapshot la ventaja es de $96/9.3\approx10$ veces.
+
+\subsection{El estimador trayectoria a trayectoria}\label{sec:cap16-estimador}
+
+Con $\omega_p$ fijas, el CVA, el DVA y el FVA del capítulo~\ref{cap:xva} son promedios de funciones de $\boldsymbol\vartheta$.
+Sean, para $j\ge1$,
+\begin{equation}\label{eq:cap16-pesos}
+\begin{gathered}
+  w^{\mathrm c}_j=\mathrm{LGD}_c\bigl[S_c(t_{j-1})-S_c(t_j)\bigr],\qquad
+  w^{\mathrm o}_j=\mathrm{LGD}_o\bigl[S_o(t_{j-1})-S_o(t_j)\bigr],\\[2pt]
+  w^{\mathrm f}_j=s_f\,S_c(t_j)S_o(t_j)\,(t_j-t_{j-1}),
+\end{gathered}
+\end{equation}
+y, como $V^+-V^-=V$, los aportes de la trayectoria $p$ (la ecuación del error estándar del capítulo~\ref{cap:xva}, para
+el CVA, y sus análogas)
+\begin{equation}\label{eq:cap16-contribuciones}
+  \widehat{\mathrm{CVA}}_p=\sum_{j\ge1}w^{\mathrm c}_j\,\frac{V^+_{pj}}{\mathcal B_{pj}},\qquad
+  \widehat{\mathrm{DVA}}_p=\sum_{j\ge1}w^{\mathrm o}_j\,\frac{V^-_{pj}}{\mathcal B_{pj}},\qquad
+  \widehat{\mathrm{FVA}}_p=\sum_{j\ge1}w^{\mathrm f}_j\,\frac{V_{pj}}{\mathcal B_{pj}},
+\end{equation}
+de modo que $X=\tfrac1n\sum_p\widehat X_p$ para cada medida $X$. (La suma sobre fechas queda \emph{dentro} de la
+trayectoria; el capítulo~\ref{cap:xva} promedia primero sobre trayectorias para obtener $\mathrm{EPE}^*$ y
+$\mathrm{ENE}^*$. Son la misma cantidad con otro orden de sumas.) Como $\mathcal B>0$, $V^+/\mathcal B=(V/\mathcal B)^+$,
+y el estimador de la derivada es el promedio de las derivadas de cada aporte:
+\begin{equation}\label{eq:cap16-pathwise}
+  \frac{\partial\widehat{\mathrm{CVA}}_p}{\partial\vartheta_i}=\sum_{j\ge1}\Bigl[
+  w^{\mathrm c}_j\,\mathbf 1_{\{V_{pj}>0\}}\,\frac{\partial}{\partial\vartheta_i}\Bigl(\frac{V_{pj}}{\mathcal B_{pj}}\Bigr)
+  +\frac{\partial w^{\mathrm c}_j}{\partial\vartheta_i}\,\frac{V^+_{pj}}{\mathcal B_{pj}}\Bigr],\qquad
+  \widehat{\partial_i\mathrm{CVA}}=\frac1n\sum_{p=1}^{n}\frac{\partial\widehat{\mathrm{CVA}}_p}{\partial\vartheta_i}.
+\end{equation}
+Para el DVA el indicador es $-\mathbf 1_{\{V_{pj}<0\}}$ (porque $V^-=\max(-V,0)$) y para el FVA no hay indicador
+(la función es diferenciable) y la regla del producto actúa sobre los tres factores de $w^{\mathrm f}_j\,V_{pj}/\mathcal B_{pj}$. Los dos sumandos
+de la ecuación~\eqref{eq:cap16-pathwise} se reparten los insumos: $V_{pj}$ y $\mathcal B_{pj}$ dependen de las curvas
+de tasa, el spot y los parámetros del modelo, y \emph{no} del crédito ni del fondeo, de modo que para los primeros el segundo sumando es cero, y
+para las intensidades $h^{\mathrm c}_i$, $h^{\mathrm o}_i$ y el diferencial $s_f$ (que solo están en los pesos) es cero el
+primero. Es lo que hace \codigo{src/xva/exposure_engine.cpp}{ExposureEngine::xvaSensitivities}: el indicador es la derivada de \texttt{max(V, 0.0)} de XAD, que vale $1$ si
+$V>0$, $0$ si $V<0$ y $\tfrac12$ en el empate (convención de XAD 2.2.0).
+
+\paragraph{Por qué es insesgado.} El estimador es el \emph{método de la derivada por trayectoria}
+\citep{broadie1996,glasserman2003}: se deriva el aporte de cada trayectoria con las normales fijas y se promedia.
+Intercambiar derivada y esperanza, $\partial_{\vartheta}\E[\widehat X_p]=\E[\partial_{\vartheta}\widehat X_p]$, es válido si
+(i) para cada $\omega_p$ la función $\vartheta\mapsto\widehat X_p(\vartheta)$ es continua y, con probabilidad uno,
+diferenciable en el punto, y (ii) es lipschitziana con una constante aleatoria de esperanza finita
+(convergencia dominada). (i) se cumple porque $\max(\cdot,0)$ solo no es diferenciable donde $V_{pj}=0$, un evento de
+probabilidad cero en las fechas donde $V_{pj}$ tiene densidad; en las fechas en que $V\equiv0$ (después de pagado el
+último flujo) el valor no depende de $\boldsymbol\vartheta$ y su derivada es cero, cualquiera que sea la convención del
+empate. $\max(\cdot,0)$ es 1-lipschitziana y $V/\mathcal B$ es una función suave de $\boldsymbol\vartheta$ para cada $\omega_p$
+(exponenciales de estados gaussianos), por lo que (ii) es la condición estándar del método. El código \emph{no
+verifica} (ii); lo que sí hace el repositorio es comprobar el resultado (sección~\ref{sec:cap16-ej-vega}: la media de
+lotes independientes cae sobre la derivada exacta de una forma cerrada). Además, con las normales fijas el
+estimador es exactamente la derivada del \emph{estimador de Monte Carlo} $X(\boldsymbol\vartheta)=\tfrac1n\sum_p\widehat X_p$,
+y por eso coincide, en el límite del paso, con la diferencia central que reutiliza las mismas trayectorias; esa
+coincidencia es la prueba de corrección de las secciones~\ref{sec:cap16-ej-choque} y~\ref{sec:cap16-validacion}.
+
+\paragraph{Por qué el PFE no se deriva.} El $\mathrm{PFE}_\alpha(t_i)$ es el elemento de rango $\lceil\alpha n\rceil$
+de los $V^+_p(t_i)$ ordenados: no es un promedio de una función de la trayectoria, y su derivada trayectoria a
+trayectoria es la de la \emph{única} trayectoria que ocupa ese rango, no un promedio. No cumple la estructura de la
+ecuación~\eqref{eq:cap16-pathwise} y exigiría otro estimador (de razón de verosimilitud o suavizado); este corte no
+lo implementa y la API no publica sensibilidades del PFE.
+
+\subsection{La cinta por trayectoria}\label{sec:cap16-cinta}
+
+Grabar la simulación completa en una sola cinta es inviable: cada trayectoria añade unos 43 MB de cinta
+(sección~\ref{sec:cap16-costo}), así que 2000 trayectorias serían del orden de 86 GB. El código aprovecha que el
+programa tiene dos partes. La \emph{parte común} $\boldsymbol\kappa(\boldsymbol\vartheta)$ reúne todo lo que depende
+de los insumos y no de las normales: las tablas por día de la malla (descuentos, $y_c$, $m_c$, $M_c$, factores
+$e^{-a_c d/365}$, $q$), la factorización de Cholesky de la covarianza del paso, el spot, las tablas del contexto de
+las operaciones y los pesos de la ecuación~\eqref{eq:cap16-pesos}. La \emph{parte de trayectoria} calcula
+$(\widehat{\mathrm{CVA}}_p,\widehat{\mathrm{DVA}}_p,\widehat{\mathrm{FVA}}_p)=G(\boldsymbol\kappa,\omega_p)$. Por la regla de la cadena,
+\begin{equation}\label{eq:cap16-parte-comun}
+  \frac{\partial X}{\partial\vartheta_i}=\sum_r\frac{\partial X}{\partial\kappa_r}\,\frac{\partial\kappa_r}{\partial\vartheta_i},\qquad
+  \frac{\partial X}{\partial\kappa_r}=\frac1n\sum_{p=1}^{n}\frac{\partial\widehat X_p}{\partial\kappa_r},
+\end{equation}
+y el patrón (en \codigo{src/xva/exposure_engine.cpp}{forEachPathChunk} y \codigo{src/xva/exposure_engine.cpp}{ExposureEngine::xvaSensitivities}) consiste en grabar $\boldsymbol\kappa$ una vez y, para cada trayectoria, grabar solo su parte, barrerla hacia
+atrás hasta $\boldsymbol\kappa$ (los adjuntos de $\boldsymbol\kappa$ se \emph{acumulan} en sus ranuras) y borrarla:
+\begin{enumerate}
+  \item registrar los insumos y empezar a grabar; calcular $\boldsymbol\kappa$ (tablas y pesos) y guardar la posición $\pi$ de la cinta;
+  \item para cada trayectoria $p$ del hilo: grabar $G(\boldsymbol\kappa,\omega_p)$ (\texttt{simulatePath}, \texttt{computeBonds},
+        \texttt{setValue} en cada fecha de la malla y la acumulación de las tres salidas), registrar las tres salidas y
+        sembrar $(1,0,0)$, $(0,1,0)$ y $(0,0,1)$; barrer hacia atrás \emph{solo hasta $\pi$}
+        (\texttt{computeAdjointsTo}); poner a cero las derivadas posteriores a $\pi$ (\texttt{clearDerivativesAfter}); y
+        regresar la cinta a $\pi$ (\texttt{resetTo});
+  \item un último barrido de $\boldsymbol\kappa$ a los insumos (\texttt{computeAdjoints}) entrega $\partial X/\partial\vartheta_i$.
+\end{enumerate}
+La cinta de un hilo no crece con el número de trayectorias:
+\begin{equation}\label{eq:cap16-memoria}
+  M_{\mathrm{cinta}}=M_{\boldsymbol\kappa}+M_{\mathrm{tray}}\quad(\text{independiente de }n),\qquad\text{frente a}\qquad
+  M_{\boldsymbol\kappa}+n\,M_{\mathrm{tray}}.
+\end{equation}
+Ninguna variable activa de una trayectoria puede sobrevivir a \texttt{resetTo}; por eso los datos de cada
+trayectoria se declaran dentro del bucle. Con hilos, cada uno tiene su propia cinta, su copia de los insumos y su
+propia parte común, y guarda sus adjuntos parciales indexados por su primera trayectoria; se suman en ese orden, así
+que el resultado no depende de cuándo termine cada hilo y el número de hilos solo cambia el orden de redondeo de las
+sumas. La API usa como máximo 2 hilos (sección~\ref{sec:cap16-costo}). Derivar por trayectoria y recorrer hacia atrás cada una es la técnica de
+\citet{giles2005} y \citet{capriotti2011}; repartirla en hilos con una cinta por hilo, la de la AAD sobre simulaciones
+paralelas \citep{savine2018}.
+
+\subsection{Crédito: de intensidades a cotizaciones de CDS}\label{sec:cap16-credito}
+
+Las probabilidades de supervivencia entran al motor como función de las intensidades por tramo, que son insumos
+activos. Con vértices $0=v_0<v_1<\dots<v_J$ y extrapolación plana de la última intensidad, la plantilla
+\codigo{include/qf/xva/piecewise_hazard_curve.hpp}{survivalFromHazards} calcula (es la
+ecuación de supervivencia del capítulo~\ref{cap:xva} con el tiempo vivido en cada tramo $\ell_i$ escrito explícito)
+\begin{equation}\label{eq:cap16-supervivencia-activa}
+  S(t)=\exp\Bigl(-\sum_{i=1}^{J}h_i\,\ell_i(t)\Bigr),\quad
+  \ell_i(t)=\begin{cases}[\min(t,v_i)-v_{i-1}]^+ & i<J,\\ [\,t-v_{J-1}]^+ & i=J,\end{cases}\quad
+  \frac{\partial S(t)}{\partial h_i}=-\ell_i(t)\,S(t).
+\end{equation}
+Como el perfil de exposición descontado no depende de las intensidades, las derivadas respecto de ellas son exactas
+dado el perfil (no llevan derivada de Monte Carlo):
+\begin{equation}\label{eq:cap16-dcva-dh}
+\begin{aligned}
+  \frac{\partial\,\mathrm{CVA}}{\partial h^{\mathrm c}_i}&=-\mathrm{LGD}_c\sum_{j\ge1}\mathrm{EPE}^*(t_j)\bigl[\ell_i(t_{j-1})S_c(t_{j-1})-\ell_i(t_j)S_c(t_j)\bigr],\\
+  \frac{\partial\,\mathrm{FVA}}{\partial h^{\mathrm c}_i}&=-s_f\sum_{j\ge1}\bigl[\mathrm{EPE}^*(t_j)-\mathrm{ENE}^*(t_j)\bigr]\,\ell_i(t_j)\,S_c(t_j)S_o(t_j)\,(t_j-t_{j-1}),\qquad
+  \frac{\partial\,\mathrm{FVA}}{\partial s_f}=\frac{\mathrm{FVA}}{s_f},
+\end{aligned}
+\end{equation}
+y el DVA y el FVA respecto de $h^{\mathrm o}_i$ son análogos con $\mathrm{ENE}^*$, $S_o$ y $\mathrm{LGD}_o$. El código
+no usa estas fórmulas: obtiene los mismos números de la cinta, y la sección~\ref{sec:cap16-ej-credito} las usa
+como comprobación independiente. Los insumos «de crédito» que ve la mesa, sin embargo, son las cotizaciones de CDS
+$s_k$, no las intensidades. Cada intensidad es una función de las cotizaciones por el bootstrap de la
+ecuación de CDS del capítulo~\ref{cap:xva}: $G_k(h_1,\dots,h_k;s_k)=V_{\mathrm{CDS}}(T_k,s_k;h_1,\dots,h_k)=0$,
+$k=1,\dots,J$. Derivando respecto de $s_{k'}$ y recordando que $\partial V_{\mathrm{CDS}}/\partial s_k=-\Nom\,\Ann_{\mathrm{cds},k}$,
+\begin{equation}\label{eq:cap16-jacobiano}
+  \sum_{i\le k}\frac{\partial G_k}{\partial h_i}\,J_{k'i}=\delta_{kk'}\,\Nom\,\Ann_{\mathrm{cds},k},\qquad
+  J_{k'i}=\frac{\partial h_i}{\partial s_{k'}}=0\ \ \text{si }i<k',
+\end{equation}
+un sistema triangular: $h_i$ depende de las cotizaciones de plazo menor o igual, y mover la cotización $k'$
+mueve la intensidad del tramo $k'$ y, a través de las supervivencias que cada CDS posterior hereda, las de todos los
+tramos posteriores. Por la regla de la cadena,
+\begin{equation}\label{eq:cap16-cadena}
+  \frac{\partial X}{\partial s_k}=\sum_{i=k}^{J}\frac{\partial X}{\partial h_i}\,J_{ki}.
+\end{equation}
+\textbf{El jacobiano no se obtiene resolviendo la ecuación~\eqref{eq:cap16-jacobiano} ni por AAD del bootstrap}
+(Brent no tiene derivada útil): \codigo{desk/api/risk/xva_sens.py}{_credit} \emph{reprecia} el bootstrap con
+\codigo{desk/api/risk/credit_curves.py}{build_curve}, moviendo la cotización $k$ en $\pm\varepsilon$ con $\varepsilon=10^{-6}$ ($0.01$~\pb;
+\codigo{desk/api/risk/xva_sens.py}{CDS_BUMP}) y restando,
+\begin{equation}\label{eq:cap16-jacobiano-reprecio}
+  J_{ki}\approx\frac{h_i(s_k+\varepsilon)-h_i(s_k-\varepsilon)}{2\varepsilon},
+\end{equation}
+que cuesta $2J$ bootstraps por entidad. La respuesta de la ruta declara el método en el campo \texttt{cds\_jacobian}.
+Con una curva plana o supuesta (sin cotizaciones) no hay cotizaciones que derivar: la ruta devuelve un solo tramo, con
+\texttt{to\_years} nulo, y la derivada es respecto de esa intensidad.
+
+\subsection{Derivadas parciales, y qué sería la derivada total}\label{sec:cap16-parcial}
+
+Los insumos $\boldsymbol\vartheta$ son los del \emph{motor}; los datos de mercado son otros. La curva MXN-USD se calibra
+(\codigo{desk/api/market.py}{_calibrate_csa}) con \texttt{bootstrap\_xccy\_discount} a partir de puntos forward, cotizaciones de base, el spot y las curvas
+SOFR y TIIE-F; las intensidades salen de las cotizaciones de CDS descontadas con la curva TIIE-F; y las curvas de tasa
+son ceros de pilares que a su vez salen de cotizaciones de depósito y OIS. La derivada de la API es la parcial
+$\partial X/\partial\vartheta_i$ \emph{sin recalibrar nada}: al mover un pilar de TIIE-F, las tasas cero de MXN-USD
+y las intensidades de crédito se quedan donde estaban. La derivada \emph{total} respecto de ese pilar sumaría los
+efectos de la recalibración,
+\begin{equation}\label{eq:cap16-total}
+  \frac{dX}{dz^{\mathrm M}_k}=\frac{\partial X}{\partial z^{\mathrm M}_k}
+  +\sum_{l}\frac{\partial X}{\partial z^{\mathrm{col}}_l}\,\frac{\partial z^{\mathrm{col}}_l}{\partial z^{\mathrm M}_k}
+  +\sum_{i}\frac{\partial X}{\partial h^{\mathrm c}_i}\,\frac{\partial h^{\mathrm c}_i}{\partial z^{\mathrm M}_k}
+  +\sum_{i}\frac{\partial X}{\partial h^{\mathrm o}_i}\,\frac{\partial h^{\mathrm o}_i}{\partial z^{\mathrm M}_k},
+\end{equation}
+donde el primer sumando es lo que entrega la AAD, y los demás exigen los jacobianos de la calibración de MXN-USD y del
+bootstrap de CDS respecto de la curva de descuento. Esos jacobianos \emph{no} se calculan en la ruta (el de CDS respecto
+de las cotizaciones sí, ecuación~\eqref{eq:cap16-jacobiano-reprecio}, pero no respecto de TIIE-F). La
+sección~\ref{sec:cap16-ej-parcial} mide qué tan distinta es la total de la parcial en un cross currency swap: tiene
+incluso el signo contrario.
+
+\begin{diferencia}
+  Una sensibilidad de mercado completa derivaría la cadena
+  $\text{cotizaciones}\to\text{curvas}\to\text{parámetros del modelo}\to\text{XVA}$ entera, incluida la calibración (la
+  AAD lo permite, por ejemplo con el teorema de la función implícita en cada paso de calibración). Aquí se deriva el motor (que recibe pilares, parámetros e intensidades ya
+  calibrados) y se declara qué falta: (i) la derivada es \emph{parcial}, ecuación~\eqref{eq:cap16-total}; (ii) las curvas de tasa se
+  derivan por tasa cero del pilar, no por cotización de depósito u OIS (para el crédito sí se pasa a cotizaciones, con
+  el jacobiano del bootstrap por reprecio y no por AAD del bootstrap); (iii) $a_c$, $\sigma_c$ y $\sigma_X$ son
+  insumos, no resultados de una calibración, y no se deriva respecto de la superficie de volatilidad de la que
+  sale $\sigma_X$; (iv) toda la fórmula afín de los bonos y de las patas se graba en la cinta con el tipo genérico de
+  XAD en vez de escribir a mano su adjunto (es el $70\,\%$ de la cinta; sección~\ref{sec:cap16-costo}); y (v) la
+  derivada es la de la estimación discreta del capítulo~\ref{cap:xva} (malla de integración $\mathcal G$, extremo
+  derecho), no la del XVA en tiempo continuo.
+\end{diferencia}
+\end{sloppypar}
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap16-implementacion}
+
+\begin{sloppypar}
+\subsection{Un motor, dos escalares}\label{sec:cap16-escalar}
+
+Las funciones del camino de exposición de \codigo{src/xva/exposure_engine.cpp}{ExposureEngine::simulate} (tablas por
+día, \codigo{src/xva/exposure_engine.cpp}{buildGrid}, \codigo{src/xva/exposure_engine.cpp}{simulatePath},
+\codigo{src/xva/exposure_engine.cpp}{computeBonds}, \codigo{src/xva/exposure_engine.cpp}{legValue} y
+\codigo{src/xva/exposure_engine.cpp}{setValue}) son plantillas sobre el escalar \texttt{Real}: la misma fuente sirve
+para \texttt{double} y para el tipo activo de XAD. No se duplicó la lógica y \emph{ningún número en \texttt{double} cambió}:
+la prueba \codigo{tests/test_ExposureEngine.cpp}{GoldenValuesUnchangedByTemplating} (escrita antes de templar el motor)
+compara con \texttt{EXPECT\_EQ} el CVA, DVA, FVA, perfiles y valores iniciales de siete operaciones con literales de 17 dígitos. Se
+quedan en \texttt{double} lo que no es insumo: las normales, las fechas y días, las patas compiladas
+(\codigo{src/xva/exposure_engine.cpp}{compileSet}), la validación y \codigo{src/xva/exposure_engine.cpp}{computeXva}.
+
+Las curvas de entrada de la AAD son los pilares como insumos activos:
+\codigo{src/xva/exposure_engine.cpp}{PillarCurve} guarda los plazos (\texttt{double}) y las tasas cero (\texttt{Real}), y su
+descuento replica la rama \texttt{Linear} de la interpolación del capítulo~\ref{cap:curvas}: tasa constante fuera del
+rango, interpolación lineal de las tasas cero en los pilares que encierran el plazo y $e^{-rT}$. En \texttt{double} se
+sigue llamando a \texttt{YieldCurve} (cualquier interpolación); la AAD exige \texttt{Linear} y
+\codigo{src/xva/exposure_engine.cpp}{requireLinear} lanza \texttt{std::invalid\_argument} si no es así (las curvas del desk lo
+son). Son \textbf{tres excepciones} declaradas en comentarios del código a la regla de no duplicar:
+la interpolación de unas 15 líneas, el bucle por trayectoria de la AAD (paralelo al de \texttt{simulate}, cuya
+ejecución en \texttt{double} no debe cambiar) y la suma ponderada de las fechas, que repite la de \texttt{computeXva} en
+otro orden (reutilizar \texttt{computeXva} habría movido sus números por redondeo).
+
+\subsection{\texttt{xvaSensitivities}}\label{sec:cap16-xvasens}
+
+\codigo{src/xva/exposure_engine.cpp}{ExposureEngine::xvaSensitivities} (declarada en
+\codigo{include/qf/xva/exposure_engine.hpp}{ExposureEngine}, resultado en
+\codigo{include/qf/xva/exposure_engine.hpp}{XvaSensitivities} y \codigo{include/qf/xva/exposure_engine.hpp}{XvaGreeks})
+recibe el conjunto, las dos curvas de crédito con sus LGD, el diferencial de fondeo y el tope de hilos
+(\texttt{maxThreads}, por omisión 2). Paso a paso:
+\begin{enumerate}
+  \item Valida las LGD, el diferencial y que las tres curvas de tasa sean \texttt{Linear}. Convierte las curvas de
+        crédito a tramos con \codigo{src/xva/exposure_engine.cpp}{hazardsOf}: \texttt{PiecewiseHazardCurve} da sus
+        vértices e intensidades y \texttt{FlatHazardRate}($\lambda$) un solo tramo, con vértice
+        $\max(\text{último día}/365,\,1)$ (exactamente $e^{-\lambda t}$); cualquier otro tipo de curva lanza
+        \texttt{std::invalid\_argument}.
+  \item Arma el vector de insumos en este orden (que es el de \texttt{XvaGreeks}): pilares de TIIE-F, SOFR y
+        MXN-USD (ninguno si el snapshot no trae la curva), spot, $(\sigma_X,\sigma_{\mathrm M},a_{\mathrm M},\sigma_{\mathrm U},a_{\mathrm U})$,
+        intensidades de la contraparte y propias, y $s_f$.
+  \item \codigo{src/xva/exposure_engine.cpp}{forEachPathChunk} reparte las trayectorias en trozos contiguos, uno por
+        hilo (hasta \texttt{maxThreads}, por omisión 2). Cada hilo, con su cinta
+        (\texttt{xad::Tape<double, 4>}), registra su copia de los insumos, graba $\boldsymbol\kappa$ y los pesos
+        $w^{\mathrm c}_j,w^{\mathrm o}_j,w^{\mathrm f}_j$ (que ya llevan el $1/n$ del promedio) y ejecuta el patrón de
+        la sección~\ref{sec:cap16-cinta}.
+  \item Suma los parciales en el orden de las primeras trayectorias de cada trozo, y arma el valor:
+        \texttt{value} es la suma de los aportes por trayectoria (CVA, DVA, FVA, total), con errores estándar
+        calculados como en \texttt{computeXva}; coincide con \texttt{computeXva} hasta redondeo
+        (diferencia relativa $\le10^{-12}$, probada).
+\end{enumerate}
+\codigo{src/xva/exposure_engine.cpp}{aadTapeBytes} y \codigo{src/xva/exposure_engine.cpp}{aadThreads} son
+diagnósticos (pico de bytes de una cinta y número de cintas de la última llamada); no son API. Con
+\texttt{QF\_WITH\_XAD=OFF} el método existe y lanza \texttt{std::logic\_error}.
+
+\subsection{Binding, módulo de Python y ruta}\label{sec:cap16-ruta}
+
+El módulo \texttt{qfxva} (\codigo{src/python_bindings/xva_bindings.cpp}{xva_sensitivities}) expone
+\texttt{ExposureEngine.xva\_sensitivities(\dots, max\_threads=2)} (suelta el GIL), las clases \texttt{XvaGreeks} y
+\texttt{XvaSensitivities} y la bandera \codigo{src/python_bindings/xva_bindings.cpp}{HAS_XAD}. La lógica de la ruta
+está en \codigo{desk/api/risk/xva_sens.py}{compute}, que \emph{no contiene fórmulas financieras}:
+\begin{enumerate}
+  \item arma los mismos insumos que \texttt{GET /api/xva} reutilizando sus funciones (\texttt{build\_set},
+        \texttt{model\_from\_snapshot}, \texttt{integration\_days}, parámetros y semilla) y obtiene el XVA de referencia
+        llamando a la misma \texttt{xva.\_counterparty}; por eso el XVA que devuelve es \emph{igual a igual} al de
+        \texttt{GET /api/xva} (el tiempo de esa llamada es \texttt{valuation\_elapsed\_s});
+  \item llama a \texttt{xva\_sensitivities} sobre la malla de integración $\mathcal G$ (\texttt{elapsed\_s}) y
+        convierte las unidades con la ecuación~\eqref{eq:cap16-unidades};
+  \item compone las intensidades con el jacobiano de la ecuación~\eqref{eq:cap16-jacobiano-reprecio}
+        (\codigo{desk/api/risk/xva_sens.py}{_credit});
+  \item estima el costo por choques como $2\times n_{\mathrm{insumos}}\times\texttt{valuation\_elapsed\_s}$
+        (\texttt{bump\_cost\_estimate\_s}: es una estimación, no una medición), y añade la nota
+        \codigo{desk/api/risk/xva_sens.py}{PARTIAL_NOTE} a \texttt{assumptions} («Derivadas parciales: al mover un pilar no
+        se recalibran la curva MXN-USD ni las curvas de crédito»).
+\end{enumerate}
+La ruta es \codigo{desk/api/routes/xva.py}{xva_sensitivities_get}:
+\texttt{GET /api/xva/sensitivities?snapshot=<id>\&counterparty=<nombre>}. Falta un parámetro $\to$ 400 con \texttt{field};
+snapshot o contraparte inexistentes $\to$ 404; \texttt{HAS\_XAD} falso $\to$ 501; una contraparte sin swaps de tasa ni
+cross currency swaps vivos $\to$ 200 con listas vacías y \texttt{empty\_reason}. La respuesta trae el DV01 paralelo por
+curva, las filas por pilar, spot, volatilidades, CDS por plazo y fondeo, cada una con \texttt{cva}, \texttt{dva},
+\texttt{fva} y \texttt{total} en \MXN\ por la unidad de la tabla~\ref{tab:cap16-insumos}.
+
+\subsection{Compilación, licencia y versión de XAD}\label{sec:cap16-licencia}
+
+La opción de CMake \codigo{CMakeLists.txt}{QF_WITH_XAD} (por omisión \texttt{ON}) descarga XAD con \texttt{FetchContent}
+y la versión \textbf{2.2.0 fijada por el hash del commit}
+(\texttt{aaf4e9cad59cf1bfe9728b491f95f011db687f18}); \codigo{src/CMakeLists.txt}{QF_WITH_XAD} enlaza \texttt{XAD::xad}
+con \texttt{qf} (PUBLIC) y define \texttt{QF\_WITH\_XAD}. El bloque activa \texttt{XAD\_USE\_STRONG\_INLINE} (opción de XAD que solo
+fuerza \texttt{inline} en sus plantillas de expresiones) y se declara antes de las banderas \texttt{-Wall -Wextra
+-Wpedantic} para que no se apliquen al código de XAD. Con la opción en \texttt{OFF} todo lo demás compila y pasa sus pruebas,
+\texttt{qfxva.HAS\_XAD} vale \texttt{False} y la ruta responde 501.
+
+XAD se distribuye bajo la \textbf{GNU AGPL-3.0} (o posterior) \citep{xad2026}, y su titular, Xcelerit, ofrece además una licencia
+comercial para uso en producción sin las obligaciones de la AGPL. Enlazar una biblioteca AGPL obliga, para quien use el
+servicio a través de la red, a ofrecer el código fuente completo de la aplicación salvo que exista la licencia
+comercial. El repositorio hoy es público, así que no hay conflicto inmediato; es una decisión de negocio, y la opción
+\texttt{QF\_WITH\_XAD} existe para poder prescindir de la biblioteca perdiendo solo estas sensibilidades. La versión
+2.2.0 se publicó el 2026-11-11, \emph{el día antes de escribir este capítulo}; se fijó por hash y no por etiqueta porque
+la anterior (2.1.0) tiene dos fallos que rompen el patrón de la sección~\ref{sec:cap16-cinta} (\texttt{resetTo}
+conservaba las ranuras registradas después de su posición, con lo que el tiempo por trayectoria crecía con el número
+de trayectorias, y \texttt{clearDerivativesAfter} descartaba variables registradas antes de su posición), y las corrige 2.2.0 según su
+registro de cambios. Al actualizar la biblioteca conviene revisar su estabilidad y repetir las pruebas de la
+sección~\ref{sec:cap16-validacion}. Este módulo no entra a la validación contra QuantLib del
+capítulo~\ref{cap:validacion}; su validación son las comparaciones con choque y reprecio de esa sección.
+\end{sloppypar}
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap16-ejemplo}
+
+\begin{sloppypar}
+Todos los valores se reproducen con \codigo{docs/tex/verificacion/cap16_xva_aad.py}{main}, que llama al código del
+proyecto (\texttt{qfxva} y \texttt{desk.api.risk.xva\_sens}) y, cuando hace falta el desk, usa una base SQLite
+temporal con el snapshot MX-DEMO; nunca lee la base real. Necesita \texttt{qfxva} compilado con XAD. Las derivadas
+por choque se calculan con \emph{las mismas trayectorias} (misma semilla) que las adjuntas. Las magnitudes marcadas
+«recálculo» se rehacen en el script con la biblioteca estándar y el script exige que coincidan con el código. Los
+valores de Monte Carlo dependen de la implementación de \texttt{std::normal\_distribution} de \texttt{libstdc++}
+(con otra, cambiarían dentro de su error estándar). El script tarda de 30 a 50 segundos, según la carga de la máquina.
+
+\subsection{AAD frente a choque central con las mismas trayectorias}\label{sec:cap16-ej-choque}
+
+Conjunto de compensación de dos swaps: un IRS TIIE-F \emph{pagador} de 100 millones al $6.5\,\%$ (26 periodos de 28
+días) y un IRS SOFR \emph{receptor} de 5 millones de \USD\ al $4\,\%$ (8 trimestres de 91 días). Las curvas
+son planas, TIIE-F al $7\,\%$ y SOFR al $4\,\%$ (continuo), con pilares en $0.25,0.5,1,2,5,10,30$ años; spot $18.6$;
+modelo $a_{\mathrm M}=0.05$, $\sigma_{\mathrm M}=0.01$, $a_{\mathrm U}=0.03$, $\sigma_{\mathrm U}=0.008$,
+$\sigma_X=0.12$, $\rho_{\mathrm{MU}}=0.35$, $\rho_{\mathrm{MX}}=0.30$, $\rho_{\mathrm{UX}}=-0.10$; 400 trayectorias, semilla 42 y
+malla cada 30 días de 0 a 750 (26 fechas). El crédito de la contraparte es una curva por tramos con vértices en 1 y 3
+años e intensidades $1.5\,\%$ y $2.5\,\%$, el propio con $0.6\,\%$ y $1.0\,\%$; $\mathrm{LGD}_c=0.6$,
+$\mathrm{LGD}_o=0.5$ y $s_f=0.5\,\%$. La AAD da un CVA de
+$\verif{cap16-aad-valor-cva}{11286.2076}$~\MXN\ (tolerancia $5\times10^{-5}$), igual al que da
+\texttt{simulate} más \texttt{compute\_xva} con diferencia relativa menor que $10^{-12}$ (el script lo comprueba), y
+las mismas derivadas con 1 o con 2 hilos.
+
+La tabla~\ref{tab:cap16-choque} compara, para cinco insumos de clases distintas, la derivada adjunta del CVA con la
+diferencia central de \texttt{simulate} y \texttt{compute\_xva}: $\pm0.1$~\pb\ de tasa cero, $\pm10^{-3}$ en el spot,
+$\pm10^{-5}$ en $\sigma_{\mathrm M}$ y $\pm10^{-6}$ en la primera intensidad. Los valores llevan 3 decimales (tolerancia absoluta $5\times10^{-4}$).
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{6.2cm}rr@{}}
+\toprule
+Derivada del CVA & AAD & Choque central \\
+\midrule
+Pilar de 2 años de TIIE-F (\MXN\ por \pb) & \verif{cap16-aad-tiie-2a}{206.278} & \verif{cap16-choque-tiie-2a}{206.276} \\
+Pilar de 2 años de SOFR (\MXN\ por \pb) & \verif{cap16-aad-sofr-2a}{-221.855} & \verif{cap16-choque-sofr-2a}{-221.852} \\
+Spot (\MXN\ por 1~\%) & \verif{cap16-aad-spot}{34.218} & \verif{cap16-choque-spot}{34.218} \\
+$\sigma_{\mathrm M}$ (\MXN\ por \pb\ de vol. normal) & \verif{cap16-aad-sigma}{23.075} & \verif{cap16-choque-sigma}{23.073} \\
+Intensidad $h^{\mathrm c}_1$ (\MXN\ por \pb) & \verif{cap16-aad-hazard}{42.606} & \verif{cap16-choque-hazard}{42.606} \\
+DV01 paralelo de TIIE-F (suma de pilares) & \verif{cap16-aad-dv01}{129.322} & \verif{cap16-choque-dv01}{129.322} \\
+\bottomrule
+\end{tabular}
+\caption{Derivada adjunta frente a diferencia central con las mismas trayectorias (\codigo{docs/tex/verificacion/cap16_xva_aad.py}{aad_contra_choque}). Todas
+las parejas de las tres medidas (15 derivadas) cumplen $|\text{AAD}-\text{choque}|\le\max(1\,\%|\text{choque}|,\,10^{-4})$ (la
+regla de las pruebas); la mayor diferencia relativa entre las derivadas de módulo al menos $0.01$ es
+\verif{cap16-aad-dif-max}{0.0062}~\% (tolerancia $5\times10^{-5}$).}\label{tab:cap16-choque}
+\end{table}
+Las dos derivadas coinciden en al menos cuatro cifras significativas; lo que queda es el error de truncamiento de la
+diferencia central, y ambas son derivadas del mismo estimador. Los signos son los esperados: el pagador de \MXN\ gana valor, y con él exposición, cuando sube TIIE-F, y el receptor de \USD\ lo
+pierde cuando sube SOFR.
+
+\subsection{Sin volatilidad: la derivada exacta}\label{sec:cap16-ej-cero}
+
+Con $\sigma_{\mathrm M}=\sigma_{\mathrm U}=\sigma_X=0$ no hay aleatoriedad y la derivada tiene forma cerrada. Para el
+swap de un periodo del capítulo~\ref{cap:xva} (pagador de $\Nom=10^{8}$ al $8.5\,\%$, de 0 a 730 días, curva TIIE-F
+plana al $9\,\%$, malla de 10 en 10 días; $\mathrm{LGD}_c=\mathrm{LGD}_o=0.6$, intensidades planas de $2\,\%$ y
+$1\,\%$, $s_f=0.5\,\%$), $V/\mathcal B=\Nom(1-F)$ es constante hasta el pago, con
+$F=(1+\K\tau)\,\DF{\cTIIE}{T}$, $\tau=730/360$ y $T=2$ años (justo el pilar de 2 años). Como $\partial F/\partial z=-TF$,
+y la última fecha con el flujo dentro de $V$ es $t_*=720/365$,
+\begin{equation}\label{eq:cap16-cero}
+\begin{aligned}
+  \mathrm{CVA}&=\mathrm{LGD}_c\,\Nom\,(1-F)\,[1-S_c(t_*)], &
+  \frac{\partial\,\mathrm{CVA}}{\partial z^{\mathrm M}_{2a}}&=\mathrm{LGD}_c\,\Nom\,T F\,[1-S_c(t_*)],\\
+  \frac{\partial\,\mathrm{FVA}}{\partial z^{\mathrm M}_{2a}}&=s_f\,\Nom\,T F\sum_{i}S_c(t_i)S_o(t_i)\,\Delta t_i, &
+  \frac{\partial\,\mathrm{CVA}}{\partial h^{\mathrm c}}&=\mathrm{LGD}_c\,\Nom\,(1-F)\,t_*\,e^{-h^{\mathrm c}t_*},
+\end{aligned}
+\end{equation}
+y todas las demás derivadas respecto de pilares son cero (con interpolación lineal, el pilar de 1 año tiene peso cero), igual que las de SOFR, el spot y el DVA ($V>0$ en
+toda trayectoria, así que $V^-=0$). El CVA es $\verif{cap16-cero-valor-cva}{48188.6517}$ (recálculo; la AAD coincide con diferencia
+relativa menor que $10^{-12}$). Por \pb\ (recálculo con la biblioteca estándar y AAD; tolerancia $5\times10^{-7}$):
+\begin{center}\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Derivada & Ecuación~\eqref{eq:cap16-cero} & AAD \\
+\midrule
+$\partial\mathrm{CVA}/\partial z^{\mathrm M}_{2a}$ & \verif{cap16-cero-dcva-analitica}{454.569749} & \verif{cap16-cero-dcva-aad}{454.569749} \\
+$\partial\mathrm{FVA}/\partial z^{\mathrm M}_{2a}$ & \verif{cap16-cero-dfva-analitica}{187.483284} & \verif{cap16-cero-dfva-aad}{187.483284} \\
+$\partial\mathrm{CVA}/\partial h^{\mathrm c}$ & \verif{cap16-cero-dhaz-analitica}{236.221656} & \verif{cap16-cero-dhaz-aad}{236.221656} \\
+\bottomrule
+\end{tabular}
+\end{center}
+y las demás tasas cero de TIIE-F quedan por debajo de $10^{-9}$ veces la del pilar de 2 años (el script lo exige; son
+redondeo de la cancelación entre $\mathcal B$ y $P_{\mathrm M}(t,T)$), y las de SOFR, el spot y el DVA son exactamente cero. Las derivadas respecto de las
+propias volatilidades en $\sigma=0$ no se documentan ni se prueban.
+
+\subsection{El estimador es insesgado: la vega frente a la forma cerrada}\label{sec:cap16-ej-vega}
+
+La derivada trayectoria a trayectoria respecto de $\sigma_{\mathrm M}$ no se puede comparar con un choque de las
+mismas trayectorias (eso solo prueba que la AAD deriva bien el programa), sino con la derivada \emph{exacta} de algo
+que no es Monte Carlo. Para el mismo swap de un periodo (con volatilidad $\sigma_{\mathrm M}=0.01$ y el resto del
+modelo del capítulo~\ref{cap:xva}) el CVA, el DVA y el FVA tienen forma cerrada (el recálculo del
+capítulo~\ref{cap:xva}, sección «Forma cerrada del CVA, DVA y FVA de un swap de un periodo»), y su derivada respecto de
+$\sigma_{\mathrm M}$ se obtiene con una diferencia central de esa función analítica ($\pm10^{-5}$). Se compara con la
+media de 20 lotes independientes de la derivada adjunta, 3000 trayectorias por lote y semillas $20261110+7919b$, con su
+error estándar entre lotes (\MXN\ por \pb\ de volatilidad normal; tolerancia $5\times10^{-5}$):
+\begin{center}\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Medida & Exacta & Media AAD & Error estándar \\
+\midrule
+CVA & \verif{cap16-vega-exacta-cva}{39.3950} & \verif{cap16-vega-media-cva}{37.2346} & \verif{cap16-vega-ee-cva}{0.9575} \\
+DVA & \verif{cap16-vega-exacta-dva}{19.9478} & \verif{cap16-vega-media-dva}{19.7411} & \verif{cap16-vega-ee-dva}{0.2320} \\
+FVA & \verif{cap16-vega-exacta-fva}{0.0000} & \verif{cap16-vega-media-fva}{-0.7214} & \verif{cap16-vega-ee-fva}{0.5154} \\
+\bottomrule
+\end{tabular}
+\end{center}
+El mayor desvío es de $\verif{cap16-vega-z-max}{2.256}$ errores estándar (tolerancia $5\times10^{-4}$; el script exige
+menos de 3), el del CVA, que queda del lado bajo. Con estas semillas el CVA queda por debajo de la derivada exacta de forma persistente, pero
+los tamaños de lote que se probaron comparten trayectorias y no son evidencia independiente. Dos corridas aparte, con otras
+semillas y la misma malla, no incluidas en el script por su duración (de 1 a 2 minutos), no muestran sesgo: 40 lotes de 5000 trayectorias (semillas $777+31b$) dieron para el CVA una
+media de $39.97\pm0.56$ frente a $39.395$ exacta ($z=1.03$) y para el DVA $20.11\pm0.13$ frente a $19.948$ ($z=1.25$); 60
+lotes de 3000 (semillas $424242+104729b$), $38.98\pm0.46$ ($z=-0.89$) y $19.96\pm0.15$ ($z=0.07$). El FVA no depende de
+$\sigma_{\mathrm M}$ en valor esperado ($\E[V/\mathcal B]$ es constante: martingala) y su estimador, de media cercana a
+cero, lo reproduce ($-0.18\pm0.26$ en la segunda corrida). Del error estándar entre lotes se obtiene lo que cuesta el
+ruido: la desviación entre corridas de 3000 trayectorias es $0.9575\sqrt{20}\approx4.28$ (un $10.9\,\%$ del valor exacto)
+para la vega del CVA y $0.2320\sqrt{20}\approx1.04$ ($5.2\,\%$) para la del DVA, y crece como $\sqrt{n}$ al reducir
+las trayectorias (unos $13\,\%$ con las 2000 de la configuración por omisión). La vega por trayectoria es mucho más
+ruidosa que el CVA mismo, cuyo error estándar para este swap es de $0.37\,\%$ con 20\,000 trayectorias en el
+capítulo~\ref{cap:xva}, es decir, cerca de $1\,\%$ con 3000; y la ruta no informa el error estándar de las derivadas.
+
+\subsection{Crédito: del jacobiano a las cotizaciones de CDS, y la ruta}\label{sec:cap16-ej-credito}
+
+Banco Ejemplo tiene un IRS TIIE-F pagador de 200 millones al $6.5\,\%$ de 26 periodos, pactado el 2026-11-10. Su curva de crédito
+sintética es de $90,100,110,125,135,150$~\pb\ a 1, 2, 3, 5, 7 y 10 años con $R=40\,\%$, y la propia de
+$70,\dots,125$~\pb; $s_f=0.5\,\%$, 400 trayectorias y semilla 42. La ruta (\texttt{xva\_sens.compute}) devuelve un CVA de
+referencia de $\verif{cap16-api-cva}{12281.9218}$~\MXN, igual a igual al de \texttt{GET /api/xva} (el script
+compara con \texttt{==} las cuatro cifras), con $\verif{cap16-api-n-insumos}{48}$ insumos. Las derivadas del CVA respecto de la
+intensidad de los dos primeros tramos de la contraparte (\MXN\ por \pb\ de intensidad) son
+$\verif{cap16-cred-dcva-h1}{48.4445}$ y $\verif{cap16-cred-dcva-h2}{25.9164}$; el resto es exactamente cero porque el
+swap vence antes de 2 años y la exposición no llega a los tramos de 3 años o más. El jacobiano del bootstrap por
+reprecio, ecuación~\eqref{eq:cap16-jacobiano-reprecio}, es triangular (el script comprueba que $J_{ki}=0$ para $i<k$) y
+tiene
+\[
+  J_{11}=\verif{cap16-cred-j11}{1.675581},\qquad
+  J_{12}=\verif{cap16-cred-j12}{-1.822996},\qquad
+  J_{22}=\verif{cap16-cred-j22}{3.501813}
+\]
+(tolerancia $5\times10^{-7}$; $J_{11}$ es cercano a la «regla del triángulo» $1/(1-R)=1.667$). Un punto base más en la
+cotización de 1 año sube la intensidad del primer tramo en $1.68$~\pb\ pero \emph{baja} la del segundo en $1.82$~\pb: el
+CDS de 2 años, cuya cotización no se movió, debe seguir valiendo cero con la supervivencia más baja del primer año. La regla
+de la cadena, ecuación~\eqref{eq:cap16-cadena}, da entonces para el CDS de 1 año $48.4445\cdot1.675581+25.9164\cdot(-1.822996)$ y,
+para el de 2 años, $25.9164\cdot3.501813$ (el script exige que coincida con la ruta a $10^{-9}$ relativo); las cotizaciones de 3 años en adelante
+valen exactamente cero. Contra el reprecio del CDS (la cotización movida $\pm0.01$~\pb, el bootstrap vuelto a correr y el XVA
+recalculado con el mismo perfil), en \MXN\ por \pb\ de cotización (tolerancia $5\times10^{-7}$):
+\begin{center}\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Derivada del CVA & Ruta (cadena) & Reprecio del CDS \\
+\midrule
+Cotización de 1 año & \verif{cap16-cred-dcva-cds1-api}{33.927133} & \verif{cap16-cred-dcva-cds1-choque}{33.927133} \\
+Cotización de 2 años & \verif{cap16-cred-dcva-cds2-api}{90.754376} & \verif{cap16-cred-dcva-cds2-choque}{90.754376} \\
+\bottomrule
+\end{tabular}
+\end{center}
+Como comprobación independiente de la cinta, el script rehace la ecuación~\eqref{eq:cap16-dcva-dh} con el perfil
+$\mathrm{EPE}^*$ de \texttt{simulate} y la supervivencia por tramos en la biblioteca estándar, y coincide con los
+$\partial\mathrm{CVA}/\partial h^{\mathrm c}_i$ de la ruta a $10^{-9}$ relativo. Finalmente, el FVA es lineal en el diferencial de
+fondeo, $\partial\mathrm{FVA}/\partial s_f=\mathrm{FVA}/s_f$ (ecuación~\eqref{eq:cap16-dcva-dh}): la ruta da
+$\verif{cap16-cred-fondeo}{28.1507}$~\MXN\ por \pb\ de fondeo, igual a $10^{-4}\,\mathrm{FVA}/s_f$ (a $10^{-9}$ relativo).
+
+\subsection{Derivada parcial frente a derivada total}\label{sec:cap16-ej-parcial}
+
+Banco Cruzado tiene un cross currency swap que paga \USD\ por 10 millones de \USD\ a 18.2, con diferencial de $5$~\pb,
+26 periodos e intercambios inicial y final de nocional, pactado el 2026-11-10; su pata \MXN\ se descuenta con MXN-USD. El
+snapshot MX-DEMO calibra MXN-USD con puntos forward (pilares de 1 mes a 1 año) y con cotizaciones de base sobre TIIE-F
+(pilares de 2 a 10 años), de modo que un desplazamiento de TIIE-F la mueve. El desk sabe hacerlo
+(\codigo{desk/api/market.py}{MarketContext.shifted} recalibra MXN-USD con sus cotizaciones fijas), y eso permite medir las dos derivadas
+del CVA respecto de un desplazamiento paralelo de $+1$~\pb\ de TIIE-F, con las mismas trayectorias, ecuación~\eqref{eq:cap16-total}
+(\MXN\ por \pb; tolerancia $5\times10^{-4}$):
+\begin{center}\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{7.0cm}rr@{}}
+\toprule
+DV01 de TIIE-F & CVA & Total ($\mathrm{CVA}-\mathrm{DVA}+\mathrm{FVA}$) \\
+\midrule
+Parcial por AAD (suma de los 10 pilares) & \verif{cap16-parcial-aad-cva}{111.858} & \verif{cap16-parcial-aad-total}{470.996} \\
+Parcial por choque (MXN-USD fija) & \verif{cap16-parcial-choque-cva}{111.855} & \verif{cap16-parcial-choque-total}{470.995} \\
+Total por choque (MXN-USD recalibrada) & \verif{cap16-total-choque-cva}{-145.508} & \verif{cap16-total-choque-total}{-458.339} \\
+\bottomrule
+\end{tabular}
+\end{center}
+La AAD reproduce la derivada \emph{parcial}; la total tiene el signo contrario. La diferencia es exactamente el segundo
+sumando de la ecuación~\eqref{eq:cap16-total}: los pilares de MXN-USD de 2 años en adelante se mueven $\verif{cap16-mueve-2a}{1.0400}$~\pb\ (el de 2 años) a
+$\verif{cap16-mueve-10a}{1.0054}$~\pb\ (el de 10 años) por cada punto base de TIIE-F, y los cuatro primeros no se mueven; sumando
+a la parcial los productos de las sensibilidades \emph{por AAD} a los pilares de MXN-USD por esos movimientos se
+reconstruye la total del CVA, $\verif{cap16-total-reconstruida-cva}{-145.507}$ (a menos de $10^{-5}$ relativo de la medida por choque y recalibración; el script exige $1\,\%$). El crédito se mantuvo fijo en los
+tres renglones (no se recalibró el bootstrap de CDS, que también descuenta con TIIE-F). Para una cartera cuyas
+operaciones se descuentan con MXN-USD, el DV01 de TIIE-F de la API \textbf{no es el cambio del XVA ante un movimiento
+de 1~\pb\ de TIIE-F en el mercado}.
+\end{sloppypar}
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap16-validacion}
+
+\begin{sloppypar}
+\subsection{Pruebas del repositorio}\label{sec:cap16-pruebas}
+
+\paragraph{Corrección de las derivadas (C++).} La regla de aceptación del corte es que cada derivada adjunta
+coincida con la diferencia central con las mismas trayectorias dentro de $\max(1\,\%,\,1\text{ \MXN\ por unidad del insumo})$
+(que es $10^{-4}$ \MXN\ por \pb), sin aflojar. Cuatro pruebas cubren todas las clases de insumo con 400 trayectorias:
+\codigo{tests/test_ExposureEngine.cpp}{AadMatchesBumpTiieSwap} (un swap TIIE-F; además exige que $\partial/\partial$SOFR,
+MXN-USD y spot sean exactamente cero),
+\codigo{tests/test_ExposureEngine.cpp}{AadMatchesBumpSofrSwap} (un swap SOFR, que depende de las tres curvas y del spot),
+\codigo{tests/test_ExposureEngine.cpp}{AadMatchesBumpXccySwap} y
+\codigo{tests/test_ExposureEngine.cpp}{AadMatchesBumpCombinedSet} (el conjunto de cuatro swaps y tres cross currency
+swaps, con las tres curvas, el spot, los cinco números del modelo, las intensidades de ambas curvas y el fondeo). El
+desacuerdo medido es de $\sim10^{-4}$ relativo en curvas, modelo y spot (el máximo, $4.5\times10^{-3}$, en un pilar de
+derivada pequeña: $-\num{22542}$ frente a $-\num{22644}$) y de $10^{-10}$ en crédito y fondeo.
+\codigo{tests/test_ExposureEngine.cpp}{AadValueMatchesComputeXva} exige que el valor sea el de \texttt{computeXva}
+(relativo $10^{-12}$, y los errores estándar);
+\codigo{tests/test_ExposureEngine.cpp}{AadZeroVolatilityMatchesDeterministicDerivative} compara con la derivada determinista
+de un choque de $10^{-7}$ (tolerancia $10^{-6}$ relativa más $10^{-3}$ de redondeo del choque);
+\codigo{tests/test_ExposureEngine.cpp}{AadFlatHazardHasOneTranche},
+\codigo{tests/test_ExposureEngine.cpp}{AadRejectsNonLinearCurves} (interpolación no lineal y tipos de curva de crédito
+no admitidos) y \codigo{tests/test_ExposureEngine.cpp}{AadMaxThreadsCapsTheWorkersAndKeepsTheResult} (el tope de hilos
+acota las cintas y el resultado cambia solo por redondeo, $10^{-9}$). Sin XAD,
+\codigo{tests/test_ExposureEngine.cpp}{XvaSensitivitiesWithoutXadThrowsLogicError} comprueba el \texttt{logic\_error}
+(se corrió en una compilación aparte con la opción en \texttt{OFF}: todas las pruebas pasan). Bindings:
+\codigo{tests/test_xva_engine_py.py}{test_has_xad_flag_is_a_bool},
+\codigo{tests/test_xva_engine_py.py}{test_xva_sensitivities_shape} y
+\codigo{tests/test_xva_engine_py.py}{test_xva_sensitivities_max_threads}.
+
+\paragraph{Por la API.} \codigo{desk/api/tests/test_xva_sens.py}{test_aad_matches_bump_and_reprice_for_one_input_of_each_class}
+repite la comparación sobre el conjunto sembrado de una contraparte, a través de la ruta, para un insumo de cada
+clase: el pilar de mayor sensibilidad de TIIE-F, SOFR y MXN-USD, el spot, la volatilidad de \USD/\MXN, el fondeo y
+una cotización de CDS (con el bootstrap vuelto a correr); \codigo{desk/api/tests/test_xva_sens.py}{test_xva_is_exactly_the_one_of_get_xva_and_dv01_sums_the_pillars}
+exige que el XVA de referencia sea el de \texttt{GET /api/xva} y que cada DV01 sea la suma de sus pilares; los
+tipos, longitudes y totales, en \codigo{desk/api/tests/test_xva_sens.py}{test_shape_lengths_and_totals}; los
+errores, en \codigo{desk/api/tests/test_xva_sens.py}{test_unknown_counterparty_is_404_and_missing_parameters_are_400},
+\codigo{desk/api/tests/test_xva_sens.py}{test_without_xad_the_route_answers_501},
+\codigo{desk/api/tests/test_xva_sens.py}{test_counterparty_without_covered_trades_has_empty_sensitivities} y
+\codigo{desk/api/tests/test_xva_sens.py}{test_without_the_mxn_usd_curve_it_does_not_appear}.
+
+\paragraph{Pruebas por mutación (a mano, no automáticas).} Para comprobar que las pruebas detectan un adjunto mal
+propagado se sustituyó, en la interpolación de pilares, \texttt{z[i+1]} por \texttt{Real(xad::value(z[i+1]))}
+(se pierde la dependencia del pilar superior de cada intervalo). Fallaron las pruebas del swap TIIE-F, del SOFR, del
+cross currency swap, del conjunto combinado y del límite sin volatilidad (por ejemplo, $\partial\mathrm{CVA}/\partial z_{\mathrm{TIIE}}(1a)$:
+AAD $-\num{1049708}$ frente a $-\num{1379976}$ del choque), mientras la prueba dorada en \texttt{double} siguió pasando: la
+mutación solo afecta al tipo activo. Para la ruta se comprobaron además tres mutaciones (omitir el jacobiano del CDS,
+duplicar la escala del spot y desalinear un pilar), que la comparación con el reprecio detectó. La mutación fue
+revertida.
+
+\subsection{Costo y memoria medidos}\label{sec:cap16-costo}
+
+Las cifras de esta sección son \textbf{mediciones de una sola máquina} (un portátil i7-10510U de 4 núcleos y 8 hilos,
+con carga ajena de 1 a 7 tareas durante las corridas): son órdenes de magnitud, con unos $\pm20\,\%$; no se verifican
+en el script (varían). Se citan las cifras medidas durante el desarrollo con la prueba desactivada
+\codigo{tests/test_ExposureEngine.cpp}{DISABLED_AadTiming} (se corre a mano), con un conjunto pesado: tres operaciones
+(IRS TIIE-F pagador a 10 años con 130 periodos, IRS SOFR a 5 años, cross currency swap a 5 años), malla de integración de
+1407 fechas y 2000 trayectorias.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Hilos & Valuación \texttt{double} (s) & AAD (s) & Razón \\
+\midrule
+1 & 4.87 & 44.5 & 9.1 \\
+2 & 2.83 & 27.7 & 9.8 \\
+4 & 1.54 & 26.0 & 16.8 \\
+8 (valor por omisión de \texttt{simulate}) & 1.31 & 26.4 & 20.2 \\
+\midrule
+1 núcleo fijado para ambas (afinidad), 2000 trayectorias & 4.80 & 44.5 & 9.27 \\
+1 núcleo fijado para ambas, 500 trayectorias & 1.11 & 10.9 & 9.85 \\
+Como la API: valuación en los 8 hilos, AAD en 2 & 1.28 & 27.6 & 21.6 \\
+\bottomrule
+\end{tabular}
+\caption{Costo de las sensibilidades por AAD frente a una valuación (\texttt{simulate} más \texttt{computeXva}) del mismo
+conjunto, con la misma malla; filas superiores, el mismo número de hilos en las dos columnas; las dos últimas, la
+razón con un solo núcleo para ambas (el criterio de aceptación del corte) y la que ve el usuario de la API.}\label{tab:cap16-costo}
+\end{table}
+
+\paragraph{La razón es de unas 9 valuaciones con un hilo.} Con un núcleo para ambas, la AAD cuesta
+\textbf{9.27 valuaciones} con 2000 trayectorias (9.1 en la primera medición, 9.85 con 500 trayectorias: el margen
+frente al objetivo de 10 es corto). Con los 48 insumos del snapshot, los choques serían $2\times48=96$ valuaciones
+($\approx10$ veces más). La razón \textbf{no se mantiene al repartir en hilos}: la valuación en \texttt{double} escala
+(3.7 veces con 8 hilos) y la AAD no pasa de 1.7 veces (de unos 44 s a unos 26 s): es una carga limitada por el ancho de banda
+de memoria, no por cómputo. El barrido de adjuntos de un hilo pasa de 17.8 a 115 s de CPU con 8 hilos (6.5 veces) y la
+grabación de 24.1 a 82 s (3.4 veces), mientras la valuación en \texttt{double} casi no se infla (9.4 contra 9.5 s). Por
+eso la API usa como máximo 2 hilos (más no acelera y multiplica la memoria), y con ellos contra la valuación en los 8
+hilos del equipo la razón es de unas $21$ veces (última fila). Comparada con la estimación por choques
+(96 valuaciones en los 8 hilos, 125 s para ese conjunto, estimada y no medida), la AAD de 26 a 28 s sigue siendo unas 5 veces
+más barata.
+
+\paragraph{Dónde se va el tiempo} (un hilo, 2000 trayectorias, tiempos de CPU). Valuación en \texttt{double}: 4.8 s
+(trayectoria 1.15, bonos 2.45, \texttt{setValue} y resto 1.17). AAD: 24.1 s de grabación (trayectoria 3.2, \texttt{computeBonds}
+7.6, \texttt{setValue} 13.1, resto 0.3) y 17.8 s (el 40\,\%) de barrido de adjuntos. Los bonos y la valuación de patas
+(la fórmula afín) son el 70\,\% de la cinta. Un adjunto escrito a mano de esa fórmula evitaría grabar unos 2.4 millones de
+operaciones por trayectoria y es la mejora futura señalada (sección~\ref{sec:cap16-limites}).
+
+\paragraph{Memoria.} El pico de una cinta por hilo es de $\num{48063764}$ bytes (48.06 MB) \emph{y es idéntico con 500 y con
+2000 trayectorias}, como dice la ecuación~\eqref{eq:cap16-memoria}. La parte común ocupa $\num{4957880}$ bytes (4.96 MB) y
+cada trayectoria agrega unos $\num{43105884}$ bytes (43.1 MB) que \texttt{resetTo} descarta: una cinta de toda la simulación,
+con 2000 trayectorias, sería de unos 86 GB. Con los dos hilos de la API, unos 96 MB de cinta. (Los 5--6 MB de la sonda
+original medían solo la parte común, después del reinicio.)
+
+\paragraph{Tiempo real por la API.} La tabla~\ref{tab:cap16-api} da los tiempos de las tres contrapartes sembradas de
+MX-DEMO (2000 trayectorias, 48 insumos). \texttt{valuation\_elapsed\_s} incluye armar el conjunto, el bootstrap de crédito y el
+perfil publicado, de modo que sobreestima un poco la valuación pura.
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Contraparte & AAD (s) & Valuación (s) & Razón & Choques estimados (s) & Total ruta (s) \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Medición del desarrollo} (carga ajena $\approx1.6$)} \\
+Banco Alfa & 5.77 & 0.31 & 18.6 & 30.0 & 6.1 \\
+Banco Beta & 11.77 & 0.60 & 19.6 & 57.5 & 12.4 \\
+Banco Gamma & 5.27 & 0.35 & 15.1 & 33.3 & 5.6 \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Repetición al escribir este capítulo} (carga ajena $\approx1.2$)} \\
+Banco Alfa & 8.23 & 0.38 & 21.8 & 36.2 & 8.6 \\
+Banco Beta & 14.25 & 0.61 & 23.2 & 59.0 & 14.9 \\
+Banco Gamma & 9.43 & 0.52 & 18.1 & 50.0 & 10.0 \\
+\bottomrule
+\end{tabular}
+\caption{Tiempos reales de \texttt{GET /api/xva/sensitivities} para las tres contrapartes sembradas (2000 trayectorias). La razón es
+\texttt{elapsed\_s}$/$\texttt{valuation\_elapsed\_s}; los choques son $2\times48\times$\texttt{valuation\_elapsed\_s}, una
+estimación (no se corrieron).}\label{tab:cap16-api}
+\end{table}
+Con la malla fina y 2000 trayectorias los conjuntos sembrados tardan de unos 5 a 15 s, no los 26 s del conjunto pesado,
+y la AAD de las tres es de 5 a 6 veces más barata que la estimación por choques. La razón que ve el usuario (15 a 23) es mayor que
+la de 9 a 10 de la tabla~\ref{tab:cap16-costo} porque la valuación corre en todos los hilos y la AAD en dos (hallazgo H25).
+\end{sloppypar}
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap16-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \textbf{Derivadas parciales.} Al mover un pilar no se recalibran la curva MXN-USD ni las curvas de crédito
+          (el bootstrap de CDS descuenta con TIIE-F). La derivada total es otra cosa y puede tener otro signo
+          (sección~\ref{sec:cap16-ej-parcial}). Las curvas de tasa se derivan por tasa cero del pilar, no por
+          cotización de depósito u OIS; solo el crédito pasa a cotizaciones (por el jacobiano del bootstrap
+          obtenido por reprecio, no por AAD del bootstrap).
+    \item \textbf{Primer orden, sin correlaciones y sin PFE.} No hay segundo orden (gamma cruzada), ni sensibilidad a
+          las correlaciones, a la recuperación (LGD) ni a las fechas y términos de las operaciones; no se derivan el
+          PFE (un cuantil) ni el XVA incremental. Se deriva una contraparte (un conjunto de compensación) a la vez.
+    \item \textbf{Derivadas de la estimación, con su ruido.} Son derivadas trayectoria a trayectoria con las mismas
+          trayectorias, malla de integración y semilla que el XVA; llevan el error de Monte Carlo del XVA y, la vega,
+          bastante más (11\,\% entre corridas de 3000 trayectorias en el ejemplo de la
+          sección~\ref{sec:cap16-ej-vega}, contra cerca de $1\,\%$ del CVA). La ruta \emph{no informa el error estándar de las derivadas}. Son las de la malla $\mathcal G$ con
+          extremo derecho (capítulo~\ref{cap:xva}), no las del XVA en tiempo continuo.
+    \item \textbf{Tiempo.} Con un hilo, unas 9 valuaciones; con los dos hilos de la API, unas 15 a 23 veces el tiempo
+          de la valuación (que usa todos los hilos), y decenas de segundos en conjuntos largos (26 s el conjunto de 3
+          operaciones a 10 años). Es 5 veces más barata que los choques ($2m$ valuaciones) con 48 insumos, pero no
+          instantánea; por eso se calcula a petición.
+    \item \textbf{Memoria.} Unos 48 MB de cinta por hilo con la malla fina (4.96 MB de parte común y 43 MB por la
+          trayectoria en curso), independientes del número de trayectorias, pero proporcionales al tamaño del conjunto y
+          a la malla; con más hilos, proporcionalmente más. El tope de 2 hilos acota la memoria.
+    \item \textbf{Curvas admitidas.} Solo curvas de tasa con interpolación \texttt{Linear} y solo curvas de crédito
+          \texttt{PiecewiseHazardCurve} o \texttt{FlatHazardRate} (otras lanzan \texttt{std::invalid\_argument}). Con una
+          volatilidad exactamente cero las derivadas respecto de las volatilidades no se documentan.
+    \item \textbf{Licencia.} XAD es AGPL-3.0 (con licencia comercial aparte). Un producto que se ofrezca a un cliente sin
+          publicar su código necesita esa licencia o compilar con \texttt{QF\_WITH\_XAD=OFF}, que deja la ruta en 501.
+          Es una decisión de negocio pendiente.
+    \item \textbf{Versión de XAD.} 2.2.0 se publicó el 2026-11-11, un día antes de este capítulo, y está fijada por hash
+          de commit. Se aceptó porque corrige justo la técnica que se usa y las pruebas de corrección contra choques
+          validan los números; conviene revisar su estabilidad al actualizar.
+    \item \textbf{Mejora futura.} Escribir a mano el adjunto de la fórmula afín de los bonos y las patas (el 70\,\% de
+          la cinta) reduciría la cinta y el tiempo; con un adjunto de tamaño 1 (solo el total) la cinta es un 20\,\% más
+          rápida. Ninguna está hecha. Las cifras de costo son de una máquina y varían con la carga.
+    \item \textbf{Informativo.} Como el XVA, las sensibilidades no entran al valor presente, a los escenarios ni a la
+          contabilidad de coberturas, y no están contrastadas con QuantLib.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap16-referencias}
+
+El modo adjunto y su costo, a \citet{griewank2008}, con una introducción práctica en \citet{naumann2011}; el uso del
+adjunto para sensibilidades por Monte Carlo en finanzas, a \citet{giles2005} (que presenta el método
+trayectoria a trayectoria recorrido hacia atrás) y \citet{capriotti2011}, su aplicación al riesgo de crédito de
+contraparte, a \citet{capriotti2011b}, y una revisión reciente, a \citet{capriotti2024}; el patrón de cinta por
+trayectoria y por hilo, a \citet{savine2018}; el estimador de la derivada por trayectoria y su insesgadez, a
+\citet{broadie1996} y \citet[cap.~7]{glasserman2003}; y la biblioteca, su versión y su licencia, a \citet{xad2026}.
+El motor que se deriva y sus convenciones son los del capítulo~\ref{cap:xva}.

@@ -1,0 +1,17 @@
+% filas del capítulo 16: símbolo & significado & unidad \\ (4.ª columna, macro, opcional; toda fila termina en \\)
+$\boldsymbol\vartheta$, $\vartheta_i$, $m$ & vector de insumos activos que se derivan, uno de sus componentes y su número ($m=48$ en MX-DEMO) & según el insumo, ---, --- \\
+$z^{\mathrm M}_k$, $z^{\mathrm U}_k$, $z^{\mathrm{col}}_k$ & tasa cero del pilar $k$ de las curvas TIIE-F, SOFR y MXN-USD (colateral \USD) & tasa anual \\
+$h^{\mathrm c}_i$, $h^{\mathrm o}_i$, $J$ & intensidad del tramo $i$ de la curva de crédito de la contraparte y de la propia, y número de tramos & tasa anual, --- \\
+$\ell_i(t)$ & tiempo vivido en el tramo $i$ de una curva de crédito hasta $t$ & años \\
+$\omega_p$ & normales de la trayectoria $p$ (no dependen de $\boldsymbol\vartheta$) & --- \\
+$V_{pj}$, $\mathcal B_{pj}$ & valor del conjunto y cuenta bancaria en la trayectoria $p$ y la fecha $t_j$ & \MXN, adimensional \\
+$w^{\mathrm c}_j$, $w^{\mathrm o}_j$, $w^{\mathrm f}_j$ & pesos de la fecha $t_j$ en CVA, DVA y FVA & adimensional, adimensional, años \\
+$\widehat{\mathrm{CVA}}_p$, $\widehat{\mathrm{DVA}}_p$, $\widehat{\mathrm{FVA}}_p$ & aporte de la trayectoria $p$ a cada medida (el promedio sobre $p$ es la medida) & \MXN \\
+$\mathbf 1_{\{\cdot\}}$ & indicador del evento (derivada de $\max(V,0)$) & --- \\
+$u_k$, $\bar u_k$ & variable intermedia del programa y su adjunto $\partial\Phi/\partial u_k$ & --- \\
+$\boldsymbol\kappa$ & parte común de la simulación: lo que depende de $\boldsymbol\vartheta$ y no de $\omega_p$ & --- \\
+$M_{\boldsymbol\kappa}$, $M_{\mathrm{tray}}$ & memoria de la cinta de la parte común y de una trayectoria & bytes \\
+$s_k$, $J_{ki}$ & cotización del CDS de plazo $T_k$ y jacobiano del bootstrap $\partial h_i/\partial s_k$ & tasa anual, adimensional \\
+$\Delta_i$, $\widetilde D^{X}_i$ & escala de la unidad del reporte y derivada reportada de la medida $X$ & según el insumo, \MXN\ por unidad del reporte \\
+$\DVO^{\mathrm{par}}_X$ & DV01 paralelo de una curva: suma de las derivadas reportadas de sus pilares & \MXN\ por \pb \\
+$C_{\mathrm{adj}}$, $C_{\mathrm{ef}}$ & constante del costo de una pasada adjunta frente a la evaluación del programa y su valor medido aquí (la AAD frente a una valuación) & --- \\

@@ -14,25 +14,25 @@ entrega su capítulo aquí, en el mismo corte.
 
 ```
 docs/tex/
-  qfdesk.tex             documento maestro (portada, índice, \include de los 15 capítulos, apéndice, bibliografía)
+  qfdesk.tex             documento maestro (portada, índice, \include de los 16 capítulos, apéndice, bibliografía)
   preambulo.tex          paquetes, macros, notación y entornos (ÚNICO lugar con \newcommand)
   referencias.bib        bibliografía única
   plainnat-es.bst        estilo bibliográfico (plainnat con las cadenas en español)
   latexmkrc              hace que bibtex encuentre plainnat-es.bst y referencias.bib con -outdir
   HALLAZGOS.md           discrepancias código <-> Metodología encontradas al documentar
-  capitulos/             un archivo por capítulo (cap01_… cap15_…), apendice_simbolos.tex y _plantilla.tex
+  capitulos/             un archivo por capítulo (cap01_… cap16_…), apendice_simbolos.tex y _plantilla.tex
   simbolos/capNN.tex     filas de la tabla de símbolos propias de cada capítulo
-  verificacion/          comun.py, correr.py, referencias_codigo.py y un capNN_<tema>.py por capítulo 2-12, 14 y 15
+  verificacion/          comun.py, correr.py, referencias_codigo.py y un capNN_<tema>.py por capítulo 2-12, 14, 15 y 16
 ```
 
 Capítulos: 1 Introducción, arquitectura y convenciones · 2 Curvas · 3 Swaps de tasa OIS · 4 Derivados de FX
 y opción sobre acción · 5 Hull–White · 6 Bonos · 7 Cross currency swap · 8 Ciclo de vida, liquidaciones y
 P&L · 9 Riesgo · 10 Contabilidad de coberturas IFRS 9 · 11 Operaciones: conciliación · 12 Validación contra
-QuantLib · 13 Fuentes de datos y procedencia · 14 XVA y curvas de crédito · 15 Exóticos de FX
+QuantLib · 13 Fuentes de datos y procedencia · 14 XVA y curvas de crédito · 15 Exóticos de FX · 16 Sensibilidades del XVA por diferenciación adjunta
 · Apéndice A: tabla de símbolos. Las etiquetas de capítulo son fijas: `cap:introduccion`,
 `cap:curvas`, `cap:swaps-ois`, `cap:fx`, `cap:hull-white`, `cap:bonos`, `cap:xccy`, `cap:ciclo-vida`,
 `cap:riesgo`, `cap:coberturas`, `cap:operaciones`, `cap:validacion`, `cap:datos`, `cap:xva`,
-`cap:exoticos-fx` y `ap:simbolos` (apéndice). Un capítulo solo referencia con `\ref` sus propias etiquetas
+`cap:exoticos-fx`, `cap:xva-aad` y `ap:simbolos` (apéndice). Un capítulo solo referencia con `\ref` sus propias etiquetas
 internas (`eq:capNN-…`, `sec:capNN-…`, `tab:capNN-…`) o estas etiquetas fijas.
 
 ## Requisitos
@@ -51,7 +51,7 @@ internas (`eq:capNN-…`, `sec:capNN-…`, `tab:capNN-…`) o estas etiquetas fi
   de cadenas literales y están listados en el encabezado del archivo.
 - Python para las verificaciones: el del backend, `/home/claudio/anaconda3/bin/python` (3.8), con `qfpy`
   compilado en `build/src/` (no se recompila desde aquí). Los scripts usan solo la stdlib y el código del
-  proyecto, salvo el del capítulo 15 (`cap15_exoticos_fx.py`), que además importa `numpy` y `QuantLib` del Python del backend.
+  proyecto, salvo el del capítulo 15 (`cap15_exoticos_fx.py`), que además importa `numpy` y `QuantLib` del Python del backend. El del capítulo 16 (`cap16_xva_aad.py`) necesita `qfxva` compilado con XAD (`QF_WITH_XAD`, activo por omisión; con la opción en `OFF` el script termina con un mensaje claro) y reutiliza la forma cerrada y las curvas planas de `cap14_xva.py`; tarda de 30 a 50 s según la carga de la máquina.
 
 ## Compilar
 
