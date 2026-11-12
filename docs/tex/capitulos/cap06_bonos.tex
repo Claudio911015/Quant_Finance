@@ -1,5 +1,313 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Bonos}\label{cap:bonos}
 
-Valuación de bonos de tasa fija y flotante sobre las curvas de la aplicación.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap06-proposito}
+
+El producto \texttt{bond} de QF Desk es un bono de tasa fija con cupones iguales y amortización del principal
+al vencimiento. El código calcula su precio sucio como suma de flujos descontados con una curva de la
+aplicación (capítulo~\ref{cap:curvas}), y, para el bono envejecido (valuado después de su fecha de pacto), el
+cupón corrido y el precio limpio. Además ofrece el rendimiento, la duración y la convexidad. No hay bonos
+flotantes, amortizables ni con opcionalidad. El valor de un bono envejecido que entra al portafolio y al
+P\&L se trata también en los capítulos~\ref{cap:ciclo-vida} (liquidación de cupones) y~\ref{cap:riesgo}
+(riesgo).
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap06-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}; aquí $\Nom$ es el valor nominal (\texttt{face} en
+el código), $\K$ la tasa de cupón anual (decimal) y $\DF{c}{T}$ el factor de descuento de la curva $c$ de
+descuento del bono. Los símbolos propios son:
+\begin{itemize}
+  \item $f$: frecuencia (cupones por año); $m$: número de periodos (cupones) del bono; $t_i$: tiempo del pago
+        $i$ en años desde la fecha de valuación.
+  \item $\tau=\texttt{periodFraction}(f,\mathrm{dcc})$: fracción de devengo de un periodo uniforme (años);
+        $C=\Nom\,\K\,\tau$: cupón por periodo; $\mathit{CF}_i$: flujo $i$ (moneda del bono).
+  \item $\mathrm{AI}$: cupón corrido; $t_{\mathrm{prev}}\le0$: tiempo del último cupón ya pagado respecto de la
+        fecha de valuación.
+  \item $V$ (\PV): precio sucio, $V_{\mathrm{lim}}=V-\mathrm{AI}$: precio limpio.
+  \item $y$: rendimiento con composición continua (tasa anual); $D$: duración (años); $\mathrm{Cvx}$:
+        convexidad (años$^{2}$).
+  \item En el envejecimiento: $e$ días transcurridos desde la fecha de inicio; $d_i$ día del pago $i$; $i_1$
+        índice del primer pago pendiente.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap06-modelo}
+
+\subsection{Flujos y precio sucio}\label{sec:cap06-flujos}
+
+Con $m$ periodos y frecuencia $f$ el constructor regular de \codigo{include/qf/instruments/bond.hpp}{Bond}
+fija los pagos en $t_i=i/f$ ($i=1,\dots,m$) y los flujos
+\begin{equation}\label{eq:cap06-flujos}
+  C=\Nom\,\K\,\tau,\qquad \mathit{CF}_i=C\ (i<m),\qquad \mathit{CF}_m=C+\Nom,
+\end{equation}
+con $\tau=\texttt{periodFraction}(f,\mathrm{dcc})$ de \codigo{src/math/daycount.cpp}{periodFraction}: $1/f$ bajo
+ACT/365 (la base por omisión, y la única que usa el desk), $365/(360f)$ bajo ACT/360. No hay conteo de días
+reales: el cupón es el mismo en cada periodo (cálculo en \codigo{src/instruments/bond.cpp}{Bond::cashflows}).
+El precio sucio es el valor presente de los flujos pendientes en la curva de descuento,
+\begin{equation}\label{eq:cap06-precio}
+  V=\sum_{i}\mathit{CF}_i\,\DF{c}{t_i},
+\end{equation}
+calculado por \codigo{src/instruments/bond.cpp}{Bond::price}; \codigo{src/instruments/bond.cpp}{Bond::calculatePV}
+lo toma con la curva predeterminada del entorno de mercado. Los flujos que ve el desk son los de
+\codigo{src/instruments/bond.cpp}{Bond::cashFlowSchedule}, pares (tiempo en años, monto) en los que el último
+monto incluye el principal.
+
+\subsection{Calendario explícito y cupón corrido}\label{sec:cap06-corrido}
+
+El segundo constructor recibe los tiempos de pago pendientes $t_1<\dots<t_n$ (finitos, estrictamente
+crecientes y positivos) y el tiempo $t_{\mathrm{prev}}\le0$ del último cupón pagado. El cupón $C$ sigue
+siendo el de la ecuación~\eqref{eq:cap06-flujos} (la frecuencia solo fija su tamaño) y el último pago incluye el
+principal. El cupón corrido es la parte transcurrida del periodo en curso, lineal en el tiempo, y el precio
+limpio es el sucio menos el corrido:
+\begin{equation}\label{eq:cap06-corrido}
+  \mathrm{AI}=C\,\frac{-t_{\mathrm{prev}}}{t_1-t_{\mathrm{prev}}}\quad(\mathrm{AI}=0\text{ si }t_{\mathrm{prev}}=0),
+  \qquad V_{\mathrm{lim}}=V-\mathrm{AI}.
+\end{equation}
+Se implementa en \codigo{src/instruments/bond.cpp}{Bond::accruedInterest} y
+\codigo{src/instruments/bond.cpp}{Bond::cleanPrice}; el constructor regular siempre tiene $\mathrm{AI}=0$ y
+su precio limpio coincide con el sucio. Con $t_{\mathrm{prev}}=0$ y pagos en $i/f$ el segundo constructor
+reproduce al primero.
+
+\subsection{Rendimiento, duración y convexidad}\label{sec:cap06-rendimiento}
+
+El rendimiento $y$ que devuelve \codigo{src/instruments/bond.cpp}{Bond::yield} resuelve, para un precio $P$
+dado,
+\begin{equation}\label{eq:cap06-rendimiento}
+  \sum_{i}\mathit{CF}_i\,e^{-y\,t_i}=P,
+\end{equation}
+con composición continua y sin descontar con ninguna curva: el precio $P$ se compara con la suma de todos los
+flujos pendientes, así que es un precio sucio. El código encierra la raíz en $[-0.30,\,0.10]$, desplaza el extremo
+superior de $0.10$ en $0.10$ mientras la función siga positiva (hasta $50$) y el inferior de $0.10$ en $0.10$
+mientras siga negativa (hasta $-5$), lanza error si no logra un cambio de signo y aplica el método de Brent
+(\codigo{include/qf/math/rootfinding.hpp}{brent}). El binding Python es
+\codigo{src/python_bindings/qfpy.cpp}{yield}, pero el desk no lo usa.
+
+La duración y la convexidad se miden contra la curva de descuento, no contra $y$:
+\begin{equation}\label{eq:cap06-duracion}
+  D=\frac{1}{V}\sum_{i}t_i\,\mathit{CF}_i\,\DF{c}{t_i},\qquad
+  \mathrm{Cvx}=\frac{1}{V}\sum_{i}t_i^{2}\,\mathit{CF}_i\,\DF{c}{t_i},
+\end{equation}
+en \codigo{src/instruments/bond.cpp}{Bond::duration} y \codigo{src/instruments/bond.cpp}{Bond::convexity}.
+Son el promedio ponderado por valor presente del tiempo de los flujos (duración de Macaulay) y su
+análogo de segundo orden; también son $-\frac1V\partial V/\partial s$ y $\frac1V\partial^2V/\partial s^2$
+para un desplazamiento paralelo $s$ de la tasa cero continua de la curva. El comentario del código afirma que
+con composición continua la duración modificada coincide con la de Macaulay.
+
+\begin{diferencia}
+  En el mercado los bonos se cotizan por un rendimiento periódico (por ejemplo, semestral equivalente a
+  bono) y la duración modificada es $D_{\mathrm{Mac}}/(1+y/f)$ \citep{hull2018,tuckman2012}. Aquí el
+  rendimiento es continuo, $y=f\ln\!\bigl(1+y_{\mathrm{per}}/f\bigr)$ o, al revés,
+  $y_{\mathrm{per}}=f\bigl(e^{y/f}-1\bigr)$, y la «duración» que el desk reporta (pantalla de pricers) es la de
+  Macaulay, que bajo composición continua es la modificada; con rendimiento periódico no lo sería. El
+  rendimiento tampoco se usa para valuar: el valor viene siempre de la curva.
+\end{diferencia}
+
+\begin{diferencia}
+  El cupón es $\Nom\K/f$ en todos los periodos, sin contar los días reales de cada uno (la base ACT/365 por
+  omisión da $\tau=1/f$). La convención M-Bono de 182 días queda fuera (Metodología, «Límites», «Bono»). La frase «devengo ACT/360» de la Metodología, en «Convención de días», no
+  describe al bono: se anota en \texttt{HALLAZGOS.md} (H13).
+\end{diferencia}
+
+\subsection{Cuadro de convenciones}
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.28\textwidth}>{\raggedright\arraybackslash}p{0.58\textwidth}}
+\toprule
+Aspecto & Qué hace el código \\
+\midrule
+Cupón & $\Nom\K\tau$ por periodo, igual en todos; $\tau=1/f$ (ACT/365 por omisión) \\
+Tiempo de pago & $t_i=i/f$ años (bono nuevo); $i/f-e/365$ años (envejecido) \\
+Descuento & $\DF{c}{t_i}$ de la curva de la operación o de la del colateral (sección~\ref{sec:cap06-desk}) \\
+Precio del producto & sucio (en el bono nuevo sucio y limpio coinciden) \\
+Rendimiento & composición continua, sobre el precio sucio; no lo usa el desk \\
+Duración y convexidad & de la curva de descuento, ponderadas por valor presente \\
+Corrido & lineal en tiempo exacto; 0 si el último cupón cae hoy \\
+\bottomrule
+\end{tabular}
+\caption{Convenciones del bono.}\label{tab:cap06-convenciones}
+\end{table}
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap06-implementacion}
+
+\subsection{Del producto \texttt{bond} al instrumento}\label{sec:cap06-desk}
+
+Los pricers de tasas se registran en \codigo{desk/api/pricing/rates.py}{PRODUCTS}. Para el bono:
+\begin{itemize}
+  \item \codigo{desk/api/pricing/rates.py}{_bond_validate} normaliza los parámetros: curva (por omisión
+        \texttt{TIIE-F}), \texttt{face}~$>0$, \texttt{coupon\_rate} en $[0,\text{MAX\_RATE}]$, \texttt{periods}
+        entero $\ge1$, \texttt{frequency} por omisión $2$ y rechaza duraciones $m/f$ de más de 1200 años.
+  \item \codigo{desk/api/pricing/rates.py}{_bond_instrument} construye
+        \texttt{qfpy.Bond(face, coupon\_rate, periods, frequency)} (constructor regular, ACT/365).
+  \item La curva de descuento es la de la operación, salvo que sea \texttt{TIIE-F} con colateral en USD y
+        exista la curva \texttt{MXN-USD}, que entonces descuenta (capítulo~\ref{cap:curvas}); \texttt{SOFR}
+        siempre descuenta con SOFR. \codigo{desk/api/pricing/rates.py}{_bond_pv} evalúa
+        $V$ con el entorno cuya curva predeterminada es la de descuento.
+  \item \codigo{desk/api/pricing/rates.py}{_bond_price} devuelve, además de $V$, la tabla de flujos (días
+        $=\operatorname{round}(365\,t_i)$, fecha, factor de descuento calculado con $t_i$ exacto, y valor
+        presente), el DV01 ($V(\text{base})-V(+1~\pb)$ con un choque paralelo a la curva de la operación) y
+        $D$ y $\mathrm{Cvx}$ de la ecuación~\eqref{eq:cap06-duracion}.
+  \item \codigo{desk/api/pricing/rates.py}{_bond_describe} informa el vencimiento como la fecha de valuación más
+        $\operatorname{round}(365\,t_m)$ días.
+\end{itemize}
+El PV está en la moneda de la curva (\MXN\ para \texttt{TIIE-F}, \USD\ para \texttt{SOFR}); el pricer de
+producto lo convierte a \MXN\ con el spot del snapshot.
+
+\subsection{Bono envejecido}\label{sec:cap06-envejecimiento}
+
+Para valuar un bono en una fecha posterior a su inicio, \codigo{desk/api/valuation.py}{value_trade} llama a
+\codigo{desk/api/aging.py}{bond_pv_mxn}, que a su vez arma el instrumento con calendario explícito en
+\codigo{desk/api/aging.py}{aged_bond}. Sean $e$ los días entre la fecha de inicio y la de valuación y
+\begin{equation}\label{eq:cap06-dias-pago}
+  d_i=\operatorname{round}\!\bigl(365\,i/f\bigr),\qquad i=1,\dots,m,
+\end{equation}
+el día del pago $i$ (\codigo{desk/api/aging.py}{_pay_day}; la misma fecha que el vencimiento de la operación).
+Quedan por pagar los pagos con $d_i>e$ (\codigo{desk/api/aging.py}{_remaining_payments}); un cupón con fecha
+igual a la de valuación ya está liquidado y no entra. Sus tiempos son \emph{exactos}, no redondeados a días:
+\begin{equation}\label{eq:cap06-tiempos-envejecido}
+  t_k=\frac{i_k}{f}-\frac{e}{365},\qquad
+  t_{\mathrm{prev}}=\min\Bigl\{0,\ \frac{i_1-1}{f}-\frac{e}{365}\Bigr\},
+\end{equation}
+donde $i_1<i_2<\dots$ son los índices de los pagos pendientes. Con la base ACT/365 del cupón,
+la ecuación~\eqref{eq:cap06-corrido} se reduce a $\mathrm{AI}=\Nom\K\,(-t_{\mathrm{prev}})$: el cupón corrido es
+la tasa anual por el tiempo transcurrido desde el último cupón (años de $i/f$ y de días$/365$), y es cero en el
+día en que cae un cupón. Si el bono aún no empieza ($e<0$), los tiempos se alargan en $|e|/365$ y
+$\mathrm{AI}=0$. El recorte a $0$ en $t_{\mathrm{prev}}$ evita que el redondeo del día deje el cupón anterior
+unas horas después de la fecha de valuación, que C++ rechazaría. Si no queda ningún pago, \texttt{aged\_bond}
+lanza \texttt{ValueError}.
+
+Las funciones de salida son \codigo{desk/api/aging.py}{bond_pv_mxn} (precio sucio, convertido con el spot si la
+curva es SOFR), \codigo{desk/api/aging.py}{bond_quote} (sucio, limpio y corrido en la moneda de la curva, con
+$\text{sucio}-\text{limpio}=\text{corrido}$) y \codigo{desk/api/aging.py}{projected_bond} (flujos por cobrar
+con factor de descuento y valor presente). La liquidación de los cupones y de la amortización, con fechas
+$\text{inicio}+d_i$ y cupón $C$ tomado del constructor de C++
+(\codigo{desk/api/aging.py}{_coupon_amount}), vive en \codigo{desk/api/aging.py}{bond_settled}
+(capítulo~\ref{cap:ciclo-vida}).
+
+Dos consecuencias que la Metodología declara y que conviene tener presentes. Primero, el calendario de
+\emph{valuación} usa tiempos exactos $i/f$ mientras la \emph{liquidación} cae en el día entero $d_i$; con
+$f=2$, $d_1=\operatorname{round}(182.5)=182$, de modo que el día siguiente al cupón el corrido es de medio día
+y no de un día completo. Segundo, \texttt{round} de Python redondea los empates al entero par:
+$d_1=182$ pero $d_3=\operatorname{round}(547.5)=548$, así que el primer cupón se paga medio día antes y el tercero
+medio día después de la fecha exacta.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap06-ejemplo}
+
+Los valores se reproducen con \codigo{docs/tex/verificacion/cap06_bonos.py}{bono_regular} y
+\codigo{docs/tex/verificacion/cap06_bonos.py}{bono_envejecido}; el script llama a \texttt{qfpy.Bond} y a
+\texttt{desk.api.aging} y comprueba cada valor con la tolerancia indicada.
+
+\subsection{Bono de 2 años, cupón 8\% semestral, curva plana a 6\%}
+
+$\Nom=10^{6}$, $\K=8\%$, $f=2$, $m=4$, curva plana a $6\%$ continuo. Por la
+ecuación~\eqref{eq:cap06-flujos}, $C=40\,000$ y los flujos son $40\,000$ en $t=0.5,\,1,\,1.5$ y $1\,040\,000$ en
+$t=2$. Con $\DF{c}{t}=e^{-0.06t}$, es decir $0.9704455$, $0.9417645$, $0.9139312$ y $0.8869204$, la
+ecuación~\eqref{eq:cap06-precio} da
+\[
+  V = 40\,000\,(0.9704455+0.9417645+0.9139312)+1\,040\,000\cdot0.8869204
+  = \verif{cap06-precio-sucio}{1035442.9043}\ \MXN,
+\]
+con tolerancia absoluta $10^{-4}$. La duración y la convexidad de la ecuación~\eqref{eq:cap06-duracion} son
+\[
+  D=\verif{cap06-duracion}{1.88973227}\ \text{años},\qquad
+  \mathrm{Cvx}=\verif{cap06-convexidad}{3.68848716}\ \text{años}^2
+\]
+(tolerancia absoluta $10^{-8}$).
+
+\subsection{Rendimiento a la par}
+
+Si el precio fuera el nominal ($P=10^{6}$) el rendimiento de la ecuación~\eqref{eq:cap06-rendimiento} es
+\[
+  y=\verif{cap06-rendimiento-par}{0.0784414263}\quad(\text{tolerancia absoluta }10^{-9}),
+\]
+y su equivalente semestral $y_{\mathrm{per}}=2\bigl(e^{y/2}-1\bigr)=\verif{cap06-rendimiento-semestral}{0.0800000000}$
+(tolerancia absoluta $10^{-9}$): a la par el rendimiento periódico es el cupón, mientras que el continuo,
+$7.844\%$, es menor. Ambos números describen el mismo bono; solo difiere la composición (recuadro
+«Diferencia» de la sección~\ref{sec:cap06-rendimiento}).
+
+\subsection{Bono envejecido 90 días}
+
+Mismo bono con inicio el 2026-01-02 y fecha de valuación 90 días después ($e=90$), en la curva plana a $6\%$.
+Los cuatro pagos están pendientes ($d_i=182,\,365,\,548,\,730>90$ con $f=2$), con tiempos
+$t_k=i/2-90/365=0.2534247,\,0.7534247,\,1.2534247,\,1.7534247$ y $t_{\mathrm{prev}}=0-90/365=-0.2465753$. El
+corrido de la ecuación~\eqref{eq:cap06-corrido} es $C\cdot0.2465753/0.5=\Nom\K\cdot90/365$:
+\[
+  \mathrm{AI}=\verif{cap06-corrido}{19726.0274}\ \MXN
+\]
+(tolerancia absoluta $10^{-4}$). Con curva plana y ningún cupón pagado todavía, el sucio es el de la fecha de
+pacto capitalizado por 90 días,
+$V=1\,035\,442.9043\,e^{0.06\cdot90/365}=\verif{cap06-precio-sucio-envejecido}{1050875.6643}$ \MXN, y el limpio es
+$V-\mathrm{AI}=\verif{cap06-precio-limpio}{1031149.6369}$ \MXN (ambos con tolerancia absoluta $10^{-4}$; el script
+comprueba la capitalización de forma independiente).
+
+\subsection{Medio día de corrido}
+
+En $e=183$ el pago $i=1$ ($d_1=182$) ya está liquidado, quedan tres pagos y $t_{\mathrm{prev}}=0.5-183/365=
+-0.0013699$ (el cupón exacto cae a los $182.5$ días, medio día antes de la valuación), con
+\[
+  \mathrm{AI}=\Nom\K\cdot\frac{0.5}{365}=\verif{cap06-corrido-dia-183}{109.5890}\ \MXN
+\]
+(tolerancia absoluta $10^{-4}$): medio día de corrido, no un día completo.
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap06-validacion}
+
+\begin{itemize}
+  \item Pruebas de C++: el calendario regular reproduce al constructor por periodos, el corrido es la parte
+        transcurrida del cupón, limpio más corrido es el sucio, el sucio se mueve por el carry diario entre
+        cupones y el limpio no da saltos al pagar un cupón; usan la función auxiliar
+        \codigo{tests/test_bond_schedule.cpp}{agedBond}, que replica el envejecimiento del desk. Otras pruebas
+        cubren el rendimiento (ida y vuelta, y a la par), la duración, la convexidad y los flujos; sus curvas de
+        prueba son \codigo{tests/test_bond_cashflows.cpp}{upwardCurve} y
+        \codigo{tests/test_instruments.cpp}{flatCurve}.
+  \item Bindings:
+        \codigo{tests/test_aged_bond_cap_py.py}{AgedBondTests.test_accrued_interest_and_clean_price}.
+  \item Backend: el PV envejecido el día del pacto coincide con el precio y no hay escalones al rodar día a día
+        (\codigo{desk/api/tests/test_aging_exact.py}{test_bond_rolled_day_by_day_has_no_step_and_dirty_clean_accrued_add_up}),
+        el corrido crece linealmente entre cupones
+        (\codigo{desk/api/tests/test_aging_exact.py}{test_bond_accrued_interest_grows_linearly_between_coupons}),
+        las fechas de pago coinciden con el vencimiento para cualquier frecuencia
+        (\codigo{desk/api/tests/test_aging_exact.py}{test_bond_pay_days_match_the_maturity_date_for_any_frequency})
+        y la forma de la respuesta del pricer y el bono cupón cero
+        (\codigo{desk/api/tests/test_price_rates.py}{test_bond_response_keys_and_cashflows},
+        \codigo{desk/api/tests/test_price_rates.py}{test_zero_coupon_bond_prices}).
+  \item Contra QuantLib (capítulo~\ref{cap:validacion}): \codigo{desk/validation/ql_rates.py}{price_bond} valúa
+        el mismo bono con \texttt{FixedRateBond} (ACT/365) y \texttt{DiscountingBondEngine} sobre la curva del
+        desk, con pagos en $\operatorname{round}(365\,i/f)$ días enteros. Los 8 casos caen dentro de la
+        tolerancia de $10^{-6}$ del nocional; la mayor diferencia relativa es $5.9\times10^{-8}$ (caso
+        \codigo{desk/validation/report.json}{bond-08}, con cupones cada 182.5 días), del orden del efecto de
+        redondear las fechas de pago a días enteros.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap06-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item Solo bonos de tasa fija con cupones iguales y amortización total al vencimiento («Periodos
+          uniformes», Metodología, «Límites»); la convención de los bonos mexicanos de 182 días queda fuera.
+    \item El cupón no usa una base de días: $\Nom\K/f$; el corrido es lineal en tiempo exacto (días$/365$). No hay
+          ajuste por días inhábiles.
+    \item El valor sale de descontar con la curva swap elegida (\texttt{TIIE-F}, \texttt{SOFR}, o la de
+          colateral): no hay curva ni diferencial de crédito del emisor, ni se valúa por rendimiento.
+    \item El rendimiento es continuo y la duración es la de Macaulay (la modificada bajo composición continua);
+          no son las medidas periódicas del mercado.
+    \item En el envejecimiento la valuación usa tiempos exactos $i/f$ y la liquidación usa el día entero más
+          cercano, con empates al par; el corrido el día siguiente a un cupón semestral es de medio día
+          (Metodología, «Bono y cap/floor envejecidos»).
+    \item El PV del bono en el portafolio es el precio \emph{sucio}; el limpio y el corrido salen de
+          \codigo{desk/api/aging.py}{bond_quote}.
+    \item Los parámetros del producto están acotados (\texttt{MAX\_PERIODS}, \texttt{MAX\_BOND\_YEARS}); un bono
+          ya vencido no tiene flujos por valuar.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap06-referencias}
+
+Las definiciones de precio sucio y limpio, cupón corrido, rendimiento y duración siguen a
+\citet{tuckman2012} y a \citet{hull2018}; las diferencias con la práctica de mercado de la
+sección~\ref{sec:cap06-rendimiento} se refieren a esas dos obras.
