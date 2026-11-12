@@ -1,4 +1,18 @@
 % filas del capítulo 08: símbolo & significado & unidad \\ (4.ª columna, macro, opcional; toda fila termina en \\)
-% Ejemplo: $w_k$ & peso del vértice $k$ & adimensional \\
-% Sustituir la fila de abajo por las filas propias del capítulo (no definir macros nuevas; ver README.md).
-\multicolumn{4}{@{}l}{\textit{Sin símbolos propios por ahora.}} \\
+$t_{\mathrm{pac}}$, $t_{\mathrm{ini}}$, $T$ & fecha de pacto, de inicio y de vencimiento de la operación & fecha (días naturales) \\
+$e_j = (d_j, \mathrm{id}_j, \mathrm{tipo}_j, \mathrm{datos}_j)$ & evento de una operación, con fecha $d_j$ e identificador creciente por inserción & --- \\
+$E(d)$ & eventos con fecha $\le d$, en el orden $(d_j, \mathrm{id}_j)$ & --- \\
+$s(d)$ & estado de la operación en $d$ (\texttt{no\_pactada}, \texttt{viva}, \texttt{vencida}, \texttt{terminada}, \texttt{ejercida}) & --- \\
+$\Nom(d)$, $\K(d)$ & nocional y campo de precio (tasa fija o precio de ejercicio) vigentes en $d$ & moneda; tasa o precio \\
+$B_c(d)$ & indicador de día hábil del calendario $c \in \{\mathrm{MX}, \mathrm{US}\}$ & 0 o 1 \\
+$\mathcal{F}$, $\mathcal{F}_{\mathrm{FIX}}$ & días con fijación overnight publicada y con FIX USDMXN publicado & --- \\
+$(r_i, m_i)$ & tramo de devengo: tasa overnight y días que devenga (fin de semana y feriados incluidos) & tasa anual; días \\
+$\rho(u)$, $\rho_{\mathrm{curva}}$ & tasa de respaldo de un día sin fijación (última publicada o tasa a un día de la curva) & tasa anual \\
+$G(a, b)$ & factor acumulado de las fijaciones diarias del rango $[a, b)$ (ACT/360) & adimensional \\
+$n_k$, $D_k$ & desfase en días y fecha del pago $k$ de un swap, $D_k = t_{\mathrm{ini}} + n_k$ & días; fecha \\
+$\tau_k$ & fracción de año ACT/360 del periodo $k$ & años \\
+$\mathrm{FIX}(u)$ & FIX USDMXN del día $u$ (o el último publicado en día inhábil) & \MXN por \USD \\
+$d_0$, $d_1$ & \texttt{as\_of} del snapshot de origen y del de destino, $d_0 \le d_1$ & fecha \\
+$\PV_i(d)$ & valor presente de la operación $i$ en $d$ (\texttt{pv\_mxn}) & \MXN \\
+$L_i(d_0, d_1]$ & flujos liquidados de la operación $i$ en $(d_0, d_1]$ & \MXN \\
+$C_k$, $C_k^{\MXN}$ & cupón neto del pago $k$ en la moneda de la pata y en \MXN; positivo si la empresa cobra & moneda; \MXN \\

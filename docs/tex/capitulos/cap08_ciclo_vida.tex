@@ -1,5 +1,261 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
+% Capítulo 8 -- Ciclo de vida, liquidaciones y P&L (T7). Estructura de _plantilla.tex.
 \chapter{Ciclo de vida, liquidaciones y P\&L}\label{cap:ciclo-vida}
 
-Eventos de ciclo de vida, liquidaciones, identidad de P\&L y regla de fin de semana.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap08-proposito}
+
+En QF Desk nada guarda el estado de una operación ni los flujos que ya se pagaron: ambos se \emph{derivan}, cada vez que se piden, de los términos pactados, de los eventos registrados y de las fijaciones publicadas. Este capítulo documenta esa derivación y la identidad que se apoya en ella, el P\&L entre dos snapshots de mercado. Tres funciones concentran el cálculo: \codigo{desk/api/lifecycle.py}{state} (estado y términos vigentes en una fecha), \codigo{desk/api/settlement.py}{settled_flows} (flujos liquidados en una ventana de fechas) y \codigo{desk/api/pnl.py}{compute_pnl} (la identidad $\PnL = \PV_{\mathrm{to}} - \PV_{\mathrm{from}} + \text{liquidado}$, por operación y en total).
+
+No hay matemática financiera nueva: los PV salen de \codigo{desk/api/valuation.py}{value_trade}. La valuación del swap OIS envejecido se describe en el capítulo~\ref{cap:swaps-ois}; la del \emph{cap/floor}, en el capítulo~\ref{cap:hull-white}; la del bono, en el capítulo~\ref{cap:bonos}, y la del \emph{cross currency swap}, en el capítulo~\ref{cap:xccy}. La confirmación de liquidaciones y el calendario de flujos del portafolio, que reutilizan lo de este capítulo, están en el capítulo~\ref{cap:operaciones}; el origen de las fijaciones, en el capítulo~\ref{cap:datos}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap08-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. En este capítulo, para una operación: $t_{\mathrm{pac}}$ es la fecha de pacto (\texttt{trade\_date}), $t_{\mathrm{ini}}$ la fecha de inicio (\texttt{start\_date}) y $T$ el vencimiento (\texttt{maturity\_date}); las tres son fechas del calendario natural. Un evento es $e_j = (d_j, \mathrm{id}_j, \mathrm{tipo}_j, \mathrm{datos}_j)$ con fecha $d_j$ e identificador $\mathrm{id}_j$ (entero creciente por inserción); $E(d) = \{e_j : d_j \le d\}$ es el conjunto de eventos con fecha anterior o igual a $d$, siempre en el orden $(d_j, \mathrm{id}_j)$. $s(d)$ es el estado en $d$, $\Nom(d)$ y $\K(d)$ el nocional y el campo de precio (tasa fija o precio de ejercicio) vigentes en $d$.
+
+$B_c(d) \in \{0, 1\}$ indica si $d$ es día hábil del calendario $c \in \{\mathrm{MX}, \mathrm{US}\}$. Para un índice overnight, $\mathcal{F}$ es el conjunto de días con fijación publicada y $\ON{u}$ la fijación del día $u \in \mathcal{F}$ (decimal anual); $(r_i, m_i)$ es un tramo de devengo (tasa y número de días que devenga) y $G(a, b)$ el factor acumulado del rango $[a, b)$. Para los pagos de un swap, $n_k$ es el desfase en días de su pago $k$ y $D_k = t_{\mathrm{ini}} + n_k$ su fecha. $\mathrm{FIX}(u)$ es el FIX \MXN por \USD del día $u$. Entre dos snapshots, $d_0 \le d_1$ son los \texttt{as\_of} de origen y destino, $\PV_i(d)$ el valor presente en \MXN de la operación $i$ (campo \texttt{pv\_mxn}) y $L_i(d_0, d_1]$ lo liquidado en $(d_0, d_1]$, también en \MXN.
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap08-modelo}
+
+\subsection{Eventos y estado derivado}\label{sec:cap08-estado}
+
+La tabla de eventos es de solo inserción: dos disparadores de SQLite abortan cualquier \texttt{UPDATE} o \texttt{DELETE} (\codigo{desk/api/db.py}{SCHEMA}), y cada evento apunta con \texttt{prev\_event\_id} al evento de ciclo de vida anterior de su operación (las confirmaciones de liquidación no extienden esa cadena). Corregir un hecho significa registrar otro evento, nunca editarlo. El catálogo es \codigo{desk/api/lifecycle.py}{EVENT_TYPES} y los estados posibles, \codigo{desk/api/lifecycle.py}{STATUSES}. La \cref{tab:cap08-eventos} resume quién registra cada tipo y qué efecto tiene.
+
+\begin{table}[ht]
+  \centering\small
+  \caption{Tipos de evento (\codigo{desk/api/events.py}{post_event}, \codigo{desk/api/events.py}{insert_event}).}\label{tab:cap08-eventos}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.19\textwidth}>{\raggedright\arraybackslash}p{0.27\textwidth}>{\raggedright\arraybackslash}p{0.23\textwidth}>{\raggedright\arraybackslash}p{0.23\textwidth}@{}}
+    \toprule
+    Tipo & Quién lo registra & Efecto en $s(d)$ y términos & Efecto en lo liquidado \\
+    \midrule
+    \texttt{execution} & el alta de la operación (\codigo{desk/api/portfolio.py}{insert_trade}) & ninguno & ninguno \\
+    \texttt{quantity\_change} & la API & cambia $\Nom$ & indirecto (PV y cupones) \\
+    \texttt{terms\_change} & la API & cambia $\K$ & indirecto (PV y cupones) \\
+    \texttt{exercise} & la API, solo opciones & estado \texttt{ejercida} & su \texttt{transfer} \\
+    \texttt{termination} & la API & estado \texttt{terminada} & su \texttt{transfer} \\
+    \texttt{transfer} & \texttt{post\_event}, tras una terminación o un ejercicio, con \texttt{cause\_event\_id} & ninguno & su monto en \MXN entra \\
+    \texttt{reset} & nadie: las fijaciones viven en su tabla & ninguno & ninguno \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+El estado y los términos vigentes en $d$ salen de aplicar en orden los eventos de $E(d)$. Para el nocional, con $j^{*}$ el último evento de $E(d)$ de tipo \texttt{quantity\_change} (en el orden $(d_j, \mathrm{id}_j)$) y $\nu_{j^{*}}$ el \texttt{notional} de sus datos,
+\begin{equation}\label{eq:cap08-nocional}
+  \Nom(d) =
+  \begin{cases}
+    \nu_{j^{*}} & \text{si existe } j^{*},\\
+    \Nom_0 & \text{en otro caso,}
+  \end{cases}
+\end{equation}
+donde $\Nom_0$ es el nocional de los términos pactados. El campo que se reescribe depende del producto (\texttt{notional}, \texttt{notional\_usd}, \texttt{face} o \texttt{quantity}), según \codigo{desk/api/lifecycle.py}{NOTIONAL_FIELD}. Un \texttt{terms\_change} mezcla el campo de precio nuevo con los términos vigentes y revalida el resultado con el producto (\codigo{desk/api/events.py}{_terms_data}), de modo que $\K(d)$ se determina igual que la ecuación~\eqref{eq:cap08-nocional}. Con las mismas convenciones, el estado es
+\begin{equation}\label{eq:cap08-estado}
+  s(d) =
+  \begin{cases}
+    \texttt{no\_pactada} & d < t_{\mathrm{pac}},\\
+    \texttt{terminada} & d \ge t_{\mathrm{pac}} \text{ y } E(d) \text{ contiene una } \texttt{termination},\\
+    \texttt{ejercida} & d \ge t_{\mathrm{pac}} \text{ y } E(d) \text{ contiene un } \texttt{exercise} \text{ (sin terminación)},\\
+    \texttt{vencida} & d \ge T \text{ (y ninguno de los casos anteriores)},\\
+    \texttt{viva} & \text{en otro caso.}
+  \end{cases}
+\end{equation}
+La precedencia es la del orden de los renglones: una terminación gana a un ejercicio, y ambos ganan a \texttt{vencida}, de modo que una operación terminada nunca pasa a \texttt{vencida}. El día del vencimiento la operación ya es \texttt{vencida} ($d \ge T$): vale cero ese día. Implementación: \codigo{desk/api/lifecycle.py}{state}.
+
+\subsubsection*{Reglas de registro}
+
+La API no confía en el llamador (\codigo{desk/api/events.py}{post_event}). Solo acepta \texttt{quantity\_change}, \texttt{terms\_change}, \texttt{exercise} y \texttt{termination} (\codigo{desk/api/events.py}{API_EVENT_TYPES}), más la confirmación de una liquidación, que es un \texttt{transfer} especial (capítulo~\ref{cap:operaciones}). Además: (i) \texttt{exercise} solo para opciones (\texttt{fx\_option}, \texttt{swaption}, \texttt{equity\_option}); (ii) la fecha del evento no puede ser anterior al pacto ni a la del último evento ya registrado, sin contar las confirmaciones de liquidación; (iii) la operación debe estar \texttt{viva} en la fecha del evento, con una excepción: un ejercicio fechado en el vencimiento se juzga con el estado del día anterior, porque el ejercicio de una opción europea ocurre ese día; (iv) \texttt{quantity\_change} exige un nocional positivo y no mayor que $10^{13}$; \texttt{terms\_change} solo admite el campo de precio del producto, cuyo nombre fija \codigo{desk/api/events.py}{_PRICE_FIELD} (los productos que no figuran ahí, el bono y el \emph{cross currency swap}, no admiten cambio de términos); \texttt{termination} y \texttt{exercise} llevan un importe \texttt{amount} en \MXN, con signo, positivo si cobra el tenedor, que el código no calcula: lo da el usuario. Una terminación o un ejercicio inserta además un \texttt{transfer} en \MXN con ese mismo importe y la fecha del evento.
+
+\subsection{Días hábiles, fines de semana y feriados}\label{sec:cap08-habiles}
+
+Los calendarios (\codigo{desk/api/calendars.py}{is_business_day}) existen solo para decidir si una fijación sin publicar es un hueco de datos o un día en que el índice no se publica. Un día es hábil del calendario $c$ si es de lunes a viernes y no es feriado de $c$:
+\begin{equation}\label{eq:cap08-habil}
+  B_c(d) = \mathbf{1}\bigl[\text{lunes} \le \mathrm{díasem}(d) \le \text{viernes}\bigr]\cdot\mathbf{1}\bigl[d \notin H_c\bigr],
+\end{equation}
+con $H_c$ el conjunto de feriados de \codigo{desk/api/calendars.py}{holidays} para los años 2020--2040; fuera de ese rango no hay feriados, pero los fines de semana siguen cerrados (\codigo{desk/api/calendars.py}{is_holiday}). El calendario de cada índice es \codigo{desk/api/calendars.py}{INDEX_CALENDAR}: $\mathrm{MX}$ para TIIE-F y para el FIX USDMXN, $\mathrm{US}$ para SOFR. La TIIE de Fondeo se calcula con operaciones de reporto a plazo de un día hábil bancario \citep{banxico2021}, y SOFR se publica cada día hábil \citep{nyfed2026}: de ahí que el calendario del índice mande y no el del swap.
+
+Los feriados de México (\codigo{desk/api/calendars.py}{_mexico}) son: 1 de enero, primer lunes de febrero, tercer lunes de marzo, Jueves y Viernes Santo (el domingo de Pascua sale del algoritmo gregoriano de Meeus, Jones y Butcher \citep{meeus1998}, \codigo{desk/api/calendars.py}{_easter}), 1 de mayo, 16 de septiembre, 2 de noviembre, tercer lunes de noviembre, 12 y 25 de diciembre, y el 1 de octubre de 2024, 2030 y 2036 (transmisión del Poder Ejecutivo). Un feriado fijo en sábado o domingo no se traslada. Para 2026 la lista coincide, fecha por fecha, con la de días inhábiles bancarios de Banxico \citep{banxico2026c}. Los de EE.~UU. (\codigo{desk/api/calendars.py}{_united_states}) siguen el calendario de recomendaciones de SIFMA \citep{sifma2026}: los feriados fijos en domingo pasan al lunes siguiente y los de sábado al viernes anterior (\codigo{desk/api/calendars.py}{_observed}), salvo el 1 de enero en sábado, que no pasa al año anterior; Juneteenth entra desde 2022.
+
+\paragraph{Las fechas de pago no se ajustan.} Para un swap OIS con periodo de $p$ días ($p = 28$ en TIIE-F, $p = 365$ en SOFR, \codigo{desk/api/market.py}{CURVES}), los desfases de pago son $n_k = k\,p$ para $k = 1, \dots, m - 1$ y $n_m = T - t_{\mathrm{ini}}$ en días, con $m = \lceil (T - t_{\mathrm{ini}})/p \rceil$ (\codigo{include/qf/termstructure/ois_bootstrap.hpp}{oisPaymentDays}); la fecha de pago es $D_k = t_{\mathrm{ini}} + n_k$ aunque caiga en sábado, domingo o feriado. Los calendarios no mueven ninguna fecha de pago: un cupón con fecha en fin de semana se liquida en esa fecha y pertenece a una ventana $(d_0, d_1]$ por su propia fecha.
+
+\paragraph{Devengo de una fijación overnight.} Las tasas a un día solo se publican en días hábiles. Para el rango $[a, b)$ de un periodo (la fecha final queda fuera), \codigo{desk/api/valuation.py}{accrued_factor} recorre todos los días naturales $u = a, a+1, \dots, b-1$ y arma una lista de tramos $(r_i, m_i)$:
+\begin{enumerate}
+  \item si $u \in \mathcal{F}$ (hay fijación, aunque $u$ sea sábado, domingo o feriado), se añade el tramo $(\ON{u}, 1)$: la fijación cargada se usa tal cual, como un día más;
+  \item si $u \notin \mathcal{F}$, $B_c(u) = 0$ y la lista no está vacía, se suma un día al último tramo: la fijación del último día hábil devenga también el fin de semana o el feriado;
+  \item en otro caso se añade el tramo $(\rho(u), 1)$, con $\rho(u)$ la última fijación publicada antes de $u$ o, si no hay ninguna, la tasa a un día de la curva. Si además $B_c(u) = 1$, el día se anota como fijación faltante y se emite el aviso \texttt{missing\_fixing}.
+\end{enumerate}
+La tasa de respaldo de la curva del índice (la del snapshot final) es
+\begin{equation}\label{eq:cap08-respaldo}
+  \rho_{\mathrm{curva}} = 360\left(\frac{1}{\DF{c}{1/365}} - 1\right),
+\end{equation}
+con $\DF{c}{1/365}$ el factor de descuento a $1/365$ de año (tiempo en días naturales entre 365). El factor acumulado es el producto de los tramos en interés simple sobre ACT/360:
+\begin{equation}\label{eq:cap08-factor}
+  G(a, b) = \prod_{i}\Bigl(1 + \frac{r_i\,m_i}{360}\Bigr),
+\end{equation}
+igual a $1$ si el rango es vacío. El producto lo calcula C++ (\codigo{include/qf/instruments/ois_swap.hpp}{compoundOvernight}, expuesto como \codigo{src/python_bindings/qfpy.cpp}{compound_overnight}). Un viernes con tasa $r$ aporta entonces $1 + 3r/360$, no $(1 + r/360)^3$.
+
+\paragraph{FIX USDMXN en día inhábil.} Los flujos en dólares se convierten a pesos con el FIX del día del flujo. Sea $x_u$ el FIX publicado el día $u \in \mathcal{F}_{\mathrm{FIX}}$ y $\ell(d) = \max\{u \in \mathcal{F}_{\mathrm{FIX}} : u < d\}$. \codigo{desk/api/settlement.py}{_fix} devuelve
+\begin{equation}\label{eq:cap08-fix}
+  \mathrm{FIX}(d) =
+  \begin{cases}
+    x_d & d \in \mathcal{F}_{\mathrm{FIX}},\\
+    x_{\ell(d)} & d \notin \mathcal{F}_{\mathrm{FIX}},\ B_{\mathrm{MX}}(d) = 0 \text{ y no hay un día hábil } u \text{ con } \ell(d) < u < d,\\
+    \Spot^{(d_1)} & \text{en otro caso, con el aviso } \texttt{fx\_fallback},
+  \end{cases}
+\end{equation}
+donde $\Spot^{(d_1)}$ es el spot del snapshot final. Es decir, en un fin de semana o feriado se usa el último FIX publicado sin aviso, siempre que entre ese FIX y $d$ no haya un día hábil sin FIX; un hueco real de datos no se tapa en silencio con un FIX viejo.
+
+\subsection{Flujos liquidados}\label{sec:cap08-liquidados}
+
+Un pago con fecha $D$ está liquidado en la ventana $(d_0, d_1]$ si y solo si
+\begin{equation}\label{eq:cap08-liquidado}
+  d_0 < D \le d_1 \quad\text{y}\quad s(D - 1\,\text{día}) = \texttt{viva}.
+\end{equation}
+Con ello el último cupón (que cae en el vencimiento, cuando el estado ya es \texttt{vencida}) y el cupón del día de una terminación cuentan, y un cupón posterior a una terminación no cuenta. Los montos que siguen los calcula \codigo{desk/api/settlement.py}{settled_flows}; todos llevan signo desde el punto de vista de la empresa (positivo si cobra).
+
+\paragraph{Swap OIS (\texttt{irs}).} Para cada pago $k$ que cumple~\eqref{eq:cap08-liquidado}, con $n_0 = 0$, $\tau_k = (n_k - n_{k-1})/360$ y $G_k = G(t_{\mathrm{ini}} + n_{k-1},\, D_k)$ la ecuación~\eqref{eq:cap08-factor} sobre todo el periodo, y con el nocional y la tasa fija \emph{vigentes en $D_k$} (no en el inicio del periodo):
+\begin{align}
+  \mathrm{fija}_k &= \Nom(D_k)\,\K(D_k)\,\tau_k, \qquad
+  \mathrm{var}_k = \Nom(D_k)\,(G_k - 1), \label{eq:cap08-cupon-patas}\\
+  C_k &=
+  \begin{cases}
+    \mathrm{var}_k - \mathrm{fija}_k & \text{si el swap es \emph{payer},}\\
+    \mathrm{fija}_k - \mathrm{var}_k & \text{si es \emph{receiver},}
+  \end{cases} \label{eq:cap08-cupon}\\
+  C_k^{\MXN} &=
+  \begin{cases}
+    C_k & \text{curva TIIE-F,}\\
+    C_k\,\mathrm{FIX}(D_k) & \text{curva SOFR,}
+  \end{cases} \label{eq:cap08-cupon-mxn}
+\end{align}
+con $\mathrm{FIX}(D_k)$ como en la ecuación~\eqref{eq:cap08-fix}. Las fijaciones que faltan en el periodo siguen la regla de la sección~\ref{sec:cap08-habiles}. Implementación: \codigo{desk/api/settlement.py}{_irs_coupons}.
+
+\paragraph{Forward de FX (\texttt{fx\_forward}).} Si $d_0 < T \le d_1$ y $s(T - 1\,\text{día}) = \texttt{viva}$, el forward liquida por diferencias en \MXN el día del vencimiento, con el nocional $N_{\mathrm{USD}}$ vigente ese día:
+\begin{equation}\label{eq:cap08-forward}
+  C^{\MXN} = \pm\,N_{\mathrm{USD}}\,\bigl(\mathrm{FIX}(T) - \K\bigr),
+\end{equation}
+con signo $+$ si la empresa compra dólares (\texttt{buy}) y $-$ si los vende. Implementación: \codigo{desk/api/settlement.py}{_forward_settlement}.
+
+\paragraph{Transferencias.} Todo evento \texttt{transfer} con fecha en $(d_0, d_1]$ aporta su \texttt{amount} tal cual, ya en \MXN; las confirmaciones de liquidación (capítulo~\ref{cap:operaciones}) se ignoran, porque son registro y no un flujo nuevo.
+
+\paragraph{Otros productos.} El bono liquida cupones y amortización (\codigo{desk/api/aging.py}{bond_settled}, capítulo~\ref{cap:bonos}); el \emph{cross currency swap}, los cupones de ambas patas y los intercambios de nocional (\codigo{desk/api/xccy.py}{settled}, capítulo~\ref{cap:xccy}). El \emph{cap/floor} y la \emph{swaption} no tienen liquidación derivada: si vencen vivos dentro de la ventana solo se emite el aviso \texttt{no\_settlement} (\codigo{desk/api/settlement.py}{_no_settlement}), y su pago conocido no entra al P\&L. Los avisos de todas las fuentes se agrupan en uno por pareja (\texttt{code}, \texttt{index}), con las fechas sin repetir y ordenadas (\codigo{desk/api/settlement.py}{merge_warnings}).
+
+\subsection{Valuación a la fecha}\label{sec:cap08-valuacion}
+
+\codigo{desk/api/valuation.py}{value_trade} valúa una operación en el \texttt{as\_of} del snapshot con su estado vigente. Fuera del swap OIS (capítulo~\ref{cap:swaps-ois}), lo que aquí importa es el contorno:
+\begin{equation}\label{eq:cap08-pv}
+  \PV_i(d) =
+  \begin{cases}
+    0 & s_i(d) \ne \texttt{viva},\\
+    \text{pv del producto en \MXN, con los términos vigentes en } d & s_i(d) = \texttt{viva}.
+  \end{cases}
+\end{equation}
+Las operaciones con curva SOFR se valúan en dólares y se convierten con el \emph{spot} del snapshot de la fecha $d$ (no con el FIX); \texttt{fx\_forward}, \texttt{fx\_option}, \texttt{equity\_option} y \texttt{xccy\_swap} ya salen en pesos. Una opción \texttt{vencida} sin ejercicio registrado vale cero y emite el aviso \texttt{expired\_unexercised}. El plazo restante de forwards, opciones de FX, opciones sobre acción y \emph{swaptions} se reescribe a los días que faltan hasta el vencimiento con \codigo{desk/api/valuation.py}{shortened}: \texttt{days} para forward y opción de FX, \texttt{maturity\_years} $= \text{días}/365$ para la opción sobre acción y \texttt{expiry\_years} $= \text{días}/365$ para la \emph{swaption}, cuyo vencimiento es la expiración. El colateral vigente de la contraparte en la fecha elige la curva de descuento (\codigo{desk/api/collateral.py}{currency_on}); si falta la curva con colateral el resultado lleva el aviso \texttt{no\_csa\_curve}. \codigo{desk/api/valuation.py}{is_live} dice si la operación está viva; una operación ilegible cuenta como viva para que quien recorre el portafolio la intente valuar y reporte su error en lugar de ocultarla.
+
+\subsection{P\&L entre dos snapshots}\label{sec:cap08-pnl}
+
+Para dos snapshots con $d_0 \le d_1$ y cada operación $i$,
+\begin{equation}\label{eq:cap08-pnl}
+  \PnL_i(d_0, d_1) = \PV_i(d_1) - \PV_i(d_0) + L_i(d_0, d_1],
+  \qquad
+  L_i(d_0, d_1] = \sum_{f} C_f^{\MXN},
+\end{equation}
+donde la suma recorre los flujos que cumplen~\eqref{eq:cap08-liquidado} y los $C_f^{\MXN}$ son los de la sección~\ref{sec:cap08-liquidados}. Todo está en \MXN: el valor presente de cada fecha se convierte con el \emph{spot} de su snapshot y cada flujo con el FIX de su fecha de pago, o con el \emph{spot} del snapshot final si falta (aviso \texttt{fx\_fallback}). El total del portafolio y los totales de \texttt{pv\_from}, \texttt{pv\_to} y \texttt{settled} suman solo las filas sin error:
+\begin{equation}\label{eq:cap08-pnl-total}
+  \PnL(d_0, d_1) = \sum_{i \in \mathcal{S}} \PnL_i(d_0, d_1), \qquad \mathcal{S} = \{\,i : \text{la fila de } i \text{ no tiene error}\,\}.
+\end{equation}
+Una fila lleva error, y no suma, si la valuación o los flujos lanzan una excepción o si alguna de las cuatro cifras no es finita (\codigo{desk/api/pnl.py}{_row}); un fallo de una operación no detiene a las demás. Si el \texttt{as\_of} de origen es posterior al de destino, \codigo{desk/api/pnl.py}{compute_pnl} responde 400.
+
+Una operación pactada dentro de la ventana está \texttt{no\_pactada} en $d_0$, así que $\PV_i(d_0) = 0$ y entra con todo su valor de $d_1$ al resultado: el código no modela prima ni pago inicial. La única excepción es el intercambio inicial de nocional del \emph{cross currency swap}, que se liquida cuando sale del PV (capítulo~\ref{cap:xccy}). La identidad~\eqref{eq:cap08-pnl} es un total, no una atribución: no separa el devengo del movimiento de mercado.
+
+\begin{diferencia}
+  Dos aspectos del tratamiento se apartan de la práctica habitual de mercado. Primero, las fechas de pago no se ajustan por días inhábiles: $D_k = t_{\mathrm{ini}} + n_k$ días naturales, mientras que una confirmación de un swap OIS suele fijar una convención de día hábil; el exportador de FpML lo declara con \texttt{businessDayConvention} igual a \texttt{NONE} (\codigo{desk/api/fpml.py}{_unadjusted}), y la Metodología lo lista como fuera de alcance. Segundo, el P\&L no incluye prima ni pago inicial (salvo el intercambio inicial del \emph{cross currency swap}), de modo que el resultado de una opción pactada dentro de la ventana es su valor final, sin descontar lo pagado por ella. La convención de días y el devengo ACT/360 siguen la práctica del mercado de swaps de tasa \citep{hull2018}.
+\end{diferencia}
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap08-implementacion}
+
+La \cref{tab:cap08-mapa} liga cada fórmula con la función que la calcula. Las rutas son relativas a la raíz del repositorio.
+
+\begin{table}[ht]
+  \centering\small
+  \caption{De la fórmula a la función.}\label{tab:cap08-mapa}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.70\textwidth}@{}}
+    \toprule
+    Fórmula & Función \\
+    \midrule
+    \eqref{eq:cap08-nocional}, \eqref{eq:cap08-estado} & \codigo{desk/api/lifecycle.py}{state}; carga de eventos: \codigo{desk/api/events.py}{load_events}, \codigo{desk/api/events.py}{load_all_events} \\
+    Registro de un evento & \codigo{desk/api/events.py}{post_event}, \codigo{desk/api/events.py}{insert_event} \\
+    \eqref{eq:cap08-habil} & \codigo{desk/api/calendars.py}{is_business_day}, \codigo{desk/api/calendars.py}{is_holiday} \\
+    \eqref{eq:cap08-respaldo}, \eqref{eq:cap08-factor} & \codigo{desk/api/valuation.py}{accrued_factor}, \codigo{src/python_bindings/qfpy.cpp}{compound_overnight} \\
+    \eqref{eq:cap08-fix} & \codigo{desk/api/settlement.py}{_fix} \\
+    \eqref{eq:cap08-liquidado}--\eqref{eq:cap08-cupon-mxn} & \codigo{desk/api/settlement.py}{_irs_coupons} \\
+    \eqref{eq:cap08-forward} & \codigo{desk/api/settlement.py}{_forward_settlement} \\
+    Despacho por producto & \codigo{desk/api/settlement.py}{settled_flows} \\
+    \eqref{eq:cap08-pv} & \codigo{desk/api/valuation.py}{value_trade}, \codigo{desk/api/valuation.py}{shortened} \\
+    \eqref{eq:cap08-pnl}, \eqref{eq:cap08-pnl-total} & \codigo{desk/api/pnl.py}{_row}, \codigo{desk/api/pnl.py}{compute_pnl} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\codigo{desk/api/settlement.py}{trade_flows} reutiliza \codigo{desk/api/settlement.py}{settled_flows} desde el día anterior al pacto hasta el \texttt{as\_of} para la ficha de la operación, y \codigo{desk/api/settlement.py}{projected_flows} añade los flujos futuros; el calendario del portafolio del capítulo~\ref{cap:operaciones} hace lo mismo para todas las operaciones.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap08-ejemplo}
+
+Todos los ejemplos usan el snapshot \texttt{MX-DEMO} ($d_0 = $ 2026-11-10, \MXN por \USD $=18.6$) y un snapshot rodado con \texttt{as\_of} $d_1 = $ 2026-12-11; los calcula \codigo{docs/tex/verificacion/cap08_ciclo_vida.py}{main} con el código del proyecto sobre una base temporal, y cada valor se reproduce con tolerancia absoluta de media unidad del último dígito impreso (el factor, $10^{-10}$; los montos, $0.005$~\MXN).
+
+\paragraph{Ejemplo 1: devengo con fin de semana y feriado.} Se piden las fijaciones de TIIE-F del lunes 9 al viernes 13 de noviembre de 2026 con los valores $7.00\,\%$, $7.02\,\%$, $7.04\,\%$, $7.06\,\%$ y $7.08\,\%$, y el rango $[2026\text{-}11\text{-}09,\ 2026\text{-}11\text{-}17)$. El viernes 13 devenga además el sábado 14, el domingo 15 y el lunes 16, que es feriado (Día de la Revolución): sus tramos son $(0.0700, 1)$, $(0.0702, 1)$, $(0.0704, 1)$, $(0.0706, 1)$ y $(0.0708, 4)$, y la ecuación~\eqref{eq:cap08-factor} da
+\[
+  G = \prod_i \Bigl(1 + \frac{r_i m_i}{360}\Bigr) = \verif{cap08-factor-semana}{1.0015686213},
+\]
+sin aviso de fijación faltante (\codigo{docs/tex/verificacion/cap08_ciclo_vida.py}{main}).
+
+\paragraph{Ejemplo 2: cupón liquidado de un swap.} Swap TIIE-F \emph{payer}, $\Nom = 100\,000\,000$ \MXN, $\K = 6.8\,\%$, inicio 2026-11-10 y dos periodos de $28$ días (vencimiento 2027-01-05). Se cargan fijaciones de $7\,\%$ en cada día hábil de México del primer periodo (el lunes 16 es feriado y no tiene fijación). Los $28$ días naturales del periodo se agrupan en $15$ tramos de un día, $3$ de tres días (viernes con sábado y domingo) y $1$ de cuatro (el viernes 13 con el feriado), de modo que
+\[
+  G_1 = \bigl(1 + \tfrac{0.07}{360}\bigr)^{15}\bigl(1 + \tfrac{3\cdot 0.07}{360}\bigr)^{3}\bigl(1 + \tfrac{4\cdot 0.07}{360}\bigr) = 1.0054581903.
+\]
+La pata fija es $\mathrm{fija}_1 = 100\,000\,000 \times 0.068 \times 28/360 = 528\,888.89$ y la variable $\mathrm{var}_1 = 100\,000\,000\,(G_1 - 1) = 545\,819.03$. El cupón del pago 1 (fecha $D_1 = $ 2026-12-08, que cae dentro de $(d_0, d_1]$) es, por la ecuación~\eqref{eq:cap08-cupon}, $C_1 = \mathrm{var}_1 - \mathrm{fija}_1 = \verif{cap08-cupon-irs}{16930.14}$~\MXN, único flujo de la ventana y sin avisos.
+
+\paragraph{Ejemplo 3: P\&L del swap.} Con la valuación del capítulo~\ref{cap:swaps-ois}, el mismo swap vale $\PV(d_0) = \verif{cap08-pv-irs-inicial}{23141.07}$~\MXN en $d_0$ y $\PV(d_1) = \verif{cap08-pv-irs-final}{14545.86}$~\MXN en $d_1$ (ya sin el primer cupón, con el segundo periodo en curso). La ecuación~\eqref{eq:cap08-pnl} da
+\[
+  \PnL = 14\,545.86 - 23\,141.07 + 16\,930.14 = \verif{cap08-pnl-irs}{8334.93}~\MXN.
+\]
+
+\paragraph{Ejemplo 4: terminación anticipada.} Un segundo swap con exactamente los mismos términos se termina el 2026-12-01 con un importe de $5\,000$~\MXN a favor de la empresa. El estado en $d_1$ es \texttt{terminada}, así que $\PV(d_1) = 0$. El cupón del 2026-12-08 ya no cuenta, porque el estado del día anterior (2026-12-07) es \texttt{terminada} y no cumple~\eqref{eq:cap08-liquidado}; solo entra el \texttt{transfer} de $5\,000$. Por tanto $\PnL = 0 - 23\,141.07 + 5\,000 = \verif{cap08-pnl-terminacion}{-18141.07}$~\MXN.
+
+\paragraph{Ejemplo 5: forward de FX que vence dentro de la ventana.} Compra de $10\,000\,000$ \USD a un precio pactado $\K = 18.70$, pacto el 2026-11-10 y vencimiento el 2026-12-10, con FIX de ese día de $18.95$. Su valor en $d_0$ (capítulo~\ref{cap:fx}) es $\PV(d_0) = \verif{cap08-pv-fwd}{-513538.46}$~\MXN. En $d_1$ la operación ya es \texttt{vencida}, así que $\PV(d_1) = 0$. Por la ecuación~\eqref{eq:cap08-forward}, lo liquidado es $10\,000\,000\,(18.95 - 18.70) = \verif{cap08-liquidado-fwd}{2500000.00}$~\MXN y
+\[
+  \PnL = 0 - (-513\,538.46) + 2\,500\,000.00 = \verif{cap08-pnl-fwd}{3013538.46}~\MXN.
+\]
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap08-validacion}
+
+Este capítulo no tiene caso contra QuantLib: el envejecimiento de operaciones y las fijaciones quedan fuera de la validación del capítulo~\ref{cap:validacion} (lo declara \codigo{desk/validation/README.md}{No valida}). Lo cubren las pruebas del backend:
+\begin{itemize}
+  \item {\sloppy Estado y términos vigentes: \codigo{desk/api/tests/test_lifecycle.py}{test_events_in_any_order_give_the_same_state}, \codigo{desk/api/tests/test_lifecycle.py}{test_same_date_events_the_highest_id_wins}, \codigo{desk/api/tests/test_lifecycle.py}{test_termination_wins_over_exercise_when_both_are_in_force}, \codigo{desk/api/tests/test_lifecycle.py}{test_quantity_change_applies_only_from_its_date}.\par}
+  \item {\sloppy Registro de eventos: \codigo{desk/api/tests/test_events_api.py}{test_termination_inserts_event_and_chained_transfer}, \codigo{desk/api/tests/test_events_api.py}{test_event_dated_before_the_last_stored_event_is_409_on_event_date}, \codigo{desk/api/tests/test_events_api.py}{test_event_on_or_after_maturity_is_409_vencida}.\par}
+  \item {\sloppy Fines de semana y feriados: \codigo{desk/api/tests/test_flows.py}{test_settled_coupon_with_business_day_fixings_only_has_no_warning_and_weekends_accrue_with_friday}, \codigo{desk/api/tests/test_calendars.py}{test_r8_the_holiday_accrues_with_the_previous_business_day_rate}, \codigo{desk/api/tests/test_calendars.py}{test_a_forward_settled_on_a_weekend_uses_the_friday_fix_without_warning}, \codigo{desk/api/tests/test_calendars.py}{test_easter_algorithm_on_known_years}.\par}
+  \item {\sloppy Flujos liquidados: \codigo{desk/api/tests/test_flows.py}{test_last_coupon_at_maturity_is_settled_and_nothing_is_projected}, \codigo{desk/api/tests/test_flows.py}{test_termination_before_a_coupon_date_cancels_that_coupon}, \codigo{desk/api/tests/test_flows.py}{test_quantity_change_mid_period_applies_the_new_notional_to_the_whole_coupon}.\par}
+  \item {\sloppy Identidad del P\&L: \codigo{desk/api/tests/test_pnl.py}{test_r4_identity_holds_for_every_seed_trade_over_35_days}, \codigo{desk/api/tests/test_pnl.py}{test_r4_par_swap_with_forward_fixings_and_shifted_curve_has_zero_pnl}, \codigo{desk/api/tests/test_pnl.py}{test_r8_forward_settles_with_the_fix_of_its_maturity}, \codigo{desk/api/tests/test_pnl.py}{test_trade_agreed_inside_the_window_enters_with_zero_pv_from}, \codigo{desk/api/tests/test_pnl.py}{test_row_with_an_error_has_null_figures_and_is_left_out_of_the_totals}.\par}
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap08-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \textbf{Fechas de pago sin ajuste por inhábiles}, y calendarios solo de 2020 a 2040: los calendarios rigen únicamente las fijaciones y el FIX, no los pagos. Tampoco hay ejercicio automático, novaciones, asignaciones ni compensación.
+    \item \textbf{Cap/floor y swaption sin liquidación derivada}: su pago conocido al vencer no entra al P\&L y solo emite el aviso \texttt{no\_settlement}. Las opciones vencidas sin ejercicio registrado valen cero, con aviso. El importe de una terminación o de un ejercicio lo captura el usuario; el código no lo calcula del \emph{payoff}.
+    \item \textbf{Bono y cap/floor envejecidos} son una aproximación declarada (capítulos~\ref{cap:bonos} y~\ref{cap:hull-white}); el cap/floor ya fijado no entra en el valor ni se liquida.
+    \item \textbf{Cambio de nocional a mitad de periodo}: el cupón completo se calcula con el nocional vigente en la fecha de pago, no con el prorrateo de ambos nocionales.
+    \item \textbf{Fijación faltante}: un día hábil sin fijación usa la última publicada antes o la tasa a un día de la curva del snapshot final, con aviso; un FIX faltante se sustituye por el \emph{spot} del snapshot final, también con aviso. Los resultados dependen de las fijaciones cargadas (capítulo~\ref{cap:datos}).
+    \item \textbf{El P\&L es un total}: no atribuye devengo ni mercado, no modela prima ni pago inicial (salvo el intercambio inicial del \emph{cross currency swap}) y convierte el PV con el \emph{spot} de cada snapshot y los flujos con el FIX de su fecha.
+    \item \textbf{Convención de días}: tiempos en días naturales entre 365 y devengo ACT/360; las operaciones solo envejecen día a día con snapshots, sin historia automática de snapshots diarios.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap08-referencias}
+
+Las convenciones de conteo de días siguen la práctica del mercado de swaps descrita en \citet{hull2018}. La publicación de las tasas a un día solo en días hábiles se apoya en la documentación de la TIIE de Fondeo \citep{banxico2021} y de SOFR \citep{nyfed2026}; el calendario de EE.~UU. sigue la recomendación de SIFMA \citep{sifma2026}. Del modelo de eventos del \emph{Common Domain Model} \citep{cdm2026} se toma la idea de describir la vida de una operación como eventos que llevan un estado anterior a uno posterior; el diseño del desk no copia el modelo completo.
