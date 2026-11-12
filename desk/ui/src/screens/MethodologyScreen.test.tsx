@@ -323,6 +323,10 @@ describe('MethodologyScreen', () => {
       expect(xvaRow('Modelo y medida')).toContain('riesgo neutral MXN');
       expect(xvaRow('Modelo y medida')).toContain('quanto');
       expect(xvaRow('Modelo y medida')).toContain('semilla fijas');
+      // H22: solo el IRS TIIE-F cambia de curva con el colateral
+      expect(xvaRow('Modelo y medida')).toContain('Solo el IRS TIIE-F cambia de curva con el colateral');
+      expect(xvaRow('Modelo y medida')).toContain('el IRS SOFR descuenta siempre con SOFR');
+      expect(xvaRow('Modelo y medida')).not.toContain('Cada operación se descuenta con la curva de su contraparte');
     });
 
     it('distingue parámetros de datos de los supuestos', () => {

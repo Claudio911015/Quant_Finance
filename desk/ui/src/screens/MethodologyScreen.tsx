@@ -418,7 +418,7 @@ const XVA_SECTIONS: Section[] = [
     items: [
       {
         label: 'Modelo y medida',
-        text: 'Hull-White de un factor por moneda sobre TIIE-F y SOFR, en forma de Cheyette: r = f(0,t) + x. USDMXN lognormal. Medida riesgo neutral MXN: la tasa USD lleva la deriva quanto −ρ·σ_USD·σ_X, y el tipo de cambio deriva con TIIE-F más la base MXN-USD menos SOFR, así que su forward es el de mercado con colateral USD. La base MXN-USD es determinista. Cada operación se descuenta con la curva de su contraparte. Malla diaria, trayectorias y semilla fijas.',
+        text: 'Hull-White de un factor por moneda sobre TIIE-F y SOFR, en forma de Cheyette: r = f(0,t) + x. USDMXN lognormal. Medida riesgo neutral MXN: la tasa USD lleva la deriva quanto −ρ·σ_USD·σ_X, y el tipo de cambio deriva con TIIE-F más la base MXN-USD menos SOFR, así que su forward es el de mercado con colateral USD. La base MXN-USD es determinista. Solo el IRS TIIE-F cambia de curva con el colateral de la contraparte (con colateral USD y la curva MXN-USD en el snapshot se descuenta con ella); el IRS SOFR descuenta siempre con SOFR, y el cross currency swap descuenta su pata MXN con MXN-USD (TIIE-F si el snapshot no la trae) y su pata USD con SOFR, cualquiera que sea el colateral. Malla diaria, trayectorias y semilla fijas.',
       },
       {
         label: 'Parámetros del XVA',
