@@ -5,8 +5,11 @@ importable, so the `pytests` target stays green without a build.
 """
 import glob
 import importlib
+import math
 import os
 import sys
+import threading
+import time
 import unittest
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -203,6 +206,57 @@ class ExposureEngineBindings(unittest.TestCase):
             qfxva.compute_xva(prof, credit, 1.5, credit, 0.6, 0.005)
         with self.assertRaises(ValueError):
             qfxva.compute_xva(prof, credit, 0.6, credit, 0.6, -0.001)
+
+    def test_simulate_releases_the_gil(self):
+        """A server thread that simulates must not freeze the other threads of the process.
+
+        A ticker thread sleeps 1 ms in a loop while the main thread runs a long simulate: with the
+        GIL held it does not tick during the call, with it released it ticks hundreds of times.
+        Measured as the longest gap between ticks, which has to be far below the call's duration.
+        (compute_xva also releases it, but one call takes about a millisecond, so no timing can tell.)
+        """
+        engine = _engine(n_paths=4000, report_days=list(range(0, 1100, 30)))
+        stop = threading.Event()
+        gaps = []
+
+        def ticker():
+            last = time.perf_counter()
+            while not stop.is_set():
+                time.sleep(0.001)
+                now = time.perf_counter()
+                gaps.append(now - last)
+                last = now
+
+        def timed(fn):
+            gaps.clear()
+            start = time.perf_counter()
+            result = fn()
+            return result, time.perf_counter() - start, max(gaps) if gaps else float("inf")
+
+        thread = threading.Thread(target=ticker)
+        thread.start()
+        try:
+            time.sleep(0.05)
+            _, took, worst = timed(lambda: engine.simulate([self.set_a, self.set_b]))
+            self.assertGreater(took, 0.3, "the simulation is too short to tell whether it blocks")
+            self.assertLess(worst, took / 4, "simulate held the GIL: other threads were frozen")
+        finally:
+            stop.set()
+            thread.join()
+
+    def test_compute_xva_accepts_a_curve_written_in_python_with_the_gil_released(self):
+        """The Python override of survival_probability takes the GIL back by itself; it must not hang."""
+        class PyFlat(qfxva.ICreditCurve):
+            def survivalProbability(self, t):      # the trampoline looks up the C++ name, not the bound one
+                return 0.98 ** t
+
+        prof = _engine(n_paths=100).simulate([self.set_a])[0]
+        py_curve = PyFlat()
+        from_python = qfxva.compute_xva(prof, py_curve, 0.6, py_curve, 0.6, 0.005)
+        flat = qfxva.FlatHazardRate(-math.log(0.98))
+        from_native = qfxva.compute_xva(prof, flat, 0.6, flat, 0.6, 0.005)
+        self.assertAlmostEqual(from_python.cva, from_native.cva, delta=1e-9 * max(1.0, abs(from_native.cva)))
+        self.assertAlmostEqual(from_python.dva, from_native.dva, delta=1e-9 * max(1.0, abs(from_native.dva)))
 
 
 if __name__ == "__main__":

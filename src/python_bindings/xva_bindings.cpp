@@ -182,7 +182,9 @@ PYBIND11_MODULE(qfxva, m) {
     py::class_<ExposureEngine>(m, "ExposureEngine")
         .def(py::init<ExposureMarket, ExposureModel, SimConfig>(),
              py::arg("market"), py::arg("model"), py::arg("config"))
-        .def("simulate", &ExposureEngine::simulate, py::arg("sets"),
+        // Seconds of pure C++: release the GIL so a threaded server keeps answering other requests.
+        // The arguments are converted to C++ values before the guard, and the result is cast after it.
+        .def("simulate", &ExposureEngine::simulate, py::arg("sets"), py::call_guard<py::gil_scoped_release>(),
              "Simulate every netting set on the same paths. Returns one ExposureProfile per set (MXN).")
         .def("trade_values_at_zero", &ExposureEngine::tradeValuesAtZero, py::arg("netting_set"),
              "Value in MXN at t = 0 of each trade (swaps first, then cross currency swaps).");
@@ -195,9 +197,11 @@ PYBIND11_MODULE(qfxva, m) {
         .def_readonly("fva",        &XvaResult::fva)
         .def_readonly("total",      &XvaResult::total);
 
+    // A curve written in Python reacquires the GIL by itself inside its override (PYBIND11_OVERRIDE).
     m.def("compute_xva", &computeXva,
           py::arg("profile"), py::arg("counterparty"), py::arg("counterparty_lgd"),
           py::arg("own"), py::arg("own_lgd"), py::arg("funding_spread"),
+          py::call_guard<py::gil_scoped_release>(),
           "CVA, DVA and FVA of a netting set from its discounted exposure, with the Monte Carlo standard "
           "errors of CVA and DVA. total = cva - dva + fva. ValueError on invalid LGD, spread or profile.");
 
