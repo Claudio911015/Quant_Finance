@@ -136,12 +136,16 @@ public:
     /// @param own              Curva propia (mismos tipos admitidos).
     /// @param ownLgd           LGD propia.
     /// @param fundingSpread    Diferencial de fondeo, decimal.
+    /// @param maxThreads       Tope de hilos (una cinta por hilo), >= 1; por omisión 2: con más hilos la AAD no
+    ///                         acelera (la cinta, ~43 MB por trayectoria, agota el ancho de banda de memoria) y la
+    ///                         memoria se multiplica. El resultado no depende del número de hilos salvo redondeo.
     /// @return                 Valores y derivadas.
-    /// @throws std::invalid_argument  curvas de tasa no Linear, curva de crédito de otro tipo, o lo que lance computeXva.
+    /// @throws std::invalid_argument  curvas de tasa no Linear, curva de crédito de otro tipo, `maxThreads` = 0, o lo
+    ///                                que lance computeXva.
     /// @throws std::logic_error       si se compiló con QF_WITH_XAD=OFF.
     XvaSensitivities xvaSensitivities(const NettingSetSpec& set, const ICreditCurve& counterparty,
                                       double counterpartyLgd, const ICreditCurve& own, double ownLgd,
-                                      double fundingSpread) const;
+                                      double fundingSpread, unsigned maxThreads = 2) const;
 
 private:
     ExposureMarket market_;

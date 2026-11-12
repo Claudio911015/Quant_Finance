@@ -197,10 +197,11 @@ PYBIND11_MODULE(qfxva, m) {
              "Value in MXN at t = 0 of each trade (swaps first, then cross currency swaps).")
         .def("xva_sensitivities", &ExposureEngine::xvaSensitivities,
              py::arg("netting_set"), py::arg("counterparty"), py::arg("counterparty_lgd"),
-             py::arg("own"), py::arg("own_lgd"), py::arg("funding_spread"),
+             py::arg("own"), py::arg("own_lgd"), py::arg("funding_spread"), py::arg("max_threads") = 2,
              py::call_guard<py::gil_scoped_release>(),
              "CVA, DVA and FVA of a netting set and their derivatives with respect to every input, by "
-             "adjoint differentiation (XAD). Raises RuntimeError when qf was built with QF_WITH_XAD=OFF.");
+             "adjoint differentiation (XAD), on at most max_threads threads (more do not speed it up). "
+             "Raises RuntimeError when qf was built with QF_WITH_XAD=OFF.");
 
     py::class_<XvaResult>(m, "XvaResult")
         .def_readonly("cva",        &XvaResult::cva)

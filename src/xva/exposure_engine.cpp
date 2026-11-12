@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <random>
@@ -39,6 +40,10 @@ std::array<std::array<double, 5>, 5> stepCovariance(const ExposureModel& model, 
 /// Peak bytes held by one AAD tape during the last xvaSensitivities() call (0 without XAD). Diagnostic for the
 /// timing test: it must not grow with the number of paths.
 std::size_t aadTapeBytes();
+
+/// Number of tapes (worker threads) of the last xvaSensitivities() call (0 without XAD). Diagnostic for the
+/// test of the `maxThreads` cap.
+std::size_t aadThreads();
 
 } // namespace detail
 
@@ -792,11 +797,13 @@ double paidFlowsDeflated(const CompiledSet& set, int d, const PathData<double>& 
 
 // Runs body(first, last) over [0, nPaths) cut into one contiguous chunk per hardware thread. A path draws its
 // normals from its own generator and writes only its own rows, so the result does not depend on the number of
-// threads. The first exception a worker throws is rethrown here once every worker has finished.
+// threads. At most `maxThreads` workers run (all the hardware threads by default). The first exception a worker
+// throws is rethrown here once every worker has finished.
 template <class Body>
-void forEachPathChunk(std::size_t nPaths, Body body)
+void forEachPathChunk(std::size_t nPaths, Body body, unsigned maxThreads = std::numeric_limits<unsigned>::max())
 {
-    const std::size_t threads = std::min<std::size_t>(std::max(1u, std::thread::hardware_concurrency()), nPaths);
+    const std::size_t threads = std::min<std::size_t>(
+        {std::max(1u, std::thread::hardware_concurrency()), std::max(1u, maxThreads), nPaths});
     if (threads <= 1) {
         body(std::size_t{0}, nPaths);
         return;
@@ -1090,6 +1097,7 @@ using AD = xad::AReal<double, 4>;      // three adjoints (CVA, DVA, FVA); XAD ha
 using ADTape = xad::Tape<double, 4>;
 
 std::atomic<std::size_t> gTapeBytes{0};
+std::atomic<std::size_t> gTapeThreads{0};
 
 // A credit curve as piecewise-constant hazards: the only two curve types the AAD understands.
 struct Hazards {
@@ -1118,8 +1126,9 @@ void requireLinear(const termstructure::YieldCurve& curve, const char* name)
 
 XvaSensitivities ExposureEngine::xvaSensitivities(const NettingSetSpec& set, const ICreditCurve& counterparty,
                                                   double counterpartyLgd, const ICreditCurve& own, double ownLgd,
-                                                  double fundingSpread) const
+                                                  double fundingSpread, unsigned maxThreads) const
 {
+    if (maxThreads == 0) throw std::invalid_argument("ExposureEngine::xvaSensitivities: maxThreads must be >= 1");
     validateLgd(counterpartyLgd, "counterparty");
     validateLgd(ownLgd, "own");
     if (!std::isfinite(fundingSpread) || fundingSpread < 0.0)
@@ -1249,7 +1258,7 @@ XvaSensitivities ExposureEngine::xvaSensitivities(const NettingSetSpec& set, con
         }
         const std::lock_guard<std::mutex> lock(partialsMutex);
         partials[first] = std::move(out);
-    });
+    }, maxThreads);
 
     std::array<std::vector<double>, 3> d;
     for (auto& v : d) v.assign(nIn, 0.0);
@@ -1260,6 +1269,7 @@ XvaSensitivities ExposureEngine::xvaSensitivities(const NettingSetSpec& set, con
         tapeBytes = std::max(tapeBytes, entry.second.tapeBytes);
     }
     gTapeBytes = tapeBytes;
+    gTapeThreads = partials.size();
 
     XvaSensitivities out{};
     const double n = static_cast<double>(nPaths);
@@ -1296,18 +1306,20 @@ XvaSensitivities ExposureEngine::xvaSensitivities(const NettingSetSpec& set, con
 
 namespace detail {
 std::size_t aadTapeBytes() { return gTapeBytes; }
+std::size_t aadThreads() { return gTapeThreads; }
 } // namespace detail
 
 #else
 
 XvaSensitivities ExposureEngine::xvaSensitivities(const NettingSetSpec&, const ICreditCurve&, double,
-                                                  const ICreditCurve&, double, double) const
+                                                  const ICreditCurve&, double, double, unsigned) const
 {
     throw std::logic_error("ExposureEngine::xvaSensitivities: qf se compiló sin XAD (QF_WITH_XAD=OFF)");
 }
 
 namespace detail {
 std::size_t aadTapeBytes() { return 0; }
+std::size_t aadThreads() { return 0; }
 } // namespace detail
 
 #endif

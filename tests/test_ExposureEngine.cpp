@@ -22,6 +22,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#ifdef __linux__
+#include <sched.h>
+#endif
 
 #include <array>
 
@@ -46,6 +49,7 @@ struct OuMoments {
 OuMoments ouMoments(double a, double sigma, double mu, double t);
 std::array<std::array<double, 5>, 5> stepCovariance(const ExposureModel& model, double dt);
 std::size_t aadTapeBytes();
+std::size_t aadThreads();
 } // namespace qf::xva::detail
 
 namespace {
@@ -1388,10 +1392,67 @@ TEST(ExposureEngine, AadRejectsNonLinearCurves) {
     EXPECT_NO_THROW(ExposureEngine(makeMarket(), demoModel(), cfg).xvaSensitivities(set, hazard, 0.6, hazard, 0.6, 0.005));
 }
 
+TEST(ExposureEngine, AadMaxThreadsCapsTheWorkersAndKeepsTheResult) {
+    // One tape per worker thread. The cap bounds the tapes (memory); the paths are summed in order of their chunk, so
+    // only the rounding of the sum depends on it.
+    const NettingSetSpec set = setOf({s0(), s1()}, {x0()});
+    const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(200, schedule(0, 30, 20)));
+    const PiecewiseHazardCurve cp({1.0, 5.0}, {0.010, 0.020}), own({1.0, 5.0}, {0.004, 0.006});
+    const unsigned hardware = std::max(1u, std::thread::hardware_concurrency());
+    const auto run = [&](unsigned maxThreads, unsigned expectedThreads) {
+        const XvaSensitivities r = engine.xvaSensitivities(set, cp, 0.6, own, 0.5, 0.005, maxThreads);
+        EXPECT_EQ(qf::xva::detail::aadThreads(), expectedThreads) << "maxThreads " << maxThreads;
+        return r;
+    };
+    const XvaSensitivities one = run(1, 1);
+    const XvaSensitivities two = run(2, std::min(2u, hardware));
+    const XvaSensitivities many = run(64, std::min(64u, hardware));
+    const XvaSensitivities byDefault = engine.xvaSensitivities(set, cp, 0.6, own, 0.5, 0.005);
+    EXPECT_EQ(qf::xva::detail::aadThreads(), std::min(2u, hardware));   // the default is two
+    const auto flat = [](const XvaSensitivities& r) {
+        std::vector<double> v = {r.value.cva, r.value.dva, r.value.fva};
+        for (const XvaGreeks* g : {&r.cva, &r.dva, &r.fva})
+            for (const auto* part : {&g->tiie, &g->sofr, &g->mxnUsd, &g->counterpartyHazard, &g->ownHazard})
+                v.insert(v.end(), part->begin(), part->end());
+        return v;
+    };
+    const std::vector<double> ref = flat(one);
+    for (const XvaSensitivities* other : {&two, &many, &byDefault}) {
+        const std::vector<double> got = flat(*other);
+        ASSERT_EQ(got.size(), ref.size());
+        for (std::size_t i = 0; i < ref.size(); ++i)
+            EXPECT_LE(std::abs(got[i] - ref[i]), 1e-9 * std::abs(ref[i]) + 1e-9) << "entry " << i;
+    }
+    EXPECT_THROW(engine.xvaSensitivities(set, cp, 0.6, own, 0.5, 0.005, 0), std::invalid_argument);
+}
+
+// Pins the calling thread, and so the threads it starts afterwards, to the CPU it runs on for as long as it lives
+// (Linux; `pinned` stays false elsewhere).
+struct OneCpu {
+    bool pinned = false;
+#ifdef __linux__
+    cpu_set_t saved{};
+    OneCpu() {
+        cpu_set_t one;
+        CPU_ZERO(&one);
+        CPU_SET(sched_getcpu(), &one);
+        pinned = sched_getaffinity(0, sizeof saved, &saved) == 0 && sched_setaffinity(0, sizeof one, &one) == 0;
+    }
+    ~OneCpu() {
+        if (pinned) sched_setaffinity(0, sizeof saved, &saved);
+    }
+#endif
+};
+
 // R5, run by hand: ctest skips it. Combined set of 3 trades (TIIE-F 10 y payer with CSA, SOFR 5 y receiver, 5 y
 // cross currency swap with CSA), 2000 paths, integration grid of the desk (monthly U every 3 days U every payment
-// and its eve). Prints ratio = t(xvaSensitivities) / t(simulate + computeXva), both with the threads of
-// forEachPathChunk, and the peak bytes of a tape (they must not depend on the number of paths).
+// and its eve). R5 (decision of Fable after measuring): ratio = t(xvaSensitivities with maxThreads = 1) /
+// t(simulate + computeXva) with ONE core for both must be <= 10. simulate has no thread cap and
+// hardware_concurrency ignores the affinity mask, so the double side still starts every thread but they share the
+// one CPU the process is pinned to (OneCpu, Linux), which costs what one thread costs. (The process CPU time over
+// all the threads is not a substitute: 8 threads on 4 hyperthreaded cores add up 2.4 times the work of one.)
+// Also printed, unpinned: the wall times of the double on every thread and of the AAD with its default two
+// threads, which is what the API pays, and the peak bytes of a tape (they must not depend on the number of paths).
 TEST(ExposureEngine, DISABLED_AadTiming) {
     const NettingSetSpec set =
         setOf({mxnSwap(true, 0.0710, 0, schedule(28, 28, 130), 1.0, true, 300e6),
@@ -1418,15 +1479,21 @@ TEST(ExposureEngine, DISABLED_AadTiming) {
     std::size_t bytes500 = 0, bytes2000 = 0;
     for (std::size_t nPaths : {std::size_t{500}, std::size_t{2000}}) {
         const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(nPaths, grid));
+        const auto valuation = [&] { computeXva(engine.simulate({set})[0], cp, 0.6, own, 0.5, 0.005); };
+        const double wallDouble = seconds(valuation);
+        const double wallAad = seconds([&] { engine.xvaSensitivities(set, cp, 0.6, own, 0.5, 0.005); });
+        const std::size_t aadThreads = qf::xva::detail::aadThreads();
+        const OneCpu oneCpu;
+        if (!oneCpu.pinned) GTEST_SKIP() << "the one-thread measurement needs sched_setaffinity (Linux)";
         double base = 1e300;
-        for (int rep = 0; rep < 2; ++rep)
-            base = std::min(base, seconds([&] { computeXva(engine.simulate({set})[0], cp, 0.6, own, 0.5, 0.005); }));
-        const double aad = seconds([&] { engine.xvaSensitivities(set, cp, 0.6, own, 0.5, 0.005); });
+        for (int rep = 0; rep < 2; ++rep) base = std::min(base, seconds(valuation));
+        const double aad = seconds([&] { engine.xvaSensitivities(set, cp, 0.6, own, 0.5, 0.005, 1); });
         (nPaths == 500 ? bytes500 : bytes2000) = qf::xva::detail::aadTapeBytes();
         ratio = aad / base;
-        std::printf("paths %zu dates %zu threads %u: double %.3f s, AAD %.3f s, ratio = %.2f, tape bytes per thread = %zu\n",
-                    nPaths, grid.size(), std::thread::hardware_concurrency(), base, aad, ratio,
-                    qf::xva::detail::aadTapeBytes());
+        std::printf("paths %zu dates %zu: ONE core: double %.3f s, AAD %.3f s, ratio = %.2f; all cores: double %.3f s "
+                    "on %u threads, AAD %.3f s on %zu threads (default); tape bytes per thread = %zu\n",
+                    nPaths, grid.size(), base, aad, ratio, wallDouble, std::thread::hardware_concurrency(), wallAad,
+                    aadThreads, qf::xva::detail::aadTapeBytes());
     }
     EXPECT_EQ(bytes500, bytes2000);
     EXPECT_LE(ratio, 10.0);

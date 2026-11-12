@@ -289,6 +289,20 @@ class ExposureEngineBindings(unittest.TestCase):
         self.assertEqual(len(sens.cva.mxn_usd), 0)
         self.assertEqual(len(sens.cva.tiie), 8)
 
+    @unittest.skipUnless(_HAVE_BUILD and getattr(qfxva, "HAS_XAD", False), "qf was built without XAD")
+    def test_xva_sensitivities_max_threads(self):
+        """One tape per thread; the cap changes the memory, not the numbers (up to the rounding of the sum)."""
+        engine = _engine(n_paths=100)
+        credit = qfxva.PiecewiseHazardCurve([1.0, 3.0, 6.0], [0.010, 0.020, 0.035])
+        args = (self.set_a, credit, 0.6, credit, 0.55, 0.005)
+        default = engine.xva_sensitivities(*args)           # two threads
+        one = engine.xva_sensitivities(*args, max_threads=1)
+        self.assertAlmostEqual(one.value.cva, default.value.cva, delta=1e-9 * abs(default.value.cva))
+        for a, b in zip(one.cva.tiie, default.cva.tiie):
+            self.assertAlmostEqual(a, b, delta=1e-9 * abs(b) + 1e-9)
+        with self.assertRaises(ValueError):
+            engine.xva_sensitivities(*args, max_threads=0)
+
 
 if __name__ == "__main__":
     unittest.main()
