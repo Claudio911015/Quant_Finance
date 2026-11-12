@@ -108,7 +108,10 @@ def _analytic(p, proc):
                                    ql.EuropeanExercise(today + p["days"]))
         e = ql.AnalyticDoubleBarrierBinaryEngine(proc)
     o.setPricingEngine(e)
-    return o.NPV()
+    try:
+        return o.NPV()
+    except RuntimeError:  # la serie del double no touch no converge con corredores muy anchos
+        raise ApiError(400, "La fórmula cerrada no converge con este corredor; use Monte Carlo", _sides(p)[0][0])
 
 
 def _value(p, mkt, spot, dvol, n):
@@ -126,7 +129,10 @@ def _value(p, mkt, spot, dvol, n):
 def _result(p, mkt):
     spot = mkt.spot
     pv, se, u = _value(p, mkt, spot, 0.0, PATHS)
-    ref = _value(dict(p, model="flat", method="analytic"), mkt, spot, 0.0, 0)[0]
+    try:
+        ref = _value(dict(p, model="flat", method="analytic"), mkt, spot, 0.0, 0)[0]
+    except ApiError:  # sin referencia; con method=analytic ya falló arriba
+        ref = None
     delta = (_value(p, mkt, spot * (1 + SPOT_BUMP), 0.0, PATHS)[0] - pv) / (SPOT_BUMP * spot)
     vega = _value(p, mkt, spot, VOL_BUMP, PATHS)[0] - pv
     return {
@@ -135,7 +141,7 @@ def _result(p, mkt):
         "details": {
             "price_pct": 100 * abs(pv) / p["payout_mxn"], "no_touch_probability": u, "std_error": se,
             "paths": 0 if p["method"] == "analytic" else PATHS, "model": p["model"], "method": p["method"],
-            "analytic_flat_pv": ref, "smile_adjustment": pv - ref if p["model"] == "smile" else 0.0,
+            "analytic_flat_pv": ref, "smile_adjustment": None if ref is None else (pv - ref if p["model"] == "smile" else 0.0),
         },
     }
 

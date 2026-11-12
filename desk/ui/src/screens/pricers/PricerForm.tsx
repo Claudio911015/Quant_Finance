@@ -350,7 +350,7 @@ function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
               {detailRows.map(([key, meta]) => (
                 <tr key={key}>
                   <th scope="row">{meta.label}</th>
-                  <td className="num">{meta.fmt(details[key])}</td>
+                  <td className="num">{details[key] === null ? '—' : meta.fmt(details[key])}</td>
                 </tr>
               ))}
             </tbody>

@@ -690,6 +690,23 @@ describe('exóticos de FX', () => {
     expect(within(block).getByText('Analítico')).toBeTruthy();
   });
 
+  it('sin referencia analítica (la serie no converge con corredores muy anchos) muestra «—» en vez de cero', async () => {
+    mockApi({
+      'POST /price/fx_double_no_touch': json(
+        exotic('fx_double_no_touch', [0.01, 1000000], { analytic_flat_pv: null, smile_adjustment: null }),
+      ),
+    });
+    renderForm('fx_double_no_touch');
+
+    valuate();
+
+    const block = (await screen.findByText('Detalle del cálculo')).closest('section') as HTMLElement;
+    const row = (label: string) => (within(block).getByText(label).closest('tr') as HTMLElement).textContent;
+    expect(row('Referencia analítica (plano)')).toBe('Referencia analítica (plano)—');
+    expect(row('Ajuste por sonrisa')).toBe('Ajuste por sonrisa—');
+    expect(row('Trayectorias')).toContain('20,000');
+  });
+
   it.each(['fx_no_touch', 'fx_double_no_touch'] as const)('%s no ofrece agregar al portafolio', (product) => {
     renderForm(product);
     expect(screen.queryByRole('button', { name: 'Agregar al portafolio' })).toBeNull();

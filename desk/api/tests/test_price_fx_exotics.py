@@ -258,7 +258,7 @@ def test_farther_barrier_never_lowers_value(ctx, model):
 @pytest.mark.parametrize("model", ["flat", "smile"])
 def test_far_barrier_tends_to_discounted_payout(ctx, model):
     for name, kw in ((NT, dict(barrier=1e6, barrier_type="up")), (NT, dict(barrier=0.01, barrier_type="down")),
-                     (DNT, dict(lower=5.0, upper=80.0))):  # más ancho no: la serie analítica de QuantLib no converge
+                     (DNT, dict(lower=0.01, upper=1e6))):
         r = _res(name, dict(BASE, model=model, **kw), ctx)
         assert abs(r["details"]["no_touch_probability"] - 1) <= 1e-6
         assert r["details"]["std_error"] <= 1e-6 * 1_000_000
@@ -274,10 +274,20 @@ def test_longest_valid_maturity_is_priced(client, name, params):
     assert 0 <= resp.get_json()["pv"] < params["payout_mxn"]
 
 
-def test_extreme_corridor_is_a_clean_400(client):
-    """La referencia analítica de QuantLib (corredor 0.01-1e6) no converge: 400 con mensaje, no 500."""
-    resp = _post(client, DNT, _dnt(91, 0.01, 1e6))
-    assert resp.status_code == 400 and "No se pudo valuar" in resp.get_json()["error"]
+@pytest.mark.parametrize("model", ["flat", "smile"])
+def test_corridor_where_the_analytic_series_fails_is_still_priced_by_mc(client, model):
+    """La serie analítica de QuantLib no converge con corredores muy anchos: el Monte Carlo sale normal, sin referencia."""
+    resp = _post(client, DNT, _dnt(91, 0.01, 1e6, model=model))
+    assert resp.status_code == 200, resp.get_json()
+    d = resp.get_json()["details"]
+    assert d["analytic_flat_pv"] is None and d["smile_adjustment"] is None
+    assert abs(d["no_touch_probability"] - 1) <= 1e-6 and d["paths"] > 0
+
+
+def test_analytic_method_where_the_series_fails_is_a_400_in_spanish(client):
+    resp = _post(client, DNT, _dnt(91, 0.01, 1e6, method="analytic"))
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "La fórmula cerrada no converge con este corredor; use Monte Carlo", "field": "lower"}
 
 
 @pytest.mark.parametrize("model", ["flat", "smile"])
