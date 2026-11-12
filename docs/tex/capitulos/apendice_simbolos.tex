@@ -1,11 +1,11 @@
 % apendice_simbolos.tex -- Apéndice A: tabla de símbolos.
 % Primero los símbolos comunes (macros de preambulo.tex); después, por capítulo, las filas de
-% simbolos/capNN.tex. Cada fila de capNN.tex: «símbolo & significado & unidad \\» (la 4.ª columna, macro,
-% puede quedar vacía; una fila con menos celdas es válida). Toda fila termina en \\ (también la última) y
+% simbolos/capNN.tex. Cada fila de capNN.tex: «símbolo & significado & unidad \\» (tres celdas: solo los
+% símbolos comunes, en la primera tabla, llevan la columna «Macro»). Toda fila termina en \\ (también la última) y
 % el archivo nunca queda sin filas: si no hay símbolos propios, deja la fila «Sin símbolos propios».
 \chapter{Tabla de símbolos}\label{ap:simbolos}
 
-Los símbolos comunes se definen una sola vez en \texttt{preambulo.tex}; los capítulos no los redefinen. Cada capítulo declara además, en su sección «Notación», los símbolos propios, que se recogen aquí por capítulo. Las macros sin argumento se usan en modo matemático (por ejemplo \texttt{\$\textbackslash Nom\$}). Las letras sueltas ($s$, $f$, $h$, $d_k$, $\tau_i$, \ldots) se reutilizan entre capítulos con un significado local; en cada capítulo rige el de su sección «Notación», que es el que recoge la tabla bajo el encabezado de ese capítulo.
+Los símbolos comunes se definen una sola vez en \texttt{preambulo.tex}; los capítulos no los redefinen. Cada capítulo declara además, en su sección «Notación», los símbolos propios, que se recogen aquí por capítulo. Las macros sin argumento se usan en modo matemático (por ejemplo \texttt{\$\textbackslash Nom\$}). Las letras sueltas ($s$, $f$, $h$, $d_k$, $\tau_i$, \ldots) se reutilizan entre capítulos con un significado local; en cada capítulo rige el de su sección «Notación», que es el que recoge la tabla bajo el encabezado de ese capítulo. En particular: $\varphi$ es el signo del lado en el capítulo~\ref{cap:swaps-ois} y la densidad normal estándar en el capítulo~\ref{cap:fx}; $s$ es el día en que empieza el periodo 1 en el capítulo~\ref{cap:swaps-ois} y el signo del lado en los capítulos~\ref{cap:fx} y~\ref{cap:exoticos-fx}; $\psi$ es el diferencial del cross currency swap en el capítulo~\ref{cap:xccy} y el valor de una trayectoria en el capítulo~\ref{cap:exoticos-fx}; y $\sigma$ imprime tanto \texttt{\textbackslash vol} (volatilidad, en el capítulo~\ref{cap:fx} la de Garman--Kohlhagen) como \texttt{\textbackslash hwsig} (volatilidad de Hull--White, en tasa anual$/\sqrt{\text{año}}$): en cada capítulo rige la de sus ecuaciones.
 
 {\small
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.19\textwidth}>{\raggedright\arraybackslash}p{0.38\textwidth}>{\raggedright\arraybackslash}p{0.18\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}@{}}
@@ -30,7 +30,7 @@ $\Nom$ & nocional & moneda de la pata & \texttt{\textbackslash{}Nom} \\
 $\K$ & tasa fija o precio de ejercicio & tasa anual o precio & \texttt{\textbackslash{}K} \\
 $\ON{j}$ & fijación overnight del día hábil $j$ & tasa anual & \texttt{\textbackslash{}ON} \\
 $\Rcomp{i}$ & tasa compuesta del periodo $i$ & tasa anual & \texttt{\textbackslash{}Rcomp} \\
-$\Ann$ & anualidad (PV01 sin escalar) & años & \texttt{\textbackslash{}Ann} \\
+$\Ann$ & anualidad (PV01 sin escalar); en el capítulo~\ref{cap:swaps-ois} incluye el nocional & años; en el capítulo~\ref{cap:swaps-ois}, moneda de la curva & \texttt{\textbackslash{}Ann} \\
 $\Spar$ & tasa par & tasa anual & \texttt{\textbackslash{}Spar} \\
 $\Spot$ & tipo de cambio spot USDMXN & MXN por USD & \texttt{\textbackslash{}Spot} \\
 $\FxF{T}$ & tipo de cambio forward USDMXN a $T$ & MXN por USD & \texttt{\textbackslash{}FxF} \\
@@ -53,36 +53,52 @@ $\cMXNcol$ & etiqueta de la curva de descuento MXN colateralizada en USD & --- &
 \MXN & peso mexicano (texto) & --- & \texttt{\textbackslash{}MXN} \\
 \USD & dólar estadounidense (texto) & --- & \texttt{\textbackslash{}USD} \\
 \pb & punto base ($10^{-4}$); se escribe «1~\texttt{\textbackslash pb}» & --- & \texttt{\textbackslash{}pb} \\
+\end{longtable}
+}
+
+Los símbolos propios de cada capítulo (sin columna de macro, porque se escriben directamente en el capítulo):
+
+{\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.22\textwidth}>{\raggedright\arraybackslash}p{0.45\textwidth}>{\raggedright\arraybackslash}p{0.21\textwidth}@{}}
+\toprule
+Símbolo & Significado & Unidad \\
 \midrule
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:introduccion}. Introducción, arquitectura y convenciones}} \\
+\endfirsthead
+\toprule
+Símbolo & Significado & Unidad \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\multicolumn{3}{@{}l}{\textbf{Capítulo~\ref{cap:introduccion}. Introducción, arquitectura y convenciones}} \\
 \simbolosinput{cap01}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:curvas}. Curvas}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:curvas}. Curvas}} \\
 \simbolosinput{cap02}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:swaps-ois}. Swaps de tasa OIS}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:swaps-ois}. Swaps de tasa OIS}} \\
 \simbolosinput{cap03}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:fx}. Derivados de FX y opción sobre acción}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:fx}. Derivados de FX y opción sobre acción}} \\
 \simbolosinput{cap04}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:hull-white}. Hull--White}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:hull-white}. Hull--White}} \\
 \simbolosinput{cap05}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:bonos}. Bonos}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:bonos}. Bonos}} \\
 \simbolosinput{cap06}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:xccy}. Cross currency swap}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:xccy}. Cross currency swap}} \\
 \simbolosinput{cap07}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:ciclo-vida}. Ciclo de vida, liquidaciones y P\&L}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:ciclo-vida}. Ciclo de vida, liquidaciones y P\&L}} \\
 \simbolosinput{cap08}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:riesgo}. Riesgo}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:riesgo}. Riesgo}} \\
 \simbolosinput{cap09}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:coberturas}. Contabilidad de coberturas IFRS 9}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:coberturas}. Contabilidad de coberturas IFRS 9}} \\
 \simbolosinput{cap10}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:operaciones}. Operaciones: conciliación}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:operaciones}. Operaciones: conciliación}} \\
 \simbolosinput{cap11}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:validacion}. Validación contra QuantLib}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:validacion}. Validación contra QuantLib}} \\
 \simbolosinput{cap12}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:datos}. Fuentes de datos y procedencia}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:datos}. Fuentes de datos y procedencia}} \\
 \simbolosinput{cap13}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:xva}. XVA y curvas de crédito}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:xva}. XVA y curvas de crédito}} \\
 \simbolosinput{cap14}%
-\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:exoticos-fx}. Exóticos de FX}} \\
+\multicolumn{3}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:exoticos-fx}. Exóticos de FX}} \\
 \simbolosinput{cap15}%
 \end{longtable}
 }

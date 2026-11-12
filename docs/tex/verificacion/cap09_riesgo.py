@@ -61,8 +61,12 @@ with tempfile.TemporaryDirectory() as tmp:
     comun.comprobar("cap09-dv01-pv-base", v0, 0.01)
     comun.comprobar("cap09-dv01-pv-mas1", vmas, 0.01)
     comun.comprobar("cap09-dv01-pv-menos1", vmenos, 0.01)
-    comun.comprobar("cap09-dv01-central-paralelo", (vmenos - vmas) / 2.0, 0.01)
-    comun.comprobar("cap09-dv01-convexidad", (vmenos + vmas - 2.0 * v0) / 2.0, 1e-4)
+    central, convexidad = (vmenos - vmas) / 2.0, (vmenos + vmas - 2.0 * v0) / 2.0
+    # la aritmética es del script, pero se amarra al código: suma de pilares y DV01 paralelo vienen de `dv01.compute_dv01`
+    assert abs(central - sum(pilar.values())) < 0.01, (central, sum(pilar.values()))
+    assert abs(convexidad - (sum(pilar.values()) - r["parallel_mxn"])) < 1e-4, (convexidad, sum(pilar.values()) - r["parallel_mxn"])
+    comun.comprobar("cap09-dv01-central-paralelo", central, 0.01)
+    comun.comprobar("cap09-dv01-convexidad", convexidad, 1e-4)
     comun.comprobar("cap09-dv01-paralelo", r["parallel_mxn"], 0.01)
     comun.comprobar("cap09-dv01-pilar-26x28", pilar["26x28"], 0.01)
     comun.comprobar("cap09-dv01-suma-pilares", sum(pilar.values()), 0.01)
@@ -78,6 +82,7 @@ with tempfile.TemporaryDirectory() as tmp:
     comun.comprobar("cap09-escenario-steepener", esc[2]["total_mxn"], 0.01)
     # primer orden del steepener de 25 pb: −Σ DV01_k δ_k con la rampa δ_j = −25 + 50 j / 9 (10 pilares)
     lineal = -sum(p["dv01_mxn"] * (-25.0 + 50.0 * j / 9.0) for j, p in enumerate(r["points"]))
+    assert abs(lineal - esc[2]["total_mxn"]) < 50.0, (lineal, esc[2]["total_mxn"])  # segundo orden: unos 14 MXN frente al escenario del código
     comun.comprobar("cap09-escenario-steepener-lineal", lineal, 0.01)
 
     # --- VaR paramétrico: del IRS (ruta completa) y de un vector de exposiciones (qfpy) ---

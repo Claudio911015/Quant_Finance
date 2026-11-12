@@ -160,7 +160,7 @@ anual con recuperación $40\%$ (\codigo{desk/api/risk/xva.py}{credit_for},
 
 El motor simula tres fuentes de riesgo bajo la medida de riesgo neutral $\Q^{\mathrm M}$ con la cuenta bancaria
 $\mathcal B$ de \MXN\ como numerario. Cada moneda $c$ tiene una tasa corta de un factor en la forma de Markov de
-Hull--White (de Cheyette) \citep{hull1990,brigo2006,ritchken1995,andersen2010},
+Hull--White (de Cheyette \citep{cheyette2001}) \citep{hull1990,brigo2006,ritchken1995,andersen2010},
 \begin{equation}\label{eq:cap14-factor}
 \begin{gathered}
   r_c(t)=f_c(0,t)+x_c(t),\qquad dx_c=\bigl(y_c(t)-a_c\,x_c+\mu_c\bigr)dt+\sigma_c\,dW_c,\quad x_c(0)=0,\\[2pt]
@@ -241,7 +241,7 @@ cambio son
 $y_c$, $m_c$, $M_c$ y $q$ están en \codigo{src/xva/exposure_engine.cpp}{buildGrid} y
 \codigo{src/xva/exposure_engine.cpp}{fillCurrencyGrid}, y la trayectoria en
 \codigo{src/xva/exposure_engine.cpp}{simulatePath}. Cada trayectoria $p$ toma sus cinco normales diarias de un
-\texttt{std::mt19937\_64} sembrado con $(\text{semilla},p)$ \citep[cap.~3]{glasserman2003}: la trayectoria no depende
+\texttt{std::mt19937\_64} sembrado con $(\text{semilla},p)$ (decisión del código, no de la bibliografía): la trayectoria no depende
 de qué instrumentos se simulen ni de qué tan lejos llegue el horizonte (un horizonte mayor sólo añade normales), y
 por eso dos conjuntos simulados en la misma llamada, o en dos llamadas con la misma semilla, comparten trayectorias.
 Por la misma independencia, \codigo{src/xva/exposure_engine.cpp}{ExposureEngine::simulate} reparte las trayectorias en
@@ -851,6 +851,6 @@ curva plana, y con margen delgado precisamente por este sesgo. \texttt{CVACalcul
 
 Las definiciones de CVA, DVA y FVA y su lectura como integrales de la exposición esperada contra la probabilidad de
 incumplimiento siguen a \citet{gregory2015} y \citet{brigo2013}; el modelo de tasa corta de un factor y su forma de Markov, a
-\citet{hull1990}, \citet{ritchken1995} y \citet{andersen2010}; el precio afín del cupón cero y la dinámica de un factor, a \citet{brigo2006}; la
+\citet{hull1990}, \citet{ritchken1995} y \citet{andersen2010}, y la representación de Markov que se llama «de Cheyette», a \citet{cheyette2001}; el precio afín del cupón cero y la dinámica de un factor, a \citet{brigo2006}; la
 simulación exacta de procesos gaussianos y el error estándar de Monte Carlo, a \citet{glasserman2003}; y la valuación del CDS por
 periodos y su bootstrap con intensidad constante por tramos, a \citet{hull2000} y \citet{okane2008}.

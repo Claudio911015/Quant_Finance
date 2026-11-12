@@ -396,7 +396,8 @@ con tasas cero $6.00\,\%$ (28 días) y $6.20\,\%$ (84 días): $\DF{c'}{28/365}=\
 $\DF{c'}{56/365}=\verif{cap03-df-col-56}{0.9906847541}$ y $\DF{c'}{70/365}=\verif{cap03-df-col-70}{0.9882747622}$. Los
 cupones flotantes no cambian (se proyectan en TIIE-F) pero se descuentan en $c'$: suman
 $\verif{cap03-flo-descontado-col}{1349367.35}$, distinto de la forma telescópica
-$\Nom(1-\DF{c'}{70/365})=\verif{cap03-flo-telescopica-col}{1172523.78}$, que aquí no aplica. La anualidad es
+$\Nom(1-\DF{c'}{70/365})=\verif{cap03-flo-telescopica-col}{1172523.78}$ (la calcula el ejemplo con la curva $c'$; el
+código del proyecto no la calcula), que aquí no aplica. La anualidad es
 $\Ann=\verif{cap03-anualidad-col}{19290677.56}$, la tasa par
 $\Spar=\verif{cap03-tasa-par-col}{0.0699491940}$ y el valor del pagador pasa de
 $\verif{cap03-pv-un-curva}{-386317.96}$~\MXN{} (descuento en TIIE-F) a $\verif{cap03-pv-col}{-386793.63}$~\MXN{}.

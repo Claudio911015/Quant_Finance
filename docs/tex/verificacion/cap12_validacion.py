@@ -61,6 +61,7 @@ comun.comprobar("cap12-cero-intermedio", z_dia, 1e-10)
 comun.comprobar("cap12-df-intermedio", df, 1e-11)
 comun.comprobar("cap12-pv-bond08", casos["bond-08"]["pv_desk"], 1e-4)
 comun.comprobar("cap12-pv-ref-bond08", pv_ref["bond-08"], 1e-4)
+assert abs(pv_bond08_fechas_enteras() - pv_ref["bond-08"]) < 1e-4  # el recálculo con los DF del desk iguala al PV de QuantLib
 comun.comprobar("cap12-pv-bond08-fechas-enteras", pv_bond08_fechas_enteras(), 1e-4)
 abs_b, rel_b = diferencias("bond-08")
 comun.comprobar("cap12-dif-abs-bond08", abs_b, 5e-3)

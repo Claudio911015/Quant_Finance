@@ -241,7 +241,7 @@ no se publica (\codigo{desk/api/valuation.py}{accrued_factor}), para el FIX de u
 moneda otro (\codigo{desk/api/calendars.py}{CURRENCY_CALENDAR}). Los feriados son:
 \begin{itemize}
   \item \texttt{MX} (\codigo{desk/api/calendars.py}{_mexico}): 1 de enero; primer lunes de febrero; tercer lunes de marzo; Jueves y Viernes Santo; 1 de mayo; 16 de septiembre; 2 de noviembre; tercer lunes de noviembre; 12 y 25 de diciembre; y el 1 de octubre en 2024, 2030 y 2036 (transmisión del Poder Ejecutivo). Un feriado de fecha fija que cae en sábado o domingo \emph{no} se traslada.
-  \item \texttt{US} (\codigo{desk/api/calendars.py}{_united_states}): Año Nuevo, Martin Luther King (tercer lunes de enero), Presidents (tercer lunes de febrero), Viernes Santo, Memorial (último lunes de mayo), 4 de julio, Labor (primer lunes de septiembre), Columbus (segundo lunes de octubre), Veterans (11 de noviembre), Thanksgiving (cuarto jueves de noviembre), Navidad, y Juneteenth (19 de junio) desde 2022. Un feriado de fecha fija en domingo pasa al lunes siguiente y en sábado al viernes anterior, salvo el 1 de enero en sábado, que no pasa al año anterior, y el Día de los Veteranos en sábado, que tampoco pasa al viernes porque la Fed de Nueva York publica SOFR ese día (\codigo{desk/api/calendars.py}{_observed}).
+  \item \texttt{US} (\codigo{desk/api/calendars.py}{_united_states}): Año Nuevo, Martin Luther King (tercer lunes de enero), Presidents (tercer lunes de febrero), Viernes Santo, Memorial (último lunes de mayo), 4 de julio, Labor (primer lunes de septiembre), Columbus (segundo lunes de octubre), Veterans (11 de noviembre), Thanksgiving (cuarto jueves de noviembre), Navidad, y Juneteenth (19 de junio) desde 2022. Un feriado de fecha fija en domingo pasa al lunes siguiente y en sábado al viernes anterior, salvo el 1 de enero en sábado, que no pasa al año anterior, y el Día de los Veteranos en sábado, que tampoco pasa al viernes porque la Fed de Nueva York publicó SOFR el viernes 2023-11-10 (\codigo{desk/api/calendars.py}{_observed}).
 \end{itemize}
 Jueves y Viernes Santo salen del domingo de Pascua con el algoritmo gregoriano anónimo
 \citep{meeus1998}, \codigo{desk/api/calendars.py}{_easter}: con $y$ el año, $a=y \bmod 19$, $b=\lfloor y/100\rfloor$,
@@ -417,14 +417,19 @@ historial en
 contrastó con la publicación real de SOFR (API de la Fed de Nueva York, \citealt{nyfed2026}), año por año de
 2020 a 2026: 1\,712 observaciones, del 2020-01-02 al 2026-11-09. Todos los días que el calendario marca como
 hábiles tienen SOFR, y la única fecha con SOFR publicada que el calendario marcaba inhábil era el 2023-11-10
-(viernes), día en que se habría observado Veterans Day (sábado 11); las Reservas Federales abren los viernes
-anteriores a un feriado en sábado \citep{frb2026}. Era un hallazgo de bajo impacto (H19 de
+(viernes), día en que se habría observado Veterans Day (sábado 11). Era un hallazgo de bajo impacto (H19 de
 \texttt{HALLAZGOS.md}) y se corrigió: el Día de los Veteranos en sábado ya no se traslada al viernes
-(\codigo{desk/api/calendars.py}{_united_states}). Repetida la comparación con el calendario corregido, las mismas
+(\codigo{desk/api/calendars.py}{_united_states}). Esa regla se fijó por contraste con las fechas en que la Fed de
+Nueva York publicó SOFR, no porque una norma distinga ese feriado: la página K.8 de la Fed \citep{frb2026} dice, para
+todo feriado en sábado, que los Bancos de la Reserva abren el viernes anterior (cierra solo la Junta de Gobernadores)
+y lista entre ellos el 3 de julio de 2026, que el código sí marca inhábil; por sí sola no separa el Día de los Veteranos
+del 4 de julio. Repetida la comparación con el calendario corregido, las mismas
 1\,712 observaciones coinciden por completo: ninguna fecha con SOFR es inhábil y ningún día hábil entre el 2020-01-02
 y el 2026-11-09 carece de SOFR. Los demás traslados al viernes (2020-07-03, 2021-12-24 y 2026-07-03) siguen
 coincidiendo con la ausencia de SOFR. Las recomendaciones de SIFMA para 2026 \citep{sifma2026} coinciden con los feriados del
-código, con la salvedad de que SIFMA recomienda para el Viernes Santo 2026 un cierre anticipado (no completo),
+código, incluido el viernes 3 de julio (4 de julio observado), pero no tratan ningún Día de los Veteranos en sábado
+(en 2026 cae en miércoles), así que no respaldan ni contradicen la excepción; esta descansa en la sola observación del
+2023-11-10. Hay además una salvedad: SIFMA recomienda para el Viernes Santo 2026 un cierre anticipado (no completo),
 mientras que el código y la publicación de SOFR lo tratan como día sin SOFR. Los feriados \texttt{MX} de 2026
 coinciden con la lista de Banxico \citep{banxico2026c}. No se comprobaron los feriados \texttt{MX} de los
 demás años ni los \texttt{US} posteriores a 2026 (el siguiente Veterans Day en sábado es el 2028-11-11, y la regla aplicada
@@ -441,7 +446,7 @@ a su viernes no está contrastada con datos publicados).
     \item \textbf{Bono.} Periodos uniformes; la convención del M-Bono de 182 días queda fuera.
     \item \textbf{Renta variable.} La opción sobre acción aporta su PV pero cero al DV01, a los escenarios y al VaR, porque su valor no depende de las curvas ni del spot del snapshot (\codigo{desk/api/pricing/fx.py}{_equity_pv_mxn}).
     \item \textbf{Operaciones.} Se valúan a la fecha del snapshot; las terminadas se conservan (no se borran).
-    \item \textbf{Payoff.} Las gráficas de payoff son de presentación: se calculan en el navegador.
+    \item \textbf{Payoff.} Las gráficas de payoff son de presentación: se calculan en el navegador. La de la swaption usa una anualidad aproximada, con descuento plano a la tasa swap (capítulo~\ref{cap:hull-white}).
     \item \textbf{Moneda.} Reporte en MXN al spot del snapshot.
     \item \textbf{Usuarios.} Un solo usuario, sin inicio de sesión ni roles; el servidor escucha en el puerto 5070 sin autenticación.
     \item \textbf{Calendarios.} Reglas codificadas, no tomadas de una publicación oficial por año: solo se contrastaron los feriados \texttt{MX} de 2026 y los \texttt{US} de 2020--2026 (sección~\ref{sec:cap01-validacion}).

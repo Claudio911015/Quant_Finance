@@ -339,7 +339,8 @@ $X=1/(1+0.07\tau)=0.9945850$, $B(\delta)=0.0765654$,
   \sigma_p = 0.01\cdot0.0765654\sqrt{\frac{1-e^{-2\cdot0.05\,t_0}}{2\cdot0.05}}
   = \verif{cap05-caplet-sigma-p}{0.0007180219}\quad(\text{recálculo, tolerancia }10^{-9}),
 \]
-$h=0.0836629$, $\Ncdf(\sigma_p-h)=0.466948$ y $\Ncdf(-h)=0.466662$. La ecuación~\eqref{eq:cap05-caplet} da
+que calcula el ejemplo (\texttt{qfpy} no expone $\sigma_p$) y solo se valida de forma indirecta: el precio completo hecho a mano
+con él coincide con el de \texttt{qfpy} a $10^{-6}$. Además, $h=0.0836629$, $\Ncdf(\sigma_p-h)=0.466948$ y $\Ncdf(-h)=0.466662$. La ecuación~\eqref{eq:cap05-caplet} da
 \[
   \mathrm{Caplet} = \Nom(1+\K\tau)\bigl[XP_0\Ncdf(\sigma_p-h)-P_1\Ncdf(-h)\bigr]
   = \verif{cap05-caplet-valor}{24147.1047}\ \MXN,
@@ -361,7 +362,8 @@ $B_1=0.9851489$, $B_2=1.9411822$. La ecuación~\eqref{eq:cap05-critica} tiene la
 \[
   x^* = \verif{cap05-swaption-x}{-0.0006246404}\quad(\text{recálculo, tolerancia }10^{-9}),
 \]
-que da los strikes $X_1=0.9517863$, $X_2=0.9058292$, las desviaciones $\sigma_{p,1}=0.0077644$,
+que calcula el ejemplo (\texttt{qfpy} no expone $x^*$; el precio de la pagadora hecho a mano con él coincide con el de
+\texttt{qfpy} a $10^{-6}$) y da los strikes $X_1=0.9517863$, $X_2=0.9058292$, las desviaciones $\sigma_{p,1}=0.0077644$,
 $\sigma_{p,2}=0.0152994$, $h_1=-0.0714897$, $h_2=-0.0639547$, las puts $\mathrm{ZBP}_1=0.0030764$ y
 $\mathrm{ZBP}_2=0.0057414$ y, por la ecuación~\eqref{eq:cap05-swaption},
 $c_1\mathrm{ZBP}_1+c_2\mathrm{ZBP}_2=155.9567+6032.4659$, es decir
@@ -442,6 +444,10 @@ nueve caplets calculados con la ecuación~\eqref{eq:cap05-caplet}.
     \item $\hwtheta$ se aproxima con diferencias finitas y la simulación es un esquema de Euler sin garantía de
           reproducir la curva; solo importa para el calculador de CVA anterior, que el desk ya no llama, y no para los precios de este capítulo.
     \item $\hwa>0$, $\hwsig>0$, nocional y strike positivos; el constructor lanza excepción en caso contrario.
+    \item La gráfica de payoff de la swaption en la interfaz es de presentación: se calcula en el navegador
+          (\codigo{desk/ui/src/screens/pricers/PricerChart.tsx}{swaptionPayoffSeries}) con una anualidad aproximada,
+          $\sum_{j=1}^{n}\tau/(1+s\tau)^j$ con descuento plano a la tasa swap $s$, y no con la anualidad de las curvas
+          de este capítulo; el PV exacto es el del backend.
   \end{itemize}
 \end{limites}
 

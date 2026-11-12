@@ -224,7 +224,7 @@ del hipotético con signo contrario y todo va a la cuenta de cobertura de valor 
   I_k = \bigl(C^{\mathrm{ins}}_k - C^{\mathrm{ins}}_{k-1}\bigr) + a_k, \qquad
   \mathrm{FV}_k = I_k + L^{\mathrm{ins}}_k ,
 \end{equation}
-donde $\mathrm{FV}_k$ es el resultado neto del periodo en esa cuenta (\texttt{fv\_result}). En esta rama no se guarda
+donde $\mathrm{FV}_k$ es el resultado neto del periodo en esa cuenta (\texttt{fv\_result}, calculado en \codigo{desk/api/hedge_measure.py}{measure}). En esta rama no se guarda
 \texttt{identity\_residual}: valía cero para cualquier entrada, porque se calculaba con las mismas cantidades que lo
 definen, y no detectaba ningún error (hallazgo H10 en \texttt{HALLAZGOS.md}, resuelto); el control de la rama es el
 cuadre de cargos y abonos.
@@ -462,7 +462,7 @@ Los ejemplos de la sección~\ref{sec:cap10-ejemplo} se ejecutan con
       de la razón que implican los nocionales en más de $1\,\%$, y la Metodología y el reporte declaran que $h$ es
       informativa.
     \item \textbf{Efectividad.} La prueba es de escenarios con razón de cambios, no de regresión ni de mínima varianza
-      \citep{hull2018}; el rango $[0.8, 1.25]$ solo se informa. Que $h$ y los términos críticos coincidan no prueba nada
+      (así lo hace el código); el rango $[0.8, 1.25]$ solo se informa. Que $h$ y los términos críticos coincidan no prueba nada
       sobre el riesgo de crédito, que no se mide.
     \item \textbf{Cambios de nocional y fechas.} Un cambio de nocional después de designar no tiene tratamiento
       especial (se usa el nocional vigente); la fecha de designación es la de un snapshot y el sistema no puede comprobar

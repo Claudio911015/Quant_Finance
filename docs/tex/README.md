@@ -22,7 +22,7 @@ docs/tex/
   HALLAZGOS.md           discrepancias código <-> Metodología encontradas al documentar
   capitulos/             un archivo por capítulo (cap01_… cap15_…), apendice_simbolos.tex y _plantilla.tex
   simbolos/capNN.tex     filas de la tabla de símbolos propias de cada capítulo
-  verificacion/          comun.py, correr.py, referencias_codigo.py y un capNN_<tema>.py por capítulo 2-12
+  verificacion/          comun.py, correr.py, referencias_codigo.py y un capNN_<tema>.py por capítulo 2-12, 14 y 15
 ```
 
 Capítulos: 1 Introducción, arquitectura y convenciones · 2 Curvas · 3 Swaps de tasa OIS · 4 Derivados de FX
@@ -51,7 +51,7 @@ internas (`eq:capNN-…`, `sec:capNN-…`, `tab:capNN-…`) o estas etiquetas fi
   de cadenas literales y están listados en el encabezado del archivo.
 - Python para las verificaciones: el del backend, `/home/claudio/anaconda3/bin/python` (3.8), con `qfpy`
   compilado en `build/src/` (no se recompila desde aquí). Los scripts usan solo la stdlib y el código del
-  proyecto.
+  proyecto, salvo el del capítulo 15 (`cap15_exoticos_fx.py`), que además importa `numpy` y `QuantLib` del Python del backend.
 
 ## Compilar
 
@@ -134,7 +134,7 @@ comun.terminar()                                       # código 1 si hubo algun
 ```
 
 `comun.py` expone `RAIZ`, `impreso(id)`, `comprobar(id, calculado, tol)` y `terminar()`. Reglas: el cálculo
-llama al código del proyecto (`qfpy` o `desk.api.*`), nunca reimplementa la fórmula; solo stdlib + proyecto;
+llama al código del proyecto (`qfpy` o `desk.api.*`), nunca reimplementa la fórmula; solo stdlib + proyecto (excepción: `cap15_exoticos_fx.py` usa también `numpy` y `QuantLib` del Python del backend);
 insumos construidos dentro del script; **no se lee `desk/data/desk.db` ni la red** (si hace falta SQLite,
 una base temporal con `desk.api.db.connect` + `init_schema` y siembra determinista); cada `id` aparece en
 exactamente un `\verif` y en exactamente un script. El valor impreso lleva los dígitos suficientes y la

@@ -369,8 +369,8 @@ $\hat\sigma[84,5]=\verif{cap15-vol-local-nodo}{0.131888983}$; el script la compa
 
 \subsection{Semilla y trayectoria}\label{sec:cap15-ej-semilla}
 
-El primer uniforme de MT19937 sembrado con $42$ es $U_0=\verif{cap15-semilla-u0}{0.374540114}$ (el script lo reproduce con el generador de \texttt{numpy}
-sembrado igual) y la primera normal $Z_0=\Phi^{-1}(U_0)=\verif{cap15-semilla-z0}{-0.319852392}$. Con sonrisa, a un año, el primer nodo de la primera trayectoria es
+El primer uniforme de MT19937 sembrado con $42$ es $U_0=\verif{cap15-semilla-u0}{0.374540114}$ (lo produce el generador de QuantLib que el código instancia con
+\texttt{SEED}, no una función del proyecto; el script lo reproduce con el generador de \texttt{numpy} sembrado igual) y la primera normal $Z_0=\Phi^{-1}(U_0)=\verif{cap15-semilla-z0}{-0.319852392}$. Con sonrisa, a un año, el primer nodo de la primera trayectoria es
 $X_1=\verif{cap15-camino-x1}{18.43283821}$, y la ecuación~\eqref{eq:cap15-paso} reproduce los $10$ pasos de esa trayectoria a $10^{-9}$ (tolerancia $10^{-9}$ en $U_0$ y $Z_0$, $10^{-8}$ en $X_1$).
 
 \subsection{Probabilidad del puente}\label{sec:cap15-ej-puente}
