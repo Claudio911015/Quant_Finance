@@ -10,7 +10,10 @@ capítulo~\ref{cap:bonos}.
 
 Hay que separar dos cosas que viven en archivos distintos. La clase del modelo,
 \codigo{include/qf/models/hullwhite.hpp}{HullWhite}, ofrece el precio del cupón cero, su valor condicionado a
-la tasa corta y una simulación; la consume el motor de XVA (capítulo~\ref{cap:xva}). El cap/floor y la
+la tasa corta y una simulación; hoy la consumen solo el calculador de CVA anterior
+(\codigo{include/qf/xva/cva_calculator.hpp}{CVACalculator}) y \codigo{include/qf/xva/exposure_profile.hpp}{simulateExposure},
+por la interfaz \texttt{IRateModel} y los bindings de \texttt{qfxva}, y el desk dejó de llamarlos: el motor de XVA actual
+(\codigo{include/qf/xva/exposure_engine.hpp}{ExposureEngine}, capítulo~\ref{cap:xva}) no instancia esta clase. El cap/floor y la
 swaption \emph{no instancian esa clase}: sus precios son fórmulas cerradas de opción sobre bono cupón cero
 que solo necesitan la curva de descuento y los parámetros $\hwa$ y $\hwsig$, y están escritas de forma
 independiente en \codigo{src/instruments/capfloor.cpp}{hwBondOption} y en
@@ -89,7 +92,8 @@ sale de un esquema de Euler en pasos $\Delta=T/\text{pasos}$,
 \end{equation}
 con $Z_k\sim N(0,1)$ de \texttt{std::normal\_distribution} sobre \texttt{std::mt19937\_64} sembrado con
 \texttt{seed} (por omisión 42); es \codigo{src/models/hullwhite.cpp}{HullWhite::simulate}. Esta simulación
-solo la usa el motor de XVA.
+solo la usan el calculador de CVA anterior y \texttt{simulateExposure}, que el desk ya no llama; el motor de
+XVA actual no la instancia (capítulo~\ref{cap:xva}).
 
 \begin{diferencia}
   En \citet{hull1990} (y en \citealp[cap.~3]{brigo2006}) $\hwtheta$
@@ -311,9 +315,9 @@ fijaron todos los caplets, \codigo{desk/api/aging.py}{cap_floor_pv_mxn} devuelve
 proyecta con la curva de la operación y descuenta con \texttt{price\_dual}.
 
 La swaption no usa \texttt{aging.py}: se envejece acortando la expiración a los días que faltan, sin cambiar
-el plazo del swap, en \codigo{desk/api/valuation.py}{shortened}. Esa función conserva además ramas de cap/floor y
-bono sin llamador y el docstring de su módulo describe un envejecimiento por periodos enteros que ya no se usa
-(\texttt{HALLAZGOS.md}, H14).
+el plazo del swap, en \codigo{desk/api/valuation.py}{shortened}. Esa función ya no tiene ramas de cap/floor ni de
+bono (no tenían llamador y se borraron, junto con el envejecimiento por periodos enteros que describía el docstring
+del módulo; \texttt{HALLAZGOS.md}, H14).
 
 % -------------------------------------------------------------------------------------------------
 \section{Ejemplo numérico verificable}\label{sec:cap05-ejemplo}
@@ -413,9 +417,9 @@ nueve caplets calculados con la ecuación~\eqref{eq:cap05-caplet}.
         \codigo{desk/validation/ql_hw.py}{price_swaption} valúan los mismos casos con
         \texttt{AnalyticCapFloorEngine} y \texttt{JamshidianSwaptionEngine} sobre un \texttt{HullWhite}
         ajustado a la misma curva. En el reporte \codigo{desk/validation/report.json}{swaption-03} los 8 casos
-        de cada producto caen dentro de la tolerancia de $5\times10^{-4}$ del nocional y la mayor diferencia
-        relativa al nocional es $2.8\times10^{-16}$ en cap/floor y $3.0\times10^{-9}$ en swaptions; que la tolerancia
-        quede cinco órdenes por encima de lo observado se anota en \texttt{HALLAZGOS.md} (H05).
+        de cada producto caen dentro de la tolerancia de $10^{-6}$ del nocional y la mayor diferencia
+        relativa al nocional es $2.8\times10^{-16}$ en cap/floor y $3.0\times10^{-9}$ en swaptions; la tolerancia
+        era de $5\times10^{-4}$, cinco órdenes por encima de lo observado, y bajó a $10^{-6}$ (\texttt{HALLAZGOS.md}, H05).
 \end{itemize}
 
 % -------------------------------------------------------------------------------------------------
@@ -436,7 +440,7 @@ nueve caplets calculados con la ecuación~\eqref{eq:cap05-caplet}.
           ningún caplet usa una fijación publicada. Al envejecer, el caplet ya fijado sale del PV y no se
           liquida (Metodología, «Bono y cap/floor envejecidos»).
     \item $\hwtheta$ se aproxima con diferencias finitas y la simulación es un esquema de Euler sin garantía de
-          reproducir la curva; solo importa para XVA, no para los precios de este capítulo.
+          reproducir la curva; solo importa para el calculador de CVA anterior, que el desk ya no llama, y no para los precios de este capítulo.
     \item $\hwa>0$, $\hwsig>0$, nocional y strike positivos; el constructor lanza excepción en caso contrario.
   \end{itemize}
 \end{limites}

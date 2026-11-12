@@ -432,9 +432,12 @@ QuantLib; su validación son las pruebas de reprecio de arriba.
           escenario: un forward FX con colateral USD apenas reacciona a un choque de SOFR.
     \item \texttt{LogLinear} y \texttt{CubicSpline} existen en C++ pero no se usan en el backend. Con
           \texttt{CubicSpline} los pilares anteriores se reprecian solo de forma aproximada (desviación del orden
-          de $10^{-6}$ en la tasa par). Con \texttt{LogLinear} el bootstrap OIS no es utilizable: devuelve una
-          curva que no reprecia sin avisar (hallazgo H01 de \texttt{HALLAZGOS.md}), contra lo que dice el contrato
-          del código.
+          de $10^{-6}$ en la tasa par). Con \texttt{LogLinear} el bootstrap OIS no es utilizable: devolvía una
+          curva que no reprecia sin avisar (hallazgo H01 de \texttt{HALLAZGOS.md}) y ahora
+          \codigo{src/termstructure/ois_bootstrap.cpp}{bootstrapOis} lanza \texttt{std::invalid\_argument}
+          (\texttt{ValueError} en \texttt{qfpy}); \texttt{bootstrapXccyDiscount} con \texttt{LogLinear} falla al
+          resolver el pilar con \texttt{std::runtime\_error}. El contrato del código ya dice que solo \texttt{Linear}
+          reprecia exactamente.
     \item La validación con QuantLib cubre la interpolación de las curvas, no su bootstrap.
   \end{itemize}
 \end{limites}

@@ -100,8 +100,8 @@ con $T_i=\text{días}_i/365$ y la interpolación por omisión, lineal en strike
 \end{enumerate}
 El ancla $(0,0)$ hace que, para $T\le T_1$, $w=w_1\,T/T_1$ y por tanto $\vol(\K,T)=\sigma_1(\K)$: la
 extrapolación es plana \emph{en volatilidad} tanto antes del primer plazo como después del último, no plana
-en varianza. (El comentario de contrato de la clase \texttt{VolSurface} dice «flat extrapolation on w»; el
-código hace lo descrito aquí y la discrepancia es el hallazgo H16 de \texttt{HALLAZGOS.md}.) El constructor rechaza volatilidades no positivas, pilares no crecientes, menos de dos plazos o
+en varianza. (El comentario de contrato de la clase \texttt{VolSurface} decía «flat extrapolation on w»; el
+código hace lo descrito aquí y el comentario se corrigió: hallazgo H16 de \texttt{HALLAZGOS.md}.) El constructor rechaza volatilidades no positivas, pilares no crecientes, menos de dos plazos o
 dos strikes, y varianza total decreciente en el plazo en algún strike de la rejilla
 (\codigo{src/termstructure/volsurface.cpp}{VolSurface::validate}). El entorno de mercado prefiere la superficie
 al escalar plano cuando hay una registrada

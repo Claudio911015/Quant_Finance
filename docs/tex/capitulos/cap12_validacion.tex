@@ -164,9 +164,8 @@ y un caso sin PV de QuantLib falla.
 \toprule
 Producto & $\varepsilon_p$ \\
 \midrule
-\texttt{irs}, \texttt{fx\_option}, \texttt{equity\_option}, \texttt{bond} & $10^{-6}$ \\
+\texttt{irs}, \texttt{fx\_option}, \texttt{equity\_option}, \texttt{bond}, \texttt{cap\_floor}, \texttt{swaption} & $10^{-6}$ \\
 \texttt{fx\_forward} & $10^{-8}$ \\
-\texttt{cap\_floor}, \texttt{swaption} (Hull--White) & $5\times 10^{-4}$ \\
 \bottomrule
 \end{tabular}
 \caption{Tolerancias relativas al nocional de referencia $N_c$.}\label{tab:cap12-tolerancias}
@@ -344,8 +343,9 @@ diferencia entera se debe a las fechas enteras y al cupón Actual/365.
 \paragraph{Margen de tolerancia en una swaption.} Para \texttt{swaption-03} (pagadora TIIE-F, expira a $730$ días, swap de
 $5$ años, strike $6.8\,\%$, nocional de $200\,000\,000$ \MXN) la diferencia absoluta es
 $\Delta V_c = \verif{cap12-dif-abs-swaption03}{0.5957}$ \MXN (tolerancia $5\times 10^{-5}$) y la relativa,
-$\epsilon_c = \verif{cap12-dif-rel-swaption03}{2.98e-9}$ (tolerancia $5\times 10^{-12}$), cinco órdenes de magnitud bajo
-$\varepsilon_{\mathrm{swaption}} = 5\times 10^{-4}$ (sección~\ref{sec:cap12-limites}).
+$\epsilon_c = \verif{cap12-dif-rel-swaption03}{2.98e-9}$ (tolerancia $5\times 10^{-12}$), más de dos órdenes de magnitud bajo
+$\varepsilon_{\mathrm{swaption}} = 10^{-6}$ (antes $5\times 10^{-4}$, cinco órdenes por encima de lo observado:
+hallazgo H05 de \texttt{HALLAZGOS.md}, resuelto; sección~\ref{sec:cap12-limites}).
 
 % -------------------------------------------------------------------------------------------------
 \section{Validación}\label{sec:cap12-validacion}
@@ -368,8 +368,8 @@ Producto & Casos & $\varepsilon_p$ & Peor $\Delta V_c$ & Peor $\epsilon_c$ & Cas
 \texttt{fx\_option} & 10 & $10^{-6}$ & $9.31\times 10^{-9}$ & $1.13\times 10^{-16}$ & \texttt{fx\_option-06} \\
 \texttt{equity\_option} & 8 & $10^{-6}$ & $2.18\times 10^{-11}$ & $1.09\times 10^{-16}$ & \texttt{equity\_option-01} \\
 \texttt{bond} & 8 & $10^{-6}$ & $5.94$ & $5.94\times 10^{-8}$ & \texttt{bond-08} \\
-\texttt{cap\_floor} & 8 & $5\times 10^{-4}$ & $3.26\times 10^{-8}$ & $2.79\times 10^{-16}$ & \texttt{cap\_floor-02} \\
-\texttt{swaption} & 8 & $5\times 10^{-4}$ & $0.596$ & $2.98\times 10^{-9}$ & \texttt{swaption-03} \\
+\texttt{cap\_floor} & 8 & $10^{-6}$ & $3.26\times 10^{-8}$ & $2.79\times 10^{-16}$ & \texttt{cap\_floor-02} \\
+\texttt{swaption} & 8 & $10^{-6}$ & $0.596$ & $2.98\times 10^{-9}$ & \texttt{swaption-03} \\
 \bottomrule
 \end{tabular}
 \caption{Peor diferencia absoluta y relativa por producto en el reporte versionado (el caso es el de la peor diferencia
@@ -439,20 +439,20 @@ este capítulo.
       incluyen \texttt{xccy\_swap}. Tampoco hay calendarios de días hábiles ni ajuste de fechas: QuantLib usa
       \texttt{NullCalendar}, \texttt{Unadjusted} y fechas enteras (capítulo~\ref{cap:ciclo-vida}), y los plazos de la
       batería caen en días enteros.
-    \item \textbf{Tolerancia holgada en Hull--White.} La tolerancia de \texttt{cap\_floor} y \texttt{swaption} es
-      $5\times 10^{-4}$ del nocional y la peor diferencia observada es $2.98\times 10^{-9}$: un defecto de hasta
-      $5\times 10^{-4}$ pasaría sin avisar (el defecto de \texttt{swaption-04} era de $1.84\times 10^{-3}$).
-      La Metodología la justifica porque «las implementaciones y convenciones del modelo difieren»; ver
-      \texttt{HALLAZGOS.md} (H05).
+    \item \textbf{Tolerancia en Hull--White.} La tolerancia de \texttt{cap\_floor} y \texttt{swaption} era
+      $5\times 10^{-4}$ del nocional con una peor diferencia observada de $2.98\times 10^{-9}$, de modo que un defecto de
+      hasta $5\times 10^{-4}$ habría pasado sin avisar (el defecto de \texttt{swaption-04} era de $1.84\times 10^{-3}$).
+      Bajó a $10^{-6}$, la de los demás productos de tasas, y el reporte regenerado sigue en $62$ dentro, $0$
+      explicados y $0$ fuera; la Metodología declara el nuevo valor (hallazgo H05 de \texttt{HALLAZGOS.md}, resuelto).
     \item \textbf{El reporte puede quedar desfasado del código.} La suite verifica la coherencia del reporte con
       \texttt{cases.json} y \texttt{reference.json}, y la aplicación avisa en tiempo de ejecución si el último commit de
       valuación difiere del guardado, pero ninguna prueba vuelve a comparar el \texttt{cases.json} versionado con el
       código actual, ni vuelve a ejecutar QuantLib.
     \item \textbf{Cobertura de la batería.} El portafolio de ejemplo no incluye opciones sobre acción, bonos ni swaptions:
       esos tres productos sólo se validan con la batería fija ($8$ casos cada uno).
-    \item \textbf{Lo que la Metodología no declara.} La lista «Qué no se compara» de la Metodología omite varios de los
-      puntos anteriores que el README del arnés sí declara (bootstrap, superficie de volatilidad); ver
-      \texttt{HALLAZGOS.md} (H06).
+    \item \textbf{Lo que la Metodología declaraba de menos.} La lista «Qué no se compara» de la Metodología omitía varios
+      de los puntos anteriores (bootstrap, superficie de volatilidad, \texttt{xccy\_swap}, curva \texttt{MXN-USD},
+      calendarios y extrapolación); ahora los declara todos (hallazgo H06 de \texttt{HALLAZGOS.md}, resuelto).
   \end{itemize}
 \end{limites}
 
