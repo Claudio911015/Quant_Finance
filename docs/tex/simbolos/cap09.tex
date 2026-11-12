@@ -1,4 +1,22 @@
-% filas del capítulo 09: símbolo & significado & unidad \\ (4.ª columna, macro, opcional; toda fila termina en \\)
-% Ejemplo: $w_k$ & peso del vértice $k$ & adimensional \\
-% Sustituir la fila de abajo por las filas propias del capítulo (no definir macros nuevas; ver README.md).
-\multicolumn{4}{@{}l}{\textit{Sin símbolos propios por ahora.}} \\
+% filas del capítulo 09 (riesgo): símbolo & significado & unidad \\
+$\mathcal O$ & conjunto de operaciones vivas en la fecha de valuación & --- \\
+$\mathcal M$ & contexto de mercado (curvas, spot, superficie y parámetros de un snapshot) & --- \\
+$\PV_i(\mathcal M)$ & valor presente de la operación $i$ bajo $\mathcal M$ & \MXN \\
+$T_k$, $n$ & vencimiento del pilar $k$ de una curva; número de pilares & años (días$/365$); adimensional \\
+$z_{c,k}$ & tasa cero continua del pilar $k$ de la curva $c$ & tasa anual \\
+$\delta_k$, $\beta$, $h$, $\epsilon$ & choque del pilar $k$; magnitud del steepener; tamaño del choque del motor C++; desplazamiento paralelo & \pb \\
+$p$ & choque porcentual del tipo de cambio spot & \% \\
+$\omega_k(T)$ & función sombrero del pilar $k$ (suma 1 sobre los pilares) & adimensional \\
+$\DVO^{\parallel}_c$, $\DVO_{c,k}$ & DV01 paralelo de la curva $c$ y DV01 del pilar $k$ & \MXN{} por \pb \\
+$a$, $b$ & factores de riesgo (TIIE-F, SOFR, USDMXN) & --- \\
+$e_f$ & exposición al factor $f$ & \MXN{} por \pb{} (curvas); \MXN{} por unidad de rendimiento (USDMXN) \\
+$\sigma_f$, $\rho_{fg}$ & volatilidad diaria y correlación de los factores & \pb{} (curvas) o rendimiento; adimensional \\
+$\alpha$, $H$, $q_\alpha$ & nivel de confianza; horizonte; cuantil normal $\Ncdf^{-1}(\alpha)$ & adimensional; días; adimensional \\
+$W$, $x_{f,t}$ & ventana histórica; cambio histórico diario del factor $f$ & días; \pb{} o rendimiento logarítmico \\
+$\Pi_t$, $L_t$, $L_{(m)}$ & resultado diario; pérdida; $m$-ésima mayor pérdida & \MXN \\
+$\kappa$ & índice del cuantil: $\max\{1,\lceil\mathrm{round}_9(W(1-\alpha))\rceil\}$ & adimensional \\
+$G$, $D$, $\xi_t$ & factor de Cholesky de $\rho$, matriz diagonal de volatilidades y normales independientes (historia sintética) & adimensional \\
+$t_f$, $t_o$ & fechas de valuación de los snapshots de origen y destino de la cascada & fecha \\
+$\mathcal C_s$, $v_s$, $\Delta_s$ & mercado híbrido $s$ de la cascada, valor de la operación bajo él y componente del paso $s$ & ---; \MXN; \MXN \\
+$\Omega$, $\Omega^{0}$, $\Omega^{\mathrm{o}}$ & liquidado en $(t_f,t_o]$: oficial, con eventos hasta $t_f$ y con la conversión al spot de origen & \MXN \\
+$U$, $\Lambda$, $u$ & uso de un límite, monto vigente y porcentaje de uso & unidad de la métrica; unidad de la métrica; \% \\

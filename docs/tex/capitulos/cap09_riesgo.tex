@@ -1,5 +1,312 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Riesgo}\label{cap:riesgo}
 
-DV01, escenarios, VaR paramétrico e histórico, expected shortfall, P\&L explicado (cascada y residuo) y límites.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap09-proposito}
+
+Este capítulo documenta los cálculos de riesgo del desk: la sensibilidad de la cartera a las curvas (DV01
+paralelo y por pilar), los escenarios deterministas de curvas y de tipo de cambio, el valor en riesgo (VaR)
+delta-normal y por simulación histórica con su déficit esperado (ES), el P\&L explicado por cascada entre dos
+snapshots y los límites de riesgo con su uso y su bitácora de excesos. Todas las cantidades están en \MXN{} y
+se calculan sobre las operaciones vivas (estado \texttt{viva}) en la fecha de valuación (\texttt{as\_of}) del
+snapshot, ver el capítulo~\ref{cap:ciclo-vida}.
+
+Todas las cifras comparten un mismo patrón: cada operación se revalúa con \codigo{desk/api/portfolio.py}{trade_pv_mxn}
+sobre un contexto de mercado modificado (\codigo{desk/api/market.py}{MarketContext.shifted}) y el resultado se suma
+sobre la cartera. En este capítulo no hay fórmulas de valuación: son las de los capítulos~\ref{cap:swaps-ois}
+a~\ref{cap:xccy}. Una operación que no se puede valuar (en la base o bajo cualquier choque) se reporta en la lista
+\texttt{errors} de la respuesta y no aporta a ningún total. El cálculo de valor de crédito (CVA) informativo existe
+como un cálculo separado de estos y se documenta en el capítulo~\ref{cap:xva}; aquí no se trata.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap09-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. En este capítulo:
+\begin{itemize}
+  \item $\mathcal O$: conjunto de operaciones vivas; $i\in\mathcal O$. $\mathcal M$: contexto de mercado (curvas,
+        tipo de cambio, superficie y parámetros de modelo de un snapshot); $\PV_i(\mathcal M)$: valor presente
+        en \MXN{} de la operación $i$ bajo $\mathcal M$ (\codigo{desk/api/portfolio.py}{trade_pv_mxn}).
+  \item $c$: curva (TIIE-F, SOFR o la dependiente MXN-USD); $T_k$, $k=1,\dots,n$: vencimiento del pilar $k$
+        en años (días$/365$); $z_{c,k}$: tasa cero continua del pilar $k$; $\delta_k$: choque del pilar $k$ (\pb);
+        $\omega_k(T)$: función sombrero del pilar $k$.
+  \item $n$: número de pilares; $\beta$: magnitud (\pb) del steepener; $p$: choque porcentual del spot; $h$: tamaño del choque (\pb) del motor C++; $\epsilon$: desplazamiento paralelo en el desarrollo de Taylor del DV01.
+  \item $\mathcal M^{c,\delta}$: mercado con el choque $\delta$ en la curva $c$; $\mathcal M^{c,k,\pm1}$: choque de
+        $\pm1~\pb$ solo en el pilar $k$; $\mathcal M^{c,\parallel\pm h}$: choque paralelo de $\pm h$~\pb.
+  \item $f,g$: factores de riesgo (TIIE-F, SOFR y USDMXN); $e_f$: exposición al factor $f$ (\MXN{} por unidad
+        del factor); $\sigma_f$: volatilidad diaria del factor; $\rho_{fg}$: correlación.
+  \item $\alpha$: nivel de confianza; $H$: horizonte en días; $q_\alpha=\Ncdf^{-1}(\alpha)$; $G$, $D$, $\xi_t$: factor de Cholesky, matriz de volatilidades y normales independientes de la historia sintética.
+  \item $W$: ventana histórica (días); $x_{f,t}$: cambio histórico del factor $f$ el día $t$; $\Pi_t$: resultado
+        diario; $L_t=-\Pi_t$: pérdida; $L_{(1)}\ge L_{(2)}\ge\cdots$: pérdidas ordenadas; $\kappa$: índice del cuantil.
+  \item $t_f,t_o$: fechas de valuación de los snapshots de origen (\emph{from}) y destino (\emph{to}); $\mathcal C_s$:
+        mercados híbridos de la cascada; $v_s$: valor de una operación bajo $\mathcal C_s$; $\Delta_s$: componente del P\&L del paso $s$; $\Omega$: flujo liquidado en
+        $(t_f,t_o]$.
+  \item $U$: uso de un límite; $\Lambda$: monto vigente del límite; $u$: porcentaje de uso.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap09-modelo}
+
+\subsection{Choques de mercado}\label{sec:cap09-choques}
+
+\paragraph{Choque de una curva.} Una curva $c$ con pilares $T_1<\cdots<T_n$ y tasas cero continuas $z_{c,k}$ (capítulo~\ref{cap:curvas}) se interpola linealmente en la tasa cero y se extrapola plana fuera de los pilares. Un choque $\delta=(\delta_1,\dots,\delta_n)$ en puntos base crea una curva nueva con los mismos pilares y la misma interpolación:
+\begin{equation}\label{eq:cap09-choque-pilar}
+  z^{\delta}_{c,k}=z_{c,k}+10^{-4}\,\delta_k,\qquad k=1,\dots,n .
+\end{equation}
+El choque paralelo es $\delta_k=\delta$ para todo $k$ y el de un solo pilar tiene $\delta_j=0$ para $j\ne k$. Como la interpolación es lineal en las tasas de los pilares, la tasa cero desplazada es
+\begin{equation}\label{eq:cap09-sombrero}
+  z^{\delta}_{c}(T)=z_{c}(T)+10^{-4}\sum_{k=1}^{n}\delta_k\,\omega_k(T),\qquad \sum_{k}\omega_k(T)=1,
+\end{equation}
+con $\omega_k$ la función sombrero del pilar $k$ (vale $1$ en $T_k$, $0$ en los demás pilares, lineal entre ellos y constante fuera). El factor de descuento es $\exp(-z^{\delta}_c(T)\,T)$. La construcción es
+\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::parallelBump} (paralelo) y
+\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::bumped} (un pilar), y el desk las compone en
+\codigo{desk/api/market.py}{_shift_curve}: primero los choques por pilar y después el paralelo, de modo que ambos pueden combinarse.
+
+Lo que se choca son las \emph{tasas cero ya construidas}, no las cotizaciones: las curvas TIIE-F y SOFR no se vuelven a calibrar y la tasa par OIS implícita cambia como consecuencia. La excepción es la curva dependiente MXN-USD (descuento \MXN{} con colateral USD, capítulo~\ref{cap:curvas}): cuando se choca TIIE-F, SOFR o el tipo de cambio, \codigo{desk/api/market.py}{_calibrate_csa} la vuelve a calibrar con \texttt{qfpy.bootstrap\_xccy\_discount} usando las mismas cotizaciones de puntos forward y de base de cross currency del snapshot, fijas, sobre las curvas y el spot ya chocados; un choque a la propia MXN-USD solo desplaza sus pilares.
+
+\paragraph{Choque de tipo de cambio.} Un choque de $p\,\%$ al spot lo reemplaza por
+\begin{equation}\label{eq:cap09-spot}
+  \Spot'=\Spot\,\Bigl(1+\frac{p}{100}\Bigr),
+\end{equation}
+sin tocar las curvas (salvo la recalibración de MXN-USD de arriba); \codigo{desk/api/market.py}{MarketContext.shifted}.
+
+\paragraph{Rampa del steepener.} Con $n$ pilares y magnitud $\beta$ (\pb), el escenario \emph{steepener} usa el vector de choques
+\begin{equation}\label{eq:cap09-rampa}
+  \delta_j=-\beta+2\beta\,\frac{j}{\max(n-1,\,1)},\qquad j=0,1,\dots,n-1,
+\end{equation}
+lineal en el \emph{índice} del pilar (no en su vencimiento): el primer pilar baja $\beta$~\pb{} y el último sube $\beta$~\pb. Es la misma rampa de \codigo{src/risk/scenario.cpp}{rampShifts} (el \emph{flattener} de C++ invierte el signo); el desk la implementa en \codigo{desk/api/risk/scenarios.py}{_shock}.
+
+\paragraph{Escenarios combinados.} Un escenario \texttt{combined} lleva de 1 a 8 choques simples (\texttt{parallel}, \texttt{steepener} o \texttt{fx\_spot}; no se anidan) que se aplican en orden \emph{sobre el mismo contexto}: el segundo choque parte del mercado ya chocado por el primero, y por eso el resultado no es, en general, la suma de los choques por separado (\codigo{desk/api/risk/scenarios.py}{_validate_combined}). Las cotas de validación son $|\beta|\le 1000$~\pb{} para curvas y $-90<p\le 500$ para el spot.
+
+\subsection{DV01 por curva y por pilar}\label{sec:cap09-dv01}
+
+\paragraph{Convención del desk.} El DV01 es positivo cuando el valor sube al bajar las tasas. Para la curva $c$, el DV01 paralelo es unilateral y el de cada pilar es de diferencia central:
+\begin{align}
+  \DVO^{\parallel}_c&=\sum_{i\in\mathcal O}\Bigl[\PV_i(\mathcal M)-\PV_i\bigl(\mathcal M^{c,\parallel+1}\bigr)\Bigr],\label{eq:cap09-dv01-par}\\
+  \DVO_{c,k}&=\frac12\sum_{i\in\mathcal O}\Bigl[\PV_i\bigl(\mathcal M^{c,k,-1}\bigr)-\PV_i\bigl(\mathcal M^{c,k,+1}\bigr)\Bigr],\label{eq:cap09-dv01-pilar}
+\end{align}
+en \MXN{} por \pb. La respuesta suma sobre curvas: \texttt{parallel\_mxn}$=\sum_c\DVO^{\parallel}_c$ y \texttt{total\_mxn}$=\sum_c\sum_k\DVO_{c,k}$. Las curvas son las del contexto: TIIE-F, SOFR y, si el snapshot trae cotizaciones de colateral, MXN-USD (esta última sin pilar a un día). Implementación: \codigo{desk/api/risk/dv01.py}{compute_dv01}, con los contextos chocados armados en \codigo{desk/api/risk/dv01.py}{_shocked_contexts}; la ruta HTTP es \codigo{desk/api/routes/risk.py}{risk_dv01}. Un pagador de tasa fija pierde cuando bajan las tasas, de modo que su DV01 es negativo.
+
+\paragraph{Por qué el pilar usa diferencia central.} Con $V(\epsilon)$ el valor bajo un desplazamiento paralelo de $\epsilon$~\pb, el desarrollo $V(\epsilon)=V_0+V'\epsilon+\tfrac12V''\epsilon^2+\cdots$ da $V_0-V(1)=-V'-\tfrac12V''$ (diferencia unilateral, de primer orden) y $\tfrac12[V(-1)-V(1)]=-V'+O(\epsilon^2)$ (central). Por la partición de la unidad de~\eqref{eq:cap09-sombrero}, la suma de los choques de un pilar a la vez equivale a un desplazamiento paralelo y, por tanto, la escalera por pilar suma al DV01 paralelo \emph{central}; frente al paralelo unilateral~\eqref{eq:cap09-dv01-par} queda el término de convexidad
+\begin{equation}\label{eq:cap09-convexidad}
+  \sum_k\DVO_{c,k}-\DVO^{\parallel}_c\;\approx\;\frac12\sum_{i\in\mathcal O}\Bigl[\PV_i\bigl(\mathcal M^{c,\parallel-1}\bigr)+\PV_i\bigl(\mathcal M^{c,\parallel+1}\bigr)-2\,\PV_i(\mathcal M)\Bigr].
+\end{equation}
+En un cap/floor, que es convexo, un choque en un solo pilar mueve varias tasas forward y la diferencia unilateral de cada pilar acumulaba un término de segundo orden que no sumaba al paralelo (la escalera quedaba 4~\% lejos); la diferencia central lo cancela (\codigo{desk/api/risk/dv01.py}{compute_dv01}, docstring del módulo). La escalera por pilar es el análogo en pesos de las duraciones por vértice de \citet{ho1992}.
+
+\begin{diferencia}
+  El motor C++ \codigo{include/qf/risk/scenario.hpp}{ScenarioEngine} calcula \emph{ambos} DV01 por diferencia central,
+  \begin{equation}\label{eq:cap09-dv01-motor}
+    \DVO^{\mathrm{motor}}=\frac{\PV(-h)-\PV(+h)}{2h},\qquad
+    \DVO^{\mathrm{motor}}_k=\frac{\PV(\mathcal M^{k,-h})-\PV(\mathcal M^{k,+h})}{2h},
+  \end{equation}
+  con $h=\texttt{bumpSizeBp}$ (1~\pb{} por omisión), sobre una copia del entorno sin observadores y con la curva de nombre
+  \texttt{default} por omisión (\codigo{src/risk/scenario.cpp}{ScenarioEngine::parallelDV01} y
+  \codigo{src/risk/scenario.cpp}{ScenarioEngine::keyRateDV01s}). El backend del desk \emph{no} llama a ese motor: usa los
+  mismos bloques (\texttt{parallelBump}, \texttt{bumped}) pero revalúa con el valuador por producto (con envejecimiento y
+  colateral) y su DV01 paralelo~\eqref{eq:cap09-dv01-par} es unilateral, como declara la Metodología (``PV(base)~$-$~PV($+1$~\pb)'').
+  Los dos coinciden a primer orden y difieren en el término de convexidad~\eqref{eq:cap09-convexidad}.
+\end{diferencia}
+
+\subsection{Escenarios}\label{sec:cap09-escenarios}
+
+El resultado de un escenario $s$ para la operación $i$ es la revaluación completa menos el valor base, y el del escenario es la suma sobre la cartera:
+\begin{equation}\label{eq:cap09-escenario}
+  \PnL_{i,s}=\PV_i\bigl(\Gamma_s(\mathcal M)\bigr)-\PV_i(\mathcal M),\qquad
+  \PnL_s=\sum_{i\in\mathcal O}\PnL_{i,s},
+\end{equation}
+donde $\Gamma_s$ es el choque (o la cadena de choques) del escenario. Es una revaluación completa y no una aproximación por sensibilidades, así que incluye la convexidad. Si la operación no se puede valuar, su fila lleva el error y \texttt{pnl\_mxn} nulo y no suma al total (\codigo{desk/api/risk/scenarios.py}{run_scenarios}). La biblioteca de escenarios (\codigo{desk/api/risk/scenario_sets.py}{BUILTIN_SETS}) trae el conjunto \emph{Por omisión} de ocho escenarios (\codigo{desk/api/risk/scenarios.py}{DEFAULT_SCENARIOS}; la efectividad prospectiva de las coberturas del capítulo~\ref{cap:coberturas} usa estos mismos ocho) y tres conjuntos históricos de un solo escenario combinado:
+
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  Conjunto histórico & USDMXN & TIIE-F (\pb) & SOFR (\pb)\\
+  \midrule
+  Depreciación 2008 & $+35~\%$ & $+100$ & $-200$\\
+  2016 elecciones EE.~UU. & $+12~\%$ & $+75$ & $+25$\\
+  Marzo 2020 & $+25~\%$ & $-100$ & $-150$\\
+  \bottomrule
+\end{tabular}
+\end{center}
+Los tres se aplican en el orden spot, TIIE-F, SOFR y son \emph{aproximaciones} con choques fijos, no reproducciones de la curva completa de esas fechas. Los ocho escenarios por omisión son $\pm50~\pb$ paralelos en TIIE-F y en SOFR, un steepener de $25~\pb$ en cada una y $\pm10~\%$ de USDMXN. Los conjuntos guardados por el usuario y su baja lógica (\codigo{desk/api/risk/scenario_sets.py}{resolve}) no alteran el cálculo: correr un conjunto por nombre equivale a mandar sus escenarios en línea.
+
+\subsection{VaR paramétrico delta-normal}\label{sec:cap09-var}
+
+\paragraph{Exposiciones.} Los factores son tres: TIIE-F paralelo y SOFR paralelo (en \pb) y el rendimiento relativo de USDMXN. La exposición de la operación $i$ a una curva $c$ es el cambio de valor por $+1~\pb$ paralelo, y la del tipo de cambio es la derivada central respecto de un rendimiento relativo (choques de $\pm1~\%$ al spot):
+\begin{align}
+  e_{i,c}&=\PV_i\bigl(\mathcal M^{c,\parallel+1}\bigr)-\PV_i(\mathcal M)\;=\;-\DVO^{\parallel}_{i,c},\label{eq:cap09-exp-tasa}\\
+  e_{i,X}&=\frac{\PV_i\bigl(\mathcal M^{X,+1\%}\bigr)-\PV_i\bigl(\mathcal M^{X,-1\%}\bigr)}{0.02},\label{eq:cap09-exp-fx}
+\end{align}
+y la exposición del factor $f$ es $e_f=\sum_{i\in\mathcal O}e_{i,f}$ (\codigo{desk/api/risk/var.py}{_exposure_fns}). Las unidades son \MXN{} por \pb{} para las curvas y \MXN{} por unidad de rendimiento (es decir, por $100~\%$) para USDMXN. El signo de la exposición a tasas es el opuesto al del DV01.
+
+\paragraph{VaR.} Con la variación de los factores normal, de media cero y con volatilidades diarias $\sigma_f$ y correlaciones $\rho_{fg}$ del snapshot, el cambio de valor se aproxima linealmente por $\sum_f e_f x_f$ y
+\begin{equation}\label{eq:cap09-var-param}
+  \VaR{\alpha}(H)=q_\alpha\,\sqrt{H}\,\sqrt{\sum_{f,g}e_f\,e_g\,\sigma_f\,\sigma_g\,\rho_{fg}},\qquad q_\alpha=\Ncdf^{-1}(\alpha),
+\end{equation}
+calculado en C++ por \codigo{src/risk/delta_normal_var.cpp}{deltaNormalVaR} y expuesto como \codigo{src/python_bindings/qfpy.cpp}{delta_normal_var}. Las exposiciones pueden ser negativas o nulas; la forma cuadrática se recorta a cero si el redondeo la deja negativa; se rechazan tamaños incompatibles, $\alpha\notin(0,1)$, $H\le0$ y volatilidades negativas. La matriz de correlaciones no se comprueba como simétrica ni definida positiva. La inversa $\Ncdf^{-1}$ es la aproximación racional de Acklam de \codigo{src/math/statistics.cpp}{normInvCDF}, con error absoluto inferior a $1.15\times10^{-9}$, sin paso de refinamiento (por eso $q_{0.99}$ sale como $2.3263478744$ y no $2.3263478740$). El horizonte es $0<H\le3650$ días y la volatilidad escala con $\sqrt H$. Se pueden sustituir volatilidades por factor con \texttt{factor\_vols} (parcial, por petición, con cota de $1000$~\pb{} para curvas y $1$ para USDMXN); el VaR de cada factor por separado es el de~\eqref{eq:cap09-var-param} con ese solo factor,
+\begin{equation}\label{eq:cap09-var-factor}
+  \VaR{\alpha}^{(f)}(H)=q_\alpha\sqrt{H}\,|e_f|\,\sigma_f ,
+\end{equation}
+de modo que la suma de los VaR por factor es mayor o igual que el total cuando hay correlaciones menores que~1 (\codigo{desk/api/risk/var.py}{compute_var}). Esta es la formulación estándar de varianzas y covarianzas \citep{jorion2007,mcneil2015}.
+
+El C++ del repositorio contiene además \codigo{include/qf/risk/var.hpp}{parametricVaR}, \texttt{portfolioVaR}, \texttt{historicalVaR} y \texttt{monteCarloVaR}; no están expuestas en \texttt{qfpy} ni las usa el backend, de modo que no forman parte de ninguna cifra del desk.
+
+\subsection{VaR histórico y déficit esperado}\label{sec:cap09-hist}
+
+\paragraph{Historia de factores.} La tabla \texttt{factor\_history} (solo de inserción) guarda, por factor, fuente y fecha, el cambio diario: en \pb{} para TIIE-F y SOFR y el rendimiento logarítmico para USDMXN,
+\begin{equation}\label{eq:cap09-cambios}
+  x_{\mathrm{tasa},t}=\bigl(r_t-r_{t-1}\bigr)\cdot10^{4},\qquad
+  x_{\mathrm{USDMXN},t}=\ln\frac{X_t}{X_{t-1}},
+\end{equation}
+con $r_t$ la tasa (decimal) y $X_t$ el tipo de cambio observados el día $t$ y el dato fechado en el día del segundo punto; los pares separados por más de 5 días naturales se omiten y un cambio fuera de $|x|\le1000$~\pb{} (curvas) o $|x|\le1$ (USDMXN) detiene la derivación con error (\codigo{desk/api/risk/factor_history.py}{_changes}). Las fuentes son \texttt{synthetic}, \texttt{csv}, \texttt{live} (SOFR con el proxy del Tesoro a 5 años de MarketDataFeed y USDMXN de FRED) y \texttt{fixings} (derivada de las fijaciones cargadas; \codigo{desk/api/risk/factor_history.py}{derive}); en \texttt{observed} gana, por factor y fecha, la primera de \texttt{csv}, \texttt{live}, \texttt{fixings} (\codigo{desk/api/risk/factor_history.py}{window}). Las fuentes de datos están descritas en el capítulo~\ref{cap:datos}. La historia sintética de MX-DEMO son $500$ días hábiles (lunes a viernes) anteriores a su \texttt{as\_of}, generados con \texttt{random.Random(20261110)} y
+\begin{equation}\label{eq:cap09-sintetica}
+  x_t=D\,G\,\xi_t,\qquad \xi_t\sim\mathcal N(0,I)\ \text{(\texttt{gauss})},\qquad GG^{\top}=\rho,\qquad D=\mathrm{diag}(\sigma_f),
+\end{equation}
+con $G$ el factor de Cholesky (triangular inferior) de la matriz de correlaciones $\rho$ del snapshot y $\sigma_f$ sus volatilidades diarias (\codigo{desk/api/risk/factor_history.py}{seed_synthetic}). Son datos inventados para demostración. Sin \texttt{history\_source} explícito, un snapshot totalmente sintético usa \texttt{synthetic} y cualquier otro usa \texttt{observed}.
+
+\paragraph{Cuantil y déficit esperado.} Con las exposiciones $e_f$ de las ecuaciones~\eqref{eq:cap09-exp-tasa}--\eqref{eq:cap09-exp-fx} (las mismas del VaR paramétrico), las últimas $W$ fechas hasta el \texttt{as\_of} que traen los tres factores dan el resultado diario y las pérdidas
+\begin{equation}\label{eq:cap09-pnl-hist}
+  \Pi_t=\sum_{f}e_f\,x_{f,t},\qquad L_t=0-\Pi_t,\qquad t=1,\dots,W,
+\end{equation}
+y, con las pérdidas ordenadas de mayor a menor, $L_{(1)}\ge\cdots\ge L_{(W)}$,
+\begin{align}
+  \kappa&=\max\Bigl\{1,\ \bigl\lceil\mathrm{round}_{9}\bigl(W(1-\alpha)\bigr)\bigr\rceil\Bigr\},\label{eq:cap09-k}\\
+  \VaR{\alpha}^{\mathrm{hist}}(H)&=\sqrt{H}\,L_{(\kappa)},\label{eq:cap09-var-hist}\\
+  \ES{\alpha}^{\mathrm{hist}}(H)&=\max\Bigl\{\sqrt{H}\,\frac1\kappa\sum_{m=1}^{\kappa}L_{(m)},\ \VaR{\alpha}^{\mathrm{hist}}(H)\Bigr\},\label{eq:cap09-es-hist}
+\end{align}
+donde $\mathrm{round}_9$ redondea a 9 decimales (para que $W(1-\alpha)$ entero no suba un escalón por error de coma flotante). El horizonte multiplica por $\sqrt H$ el resultado de un día; no se usan retornos a $H$ días. La ventana por omisión es $W=250$ (mínimo 60, máximo 10~000) y se rechaza con 409 si hay menos fechas completas que $W$. El VaR histórico es por \emph{sensibilidades} (delta): el resultado diario es la exposición lineal por el cambio histórico, no una revaluación completa. El \emph{peor día} es la primera fecha del mayor $L_t$. Implementación: \codigo{desk/api/risk/hist_var.py}{compute_hist_var}. El resultado no se trunca en cero: si todos los $\Pi_t$ son positivos el VaR sale negativo.
+
+\begin{diferencia}
+  La ecuación~\eqref{eq:cap09-var-hist} es la definición~1 de cuantil muestral de \citet{hyndman1996} (inversa de la función de distribución empírica, $L_{(\kappa)}$ con $\kappa=\lceil W(1-\alpha)\rceil$). El déficit esperado~\eqref{eq:cap09-es-hist} promedia las $\kappa$ peores pérdidas, incluida la del VaR; cuando $W(1-\alpha)$ no es entero esto no es la media de la cola de masa exactamente $1-\alpha$, que asigna un peso fraccionario a la pérdida $\kappa$ \citep{acerbi2002}. La función C++ \codigo{src/risk/var.cpp}{historicalVaR}, que el backend no usa, toma el elemento de índice $\lfloor (1-\alpha)n+10^{-9}\rfloor$ (base 0) del vector ordenado de menor a mayor: coincide con el desk salvo cuando $n(1-\alpha)$ es entero, caso en que toma una pérdida más profunda ($\kappa=n(1-\alpha)+1$). El cuantil y el ES se calculan en Python y no en C++ (ver \texttt{HALLAZGOS.md}, entrada H04).
+\end{diferencia}
+
+\subsection{P\&L explicado por cascada}\label{sec:cap09-explain}
+
+El P\&L oficial por operación es el del capítulo~\ref{cap:ciclo-vida}, $\PnL=V_{\mathrm{to}}-V_{\mathrm{from}}+\Omega$. La cascada lo reparte revaluando la operación sobre mercados híbridos que cambian un bloque del mercado de origen por el de destino, en orden fijo (\codigo{desk/api/risk/explain.py}{STEPS}). Sea $\mathcal C_0$ el mercado de origen \emph{rodado} a la fecha $t_o$ (mismas cotizaciones en los mismos plazos en días, ahora medidos desde $t_o$); cada $\mathcal C_s$ sustituye a $\mathcal C_{s-1}$ en un bloque, en este orden: las cotizaciones de TIIE-F, las de SOFR (en general, las demás curvas de \texttt{market.CURVES} en orden alfabético), los puntos forward y la base que calibran MXN-USD, el tipo de cambio, y por último la superficie de volatilidad junto con los parámetros de Hull--White (\codigo{desk/api/risk/explain.py}{_hybrid_contexts}). Si un paso no cambia ningún dato se reutiliza el contexto anterior y su diferencia es exactamente cero. Con $v_s=\PV^{(t_f)}(\mathcal C_s)$ el valor de la operación con solo los eventos hasta $t_f$:
+\begin{align}
+  \Delta_{\mathrm{carry}}&=v_0-V_{\mathrm{from}}+\Omega^{\mathrm{o}},\label{eq:cap09-carry}\\
+  \Delta_s&=v_s-v_{s-1}\quad(s\ge1:\ \text{curvas},\ \text{MXN-USD},\ \text{tipo de cambio},\ \text{volatilidad}),\label{eq:cap09-paso}\\
+  \Delta_{\mathrm{fx}}&\ \mathrel{+}=\ \Omega^{0}-\Omega^{\mathrm{o}},\label{eq:cap09-fx-liquidado}\\
+  \Delta_{\mathrm{eventos}}&=\bigl(V_{\mathrm{to}}+\Omega\bigr)-\bigl(v_{\mathrm{fin}}+\Omega^{0}\bigr),\label{eq:cap09-eventos}\\
+  \Delta_{\mathrm{residuo}}&=\PnL-\sum_{s\ne\mathrm{residuo}}\Delta_s .\label{eq:cap09-residuo}
+\end{align}
+Aquí $\Omega$ es lo liquidado de la operación completa; $\Omega^{0}$, lo liquidado de la versión con eventos hasta $t_f$ convertido al tipo de cambio real (FIX de la fecha del flujo o, a falta de él, el spot final); $\Omega^{\mathrm{o}}$, lo mismo convertido al spot del snapshot de origen. Una operación pactada después de $t_f$ pone todo su P\&L en \texttt{new\_trades}. El \emph{residuo} se define como lo que falta para el P\&L oficial; si la cascada de una operación con P\&L válido no se puede calcular, todo su P\&L va al residuo y \texttt{explain\_error} dice por qué (\codigo{desk/api/risk/explain.py}{_components}). Una fila con error en el P\&L oficial no tiene componentes y no suma.
+
+La suma telescópica de~\eqref{eq:cap09-carry}--\eqref{eq:cap09-eventos} es
+\begin{equation}\label{eq:cap09-telescopio}
+  \Delta_{\mathrm{carry}}+\sum_{s\ge1}\Delta_s+(\Omega^{0}-\Omega^{\mathrm{o}})+\Delta_{\mathrm{eventos}}=V_{\mathrm{to}}+\Omega-V_{\mathrm{from}}=\PnL,
+\end{equation}
+de modo que el residuo vale cero salvo redondeo de coma flotante y salvo la falla de la cascada: lo que ningún bloque de mercado explica queda absorbido por \texttt{eventos}, no por el residuo (ver \texttt{HALLAZGOS.md}, entrada H03). Los efectos cruzados se atribuyen al paso posterior, así que cambiar el orden cambia la atribución pero no el total.
+
+\subsection{Límites}\label{sec:cap09-limites-calc}
+
+Los límites (\texttt{limits}, \texttt{limit\_events}, \texttt{limit\_breaches}) son tablas de solo inserción: el monto vigente $\Lambda$ es el del último evento \texttt{create} o \texttt{change} y la baja es un evento \texttt{retire}; solo puede haber un límite activo por (alcance, clave, métrica) (\codigo{desk/api/risk/limits.py}{create_limit}, \codigo{desk/api/risk/limits.py}{add_event}). Cada métrica mide un uso $U\ge0$ contra el snapshot:
+\begin{equation}\label{eq:cap09-uso}
+  U=\begin{cases}
+    \max\Bigl\{\sum_{i\in\mathcal O_{\mathrm{cp}}}\PV_i(\mathcal M),\,0\Bigr\} & \text{\texttt{pv\_exposure}, por contraparte},\\[2pt]
+    \bigl|\DVO^{\parallel}_c\bigr| & \text{\texttt{dv01}, por curva }c\in\{\cTIIE,\cSOFR\},\\[2pt]
+    |e_X|/100 & \text{\texttt{fx\_delta}, USDMXN (\MXN{} por $1\,\%$)},\\[2pt]
+    \VaR{0.99}(1) & \text{\texttt{var}, del portafolio (paramétrico a 1 día, $99~\%$)},
+  \end{cases}
+\end{equation}
+donde $\mathcal O_{\mathrm{cp}}$ son las operaciones de la contraparte (valuación de \codigo{desk/api/portfolio.py}{valuation}), $\DVO^{\parallel}_c$ es el paralelo~\eqref{eq:cap09-dv01-par} y $e_X$ la exposición~\eqref{eq:cap09-exp-fx}. El porcentaje y el estado son
+\begin{equation}\label{eq:cap09-pct}
+  u=\mathrm{round}_{9}\!\Bigl(100\,\frac{U}{\Lambda}\Bigr),\qquad
+  \text{estado}=\begin{cases}
+    \texttt{ok} & u<80,\\
+    \texttt{alerta} & 80\le u\le100,\\
+    \texttt{exceso} & u>100,
+  \end{cases}
+\end{equation}
+(\codigo{desk/api/risk/limits.py}{usage} y \codigo{desk/api/risk/limits.py}{_status}). La comprobación (\codigo{desk/api/risk/limits.py}{check}) inserta en la bitácora un exceso por límite y fecha de valuación: si ya hay una fila para (límite, \texttt{as\_of}) no se inserta otra. Cada cálculo (valuación, DV01, VaR) se hace una sola vez por petición y solo si algún límite activo lo usa.
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap09-implementacion}
+
+\begin{itemize}
+  \item Choques~\eqref{eq:cap09-choque-pilar}--\eqref{eq:cap09-rampa}:
+        \codigo{include/qf/termstructure/yieldcurve.hpp}{YieldCurve},
+        \codigo{desk/api/market.py}{MarketContext.shifted} y \codigo{desk/api/market.py}{_shift_curve};
+        recalibración de MXN-USD: \codigo{desk/api/market.py}{_calibrate_csa}.
+  \item DV01~\eqref{eq:cap09-dv01-par}--\eqref{eq:cap09-convexidad}: \codigo{desk/api/risk/dv01.py}{compute_dv01};
+        motor C++ \eqref{eq:cap09-dv01-motor}: \codigo{include/qf/risk/scenario.hpp}{KeyRateDV01}.
+  \item Escenarios~\eqref{eq:cap09-escenario}: \codigo{desk/api/risk/scenarios.py}{run_scenarios},
+        \codigo{desk/api/risk/scenarios.py}{_validate} y \codigo{desk/api/risk/scenario_sets.py}{list_sets};
+        ruta HTTP \codigo{desk/api/routes/risk.py}{risk_scenarios}.
+  \item VaR paramétrico~\eqref{eq:cap09-exp-tasa}--\eqref{eq:cap09-var-factor}:
+        \codigo{desk/api/risk/var.py}{compute_var} llama a \codigo{include/qf/risk/delta_normal_var.hpp}{deltaNormalVaR};
+        ruta \codigo{desk/api/routes/risk.py}{risk_var}.
+  \item VaR histórico y ES~\eqref{eq:cap09-cambios}--\eqref{eq:cap09-es-hist}:
+        \codigo{desk/api/risk/hist_var.py}{compute_hist_var}, \codigo{desk/api/risk/factor_history.py}{import_csv}
+        (carga CSV \texttt{factor,date,value}, idempotente) y \codigo{desk/api/risk/factor_history.py}{summary}.
+  \item Cascada~\eqref{eq:cap09-carry}--\eqref{eq:cap09-telescopio}: \codigo{desk/api/risk/explain.py}{explain_pnl};
+        ruta \codigo{desk/api/routes/risk_adv.py}{pnl_explain}.
+  \item Límites~\eqref{eq:cap09-uso}--\eqref{eq:cap09-pct}: \codigo{desk/api/risk/limits.py}{usage};
+        ruta \codigo{desk/api/routes/risk_adv.py}{limits_usage}.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap09-ejemplo}
+
+Los ejemplos usan el snapshot sintético MX-DEMO (\texttt{as\_of} 2026-11-10, $\Spot=18.60$) y una operación: un IRS pagador de tasa fija en TIIE-F de $\Nom=100\,000\,000$ \MXN, $26$ periodos de $28$ días (vence el 2028-11-07, a $728$ días) y $\K=6.8~\%$, con una contraparte sin colateral. Los reproduce \codigo{docs/tex/verificacion/cap09_riesgo.py}{base}, que siembra una base temporal y llama a las funciones de \texttt{desk.api.risk}, con tolerancia absoluta de $0.01$ \MXN{} salvo que se diga otra.
+
+\paragraph{Ejemplo 1: DV01 paralelo y por pilar.} El valor base es $V=\verif{cap09-dv01-pv-base}{-188579.70}$ \MXN; con $+1~\pb$ paralelo en TIIE-F sube a $\verif{cap09-dv01-pv-mas1}{-169856.98}$ y con $-1~\pb$ baja a $\verif{cap09-dv01-pv-menos1}{-207306.06}$. Por~\eqref{eq:cap09-dv01-par},
+\[
+  \DVO^{\parallel}_{\cTIIE}=V-V(+1)=\verif{cap09-dv01-paralelo}{-18722.72}\ \MXN/\pb ,
+\]
+negativo porque el pagador pierde cuando bajan las tasas. La diferencia central $\tfrac12[V(-1)-V(+1)]$ da $\verif{cap09-dv01-central-paralelo}{-18724.54}$. Por pilar~\eqref{eq:cap09-dv01-pilar}, casi todo el riesgo está en el pilar de $728$ días (\texttt{26x28}): $\DVO_{\cTIIE,\mathrm{26x28}}=\verif{cap09-dv01-pilar-26x28}{-17981.13}$; los pilares anteriores aportan en conjunto $-743.41$ \MXN{} (el de $364$ días, $-559.52$) y los de más de $728$ días son cero porque el swap no tiene flujos después. La suma de los diez pilares es $\verif{cap09-dv01-suma-pilares}{-18724.54}$, igual al DV01 central, y se separa del paralelo unilateral en $\verif{cap09-dv01-diferencia}{-1.8248}$ \MXN{} (tolerancia $10^{-4}$), que coincide con el término de convexidad de~\eqref{eq:cap09-convexidad}, $\tfrac12[V(-1)+V(+1)-2V]=\verif{cap09-dv01-convexidad}{-1.8248}$.
+
+\paragraph{Ejemplo 2: escenarios.} Por~\eqref{eq:cap09-escenario}, $+50~\pb$ paralelos en TIIE-F dan $\PnL=\verif{cap09-escenario-mas50}{931679.99}$ y $-50~\pb$ dan $\verif{cap09-escenario-menos50}{-940803.97}$ \MXN. La aproximación lineal $50\times18\,722.715=936\,135.76$ queda entre las dos magnitudes: la diferencia es la convexidad, que reduce la ganancia cuando suben las tasas y aumenta la pérdida cuando bajan. El steepener de $25~\pb$ usa la rampa~\eqref{eq:cap09-rampa} con $n=10$ pilares, $\delta_j=-25+50\,j/9$, y da $\PnL=\verif{cap09-escenario-steepener}{46573.16}$; a primer orden, $-\sum_k\DVO_{c,k}\,\delta_k=\verif{cap09-escenario-steepener-lineal}{46587.20}$, con una diferencia de segundo orden de unos $14$ \MXN.
+
+\paragraph{Ejemplo 3: VaR delta-normal.} La exposición a TIIE-F del mismo swap es, por~\eqref{eq:cap09-exp-tasa}, $e=\verif{cap09-var-exposicion-tiie}{18722.72}$ \MXN/\pb{} (la del DV01 con signo opuesto); sus exposiciones a SOFR y USDMXN son cero. Con $\sigma_{\cTIIE}=4$~\pb{} diarios, $\alpha=0.99$ y $H=1$, por~\eqref{eq:cap09-var-param}, $\VaR{0.99}(1)=q_{0.99}\cdot4\cdot18\,722.72=\verif{cap09-var-irs}{174222.19}$ \MXN, donde $q_{0.99}=\verif{cap09-z-99}{2.3263478744}$ (tolerancia $10^{-9}$, el error de la aproximación de Acklam; el valor exacto es $2.3263478740$). Con tres factores: exposiciones $e=(300\,000,\,-120\,000,\,2\,000\,000)$, volatilidades $(4,\,5,\,0.0075)$ y las correlaciones de MX-DEMO ($\rho_{12}=0.35$, $\rho_{13}=0.30$, $\rho_{23}=-0.10$), los términos $e_f\sigma_f$ son $(1\,200\,000,\,-600\,000,\,15\,000)$, la forma cuadrática vale $1.308825\times10^{12}$ y su raíz $1\,144\,038.90$; con $H=10$ días, $\VaR{0.99}(10)=2.3263478744\times\sqrt{10}\times1\,144\,038.90=\verif{cap09-var-vector}{8416188.41}$ \MXN. Los tres VaR por factor suman $\verif{cap09-var-suma-factores}{13352152.61}$, mayor que el total: el beneficio de diversificación.
+
+\paragraph{Ejemplo 4: VaR histórico y ES.} Se carga (\codigo{docs/tex/verificacion/cap09_riesgo.py}{historia_csv}) una historia de $W=60$ días hábiles que terminan el 2026-11-10 con cambio de TIIE-F $x_t=0.1\,(t-30.5)$~\pb, $t=1$ el día más antiguo (2026-08-19), y cambios nulos de SOFR y USDMXN. Con $e=18\,722.72$ el resultado diario es $\Pi_t=e\,x_t$ y las pérdidas más grandes son $L_{(1)}=2.95\,e$, $L_{(2)}=2.85\,e$, $L_{(3)}=2.75\,e$. Con $\alpha=0.95$, $\kappa=\lceil60\times0.05\rceil=3$ por~\eqref{eq:cap09-k}, así que $\VaR{0.95}^{\mathrm{hist}}(1)=2.75\,e=\verif{cap09-var-historico}{51487.47}$ y $\ES{0.95}^{\mathrm{hist}}(1)=\tfrac13(2.95+2.85+2.75)\,e=2.85\,e=\verif{cap09-es-historico}{53359.74}$ \MXN. El peor día es el 2026-08-19, con resultado $-2.95\,e=\verif{cap09-peor-dia}{-55232.01}$ \MXN. La serie es una ilustración construida a mano, no una historia de mercado.
+
+\paragraph{Ejemplo 5: límite.} Un límite de DV01 de TIIE-F de $\Lambda=20\,000$ \MXN: el uso por~\eqref{eq:cap09-uso} es $U=\bigl|\DVO^{\parallel}_{\cTIIE}\bigr|=\verif{cap09-limite-uso}{18722.72}$ y, por~\eqref{eq:cap09-pct}, $u=\verif{cap09-limite-pct}{93.61357585}$ (tolerancia $10^{-6}$), por lo que el estado es \texttt{alerta}.
+
+\paragraph{Ejemplo 6: cascada.} Se añade un forward FX de compra de $10$ millones de USD a $182$ días con strike $19.05$ y se crea el snapshot D1 con la misma fecha: cotizaciones de TIIE-F $+25~\pb$, de SOFR $-25~\pb$ y spot $+3~\%$. Para el IRS, todo el P\&L está en el paso de TIIE-F: $\verif{cap09-explain-irs-tiie}{470728.06}$. Para el forward FX el P\&L oficial es $\verif{cap09-explain-fwd-pnl}{5940857.84}$ y se reparte en TIIE-F $\verif{cap09-explain-fwd-tiie}{231177.99}$ (el forward descuenta en \MXN), SOFR $\verif{cap09-explain-fwd-sofr}{226698.17}$ (el forward FX depende de las dos curvas) y tipo de cambio $\verif{cap09-explain-fwd-fx}{5482981.69}$, con residuo $\verif{cap09-explain-residuo}{0.000000}$ (tolerancia $10^{-6}$). Los componentes de paso del tiempo, puntos forward y base de MXN-USD (D1 conserva esas cotizaciones), volatilidad, operaciones nuevas y eventos son cero; el reparto entre TIIE-F, SOFR y tipo de cambio depende del orden de la cascada.
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap09-validacion}
+
+Las pruebas del backend que cubren este capítulo son (todas en \texttt{desk/api/tests/}):
+\begin{itemize}
+  \item DV01 y escenarios: \codigo{desk/api/tests/test_risk_dv01_scenarios.py}{test_key_rates_add_up_to_parallel}
+        (la escalera suma al paralelo dentro de $2~\%$, producto por producto en
+        \codigo{desk/api/tests/test_risk_dv01_scenarios.py}{test_key_rates_add_up_to_parallel_per_product}),
+        \codigo{desk/api/tests/test_risk_dv01_scenarios.py}{test_dv01_sign_convention_payer_loses_when_rates_fall} y
+        \codigo{desk/api/tests/test_risk_dv01_scenarios.py}{test_steepener_follows_linear_ramp_of_key_rates};
+        los escenarios combinados: \codigo{desk/api/tests/test_scenario_sets.py}{test_combined_shocks_are_chained_on_the_same_context}.
+  \item VaR paramétrico: \codigo{desk/api/tests/test_risk_var.py}{test_rate_exposure_is_minus_parallel_dv01},
+        \codigo{desk/api/tests/test_risk_var.py}{test_single_fx_forward_matches_closed_form} y
+        \codigo{desk/api/tests/test_risk_var.py}{test_var_scales_with_sqrt_horizon}.
+  \item VaR histórico: \codigo{desk/api/tests/test_hist_var.py}{test_percentile_and_es_follow_the_definition}
+        (cuantil $\kappa=\lceil W(1-\alpha)\rceil$ y ES a $10^{-12}$ relativo) y
+        \codigo{desk/api/tests/test_hist_var.py}{test_r3_historical_matches_parametric_on_normal_history}
+        (con historia normal de $5000$ días, el VaR histórico queda a menos de $10~\%$ del paramétrico);
+        historia sintética: \codigo{desk/api/tests/test_factor_history.py}{test_seed_creates_500_rows_per_factor_once}.
+  \item Cascada: \codigo{desk/api/tests/test_pnl_explain.py}{test_rolled_identical_market_is_all_carry} y
+        \codigo{desk/api/tests/test_pnl_explain.py}{test_cascade_failure_sends_the_pnl_to_residual}.
+  \item Límites: \codigo{desk/api/tests/test_limits.py}{test_status_at_thresholds} y
+        \codigo{desk/api/tests/test_limits.py}{test_check_inserts_one_breach_per_limit_and_is_idempotent}.
+\end{itemize}
+En C++ (GoogleTest): \texttt{ScenarioEngine.KeyRateLadderSumsToParallelUnderLinear} y las demás pruebas de
+\codigo{tests/test_scenario.cpp}{linearCurve} comprueban el motor~\eqref{eq:cap09-dv01-motor} (la escalera suma al paralelo con
+$O(h^2)$ bajo interpolación lineal); \codigo{tests/test_delta_normal_var.cpp}{deltaNormalVaR} cubre~\eqref{eq:cap09-var-param}
+(un factor contra forma cerrada, correlación $\pm1$, exposiciones opuestas, entradas inválidas). Los enlaces a
+\texttt{qfpy} se prueban en \codigo{tests/test_scenario_py.py}{ScenarioEngineBindings}.
+
+\begin{limites}
+  \begin{itemize}
+    \item \textbf{No hay caso de QuantLib para las cifras de riesgo.} La validación del capítulo~\ref{cap:validacion} compara la valuación por producto de la que parten el DV01, los escenarios y el VaR, no las propias cifras de riesgo.
+    \item \textbf{VaR delta-normal.} Es lineal: no incluye convexidad ni vega (cap/floor, swaption y opciones se capturan solo por su delta de tasa y de tipo de cambio). Solo hay tres factores de movimiento paralelo (sin factores por plazo); la normalidad, la media cero y las volatilidades y correlaciones son las del snapshot, sintéticas en MX-DEMO. La exposición de USDMXN se calcula respecto de un rendimiento relativo (choques de $\pm1~\%$), mientras que la historia usa rendimientos logarítmicos: coinciden a primer orden.
+    \item \textbf{VaR histórico.} Es por sensibilidades, no por revaluación completa; la ventana es fija; el horizonte multiplica por $\sqrt H$. La historia sintética de MX-DEMO (500 días hábiles, semilla 20261110) es inventada; la fuente \texttt{live} solo cubre SOFR (proxy del Tesoro a 5 años) y USDMXN, de modo que la historia de TIIE-F observada viene de CSV o de fijaciones. Quedan fuera la revaluación completa, el Monte Carlo del portafolio y las pruebas de respaldo del VaR.
+    \item \textbf{Escenarios.} Los choques son sobre las tasas cero de las curvas ya construidas, no sobre las cotizaciones. Los escenarios históricos son aproximaciones con choques fijos aplicados a la vez, no reproducen la curva completa de esas fechas. Los escenarios solo aceptan TIIE-F y SOFR; MXN-USD solo entra al DV01 por pilar y se recalibra, con cotizaciones fijas, en los demás casos.
+    \item \textbf{DV01.} El paralelo es unilateral y el de pilar es central; la suma por pilar difiere del paralelo y, en un portafolio casi neutro en DV01, la diferencia puede pasar de $2~\%$ del total.
+    \item \textbf{Cascada.} El orden fijo importa para la atribución; los efectos cruzados caen en el paso posterior; el residuo es cero por construcción y los datos que ningún bloque explica quedan en \texttt{eventos}. Una operación sin P\&L oficial (con error) no tiene componentes.
+    \item \textbf{Límites.} No hay flujo de aprobación; se registra un exceso por límite y fecha de valuación; el límite de DV01 mide el valor absoluto del DV01 paralelo de TIIE-F o de SOFR; el de \texttt{var} es siempre el paramétrico a 1 día y $99~\%$; no hay límites sobre MXN-USD.
+    \item \textbf{Crédito.} El CVA informativo no entra en este capítulo (capítulo~\ref{cap:xva}).
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap09-referencias}
+
+El VaR de varianzas y covarianzas y la simulación histórica siguen las exposiciones estándar de \citet{jorion2007} y \citet{mcneil2015}; la definición de cuantil muestral es la de \citet{hyndman1996}, el déficit esperado se compara con \citet{acerbi2002} y la escalera de DV01 por pilar es el análogo en pesos de las duraciones por vértice de \citet{ho1992}.
