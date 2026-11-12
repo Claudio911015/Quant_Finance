@@ -59,8 +59,8 @@ para la moneda de un factor (M = \MXN, curva \cTIIE; U = \USD, curva \cSOFR). Lo
         curso. $F_i(d)$: factor compuesto del periodo $i$ en el día $d$; $D_\ell(d,e)$: factor de descuento de la
         pata; $g_i(d)$: cociente de descuento con base. $V_k(d)$: valor de la operación $k$ y
         $V(d)=\sum_kV_k(d)$ el del conjunto, en \MXN.
-  \item \emph{Perfiles y ajustes}. $t_i=d_i/365$: fechas de la malla de reporte ($d_0=0$, luego fechas
-        mensuales); $V^+=\max(V,0)$ y $V^-=\max(-V,0)$; $\mathrm{EPE}$, $\mathrm{ENE}$, $\mathrm{PFE}_\alpha$ sin
+  \item \emph{Perfiles y ajustes}. $t_i=d_i/365$: fechas de la malla de integración $\mathcal G$ ($d_0=0$; el perfil que
+        se publica es su subconjunto mensual, sección~\ref{sec:cap14-perfiles}); $V^+=\max(V,0)$ y $V^-=\max(-V,0)$; $\mathrm{EPE}$, $\mathrm{ENE}$, $\mathrm{PFE}_\alpha$ sin
         descontar y $\mathrm{EPE}^*$, $\mathrm{ENE}^*$ descontadas con $\mathcal B$; $s_f$: diferencial de fondeo
         (tasa anual); $n$: número de trayectorias (el símbolo $N$ es el nocional); $\mathcal N$: conjunto de
         compensación vigente de una contraparte y $\mathcal C$: operación candidata del XVA incremental.
@@ -244,6 +244,10 @@ $y_c$, $m_c$, $M_c$ y $q$ están en \codigo{src/xva/exposure_engine.cpp}{buildGr
 \texttt{std::mt19937\_64} sembrado con $(\text{semilla},p)$ \citep[cap.~3]{glasserman2003}: la trayectoria no depende
 de qué instrumentos se simulen ni de qué tan lejos llegue el horizonte (un horizonte mayor sólo añade normales), y
 por eso dos conjuntos simulados en la misma llamada, o en dos llamadas con la misma semilla, comparten trayectorias.
+Por la misma independencia, \codigo{src/xva/exposure_engine.cpp}{ExposureEngine::simulate} reparte las trayectorias en
+bloques contiguos entre los hilos del equipo (\codigo{src/xva/exposure_engine.cpp}{forEachPathChunk}): cada una escribe solo
+su fila, así que el resultado no depende del número de hilos. Es lo que permite medir la exposición en cientos de fechas
+(la malla de integración) sin alargar la respuesta de la API.
 
 \subsection{Bono afín y revaluación de las patas}\label{sec:cap14-patas}
 
@@ -329,11 +333,23 @@ parámetro calibrado ni ajuste (\codigo{src/xva/exposure_engine.cpp}{ExposureEng
 
 \subsection{Perfiles de exposición}\label{sec:cap14-perfiles}
 
-El perfil se reporta en $d_0=0$ y en fechas mensuales: $\text{as\_of}+k$ meses (el mismo día del mes, o el último día
-si el mes no lo tiene) para $k=1,\dots,K$, con $K$ el primero cuya fecha es mayor o igual que el último vencimiento
-de las operaciones incluidas (\codigo{desk/api/risk/xva.py}{report_days},
-\codigo{desk/api/risk/credit.py}{_grid}); $t_i=d_i/365$. Con $n$ trayectorias y $V_p(t_i)$ el valor del conjunto en la
-trayectoria $p$,
+El motor simula siempre por días (sección~\ref{sec:cap14-paso}); lo que cambia de una malla a otra es en qué fechas
+se mide la exposición. Hay dos mallas, en días desde la fecha de valuación $d_0=0$:
+\begin{itemize}
+  \item \emph{La malla del perfil publicado}: $d_0=0$ y fechas mensuales $\text{as\_of}+k$ meses (el mismo día del mes,
+        o el último día si el mes no lo tiene) para $k=1,\dots,K$, con $K$ el primero cuya fecha es mayor o igual que el
+        último vencimiento de las operaciones incluidas (\codigo{desk/api/risk/xva.py}{report_days},
+        \codigo{desk/api/risk/credit.py}{_grid}). Es la que ve la pantalla (\texttt{profile} de \texttt{GET /api/xva},
+        \texttt{before}/\texttt{after} del incremental y \texttt{GET /api/credit/exposure}); los máximos de EPE y PFE que
+        se publican son los de este perfil.
+  \item \emph{La malla de integración} $\mathcal G$ (\codigo{desk/api/risk/xva.py}{integration_days}): la unión de la
+        mensual, un día de cada $\Delta_g=3$ desde $d_0$ hasta el último mes
+        (\codigo{desk/api/risk/xva.py}{INTEGRATION_STEP}) y, de cada operación incluida, sus fechas de pago $e_i$ (la
+        última es el vencimiento), su fecha de inicio $\iota_1$ si es futura (intercambio inicial de nocionales) y el
+        día anterior a cada una de ellas. Sobre $\mathcal G$ se calculan CVA, DVA y FVA y sus errores estándar
+        (sección~\ref{sec:cap14-xva}); el perfil publicado es el subconjunto de $\mathcal G$ que cae en la malla mensual.
+\end{itemize}
+$t_i=d_i/365$. Con $n$ trayectorias y $V_p(t_i)$ el valor del conjunto en la trayectoria $p$, para $t_i\in\mathcal G$,
 \begin{equation}\label{eq:cap14-perfiles}
 \begin{aligned}
   \mathrm{EPE}(t_i)&=\tfrac1n\sum_p V_p^+(t_i),\qquad \mathrm{ENE}(t_i)=\tfrac1n\sum_p V_p^-(t_i),\\
@@ -351,7 +367,7 @@ Todo se calcula en \codigo{src/xva/exposure_engine.cpp}{ExposureEngine::simulate
 
 Sean $S_c$ y $S_o$ las supervivencias de la contraparte y propia (ecuación~\eqref{eq:cap14-supervivencia}),
 $\mathrm{LGD}_c=1-R_c$, $\mathrm{LGD}_o=1-R_o$ y $\Delta S_{c,i}=S_c(t_{i-1})-S_c(t_i)$. Con las definiciones de
-\citet{gregory2015} y \citet{brigo2013} adaptadas a la malla de reporte,
+\citet{gregory2015} y \citet{brigo2013} adaptadas a la malla de integración,
 \begin{align}
   \mathrm{CVA}&=\mathrm{LGD}_c\sum_{i\ge1}\mathrm{EPE}^*(t_i)\,\Delta S_{c,i}, \label{eq:cap14-cva}\\
   \mathrm{DVA}&=\mathrm{LGD}_o\sum_{i\ge1}\mathrm{ENE}^*(t_i)\,\Delta S_{o,i}, \label{eq:cap14-dva}\\
@@ -371,6 +387,16 @@ calcula sin condicionar a ningún incumplimiento. El error estándar del CVA sal
 publica) y el FVA no tiene error estándar. Se implementa en \codigo{src/xva/exposure_engine.cpp}{computeXva}
 (con \codigo{src/xva/exposure_engine.cpp}{standardError}); el resultado es
 \codigo{include/qf/xva/exposure_engine.hpp}{XvaResult} y el binding \codigo{src/python_bindings/xva_bindings.cpp}{compute_xva}.
+
+\paragraph{Discretización.} Las sumas son la regla del \emph{extremo derecho}: el intervalo $(t_{i-1},t_i]$ lleva la
+exposición de $t_i$. Un flujo con día $\le d$ ya está pagado y fuera de $V(d)$, así que $V$ cae al pagar; por eso
+$\mathcal G$ incluye el día anterior a cada pago, la última fecha que todavía incluye el flujo: sin él, el intervalo que
+termina en el pago llevaría la exposición ya sin el flujo (y el que contiene al vencimiento, exposición cero). Entre
+pagos la exposición varía despacio y su error es de primer orden en el paso $\Delta_g$ (positivo mientras la exposición
+crece). La malla mensual sola, con el mismo extremo derecho, sesgaba el CVA $\approx3\%$ a la baja y daba CVA exactamente
+cero a una operación que vence antes del primer mes (hallazgo H21, ejemplos de la sección~\ref{sec:cap14-ej-desk}). Con
+$\mathcal G$ el CVA queda a menos de $0.5\%$ del que da la malla diaria con las mismas trayectorias, y el DVA y el FVA a
+menos de $1\%$, en el portafolio sembrado y en el caso del ejemplo.
 
 \begin{diferencia}
   El CVA y el DVA bilaterales de \citet{brigo2013} y \citet{gregory2015} multiplican cada término por la
@@ -392,7 +418,7 @@ guarda. Para cada componente $\bullet\in\{\mathrm{CVA},\mathrm{DVA},\mathrm{FVA}
   \Delta^{\mathrm{pb}}\bullet(\mathcal C)=10^{4}\,\frac{\Delta\bullet(\mathcal C)}{N_{\mathcal C}\cdot\Spot^{\mathbf 1_{\{\mathcal C\ \text{en USD}\}}}},
 \end{equation}
 con $N_{\mathcal C}$ el nocional de la candidata (el nocional en \USD\ se convierte con el spot). Los dos conjuntos se simulan
-en una sola llamada del motor (\texttt{simulate} con dos conjuntos), con la malla de reporte del conjunto ampliado, y
+en una sola llamada del motor (\texttt{simulate} con dos conjuntos), con la malla de integración del conjunto ampliado (las fechas de la candidata incluidas), y
 por la independencia de las trayectorias respecto de los instrumentos (sección~\ref{sec:cap14-paso}) comparten
 las mismas: la diferencia no lleva ruido de Monte Carlo \emph{entre corridas}. De ahí tres propiedades que prueba
 el repositorio:
@@ -401,7 +427,10 @@ el repositorio:
         conjunto lo deja con exposición cero, así que $\Delta\bullet=-\bullet(\mathcal N)$ con igualdad exacta de
         flotantes (con varias operaciones por lado la suma de flotantes deja un residuo del orden de $10^{-10}$).
   \item \emph{Coherencia con pactar}: guardar la candidata con \texttt{POST /api/trades} y pedir \texttt{GET /api/xva}
-        da el «después» (diferencia relativa $\le10^{-6}$).
+        da el «después» (diferencia relativa $\le10^{-6}$). El «antes» sale de la malla del conjunto ampliado, que añade
+        las fechas de la candidata a las del conjunto previo: coincide con el \texttt{GET} previo en el perfil y los
+        máximos, y en el XVA hasta la discretización (medido: $\le1.4\times10^{-4}$ relativo; exacto cuando las fechas de
+        la candidata ya estaban en la malla).
   \item \emph{Compensación}: $\mathrm{CVA}(A\cup B)\le\mathrm{CVA}(A)+\mathrm{CVA}(B)$ con las mismas trayectorias.
 \end{enumerate}
 El incremental \emph{no} es una asignación del XVA de la cartera a cada operación existente (no hay contribuciones
@@ -445,8 +474,11 @@ da forma a la respuesta (\codigo{desk/api/risk/xva.py}{compute}). Para cada cont
         (capítulo~\ref{cap:xccy}; la frase de la Metodología «cada operación se descuenta con la curva de su contraparte» solo
         vale para el IRS TIIE-F, hallazgo H22). \textbf{No se modela margen ni colateral en la exposición.}
   \item \emph{Motor.} \codigo{desk/api/risk/xva.py}{engine} construye el mercado con las curvas TIIE-F, SOFR y MXN-USD
-        del snapshot (las del capítulo~\ref{cap:curvas}) y el spot; el crédito sale de
-        \codigo{desk/api/risk/xva.py}{credit_for} y \codigo{desk/api/risk/xva.py}{own_credit}.
+        del snapshot (las del capítulo~\ref{cap:curvas}) y el spot, y recibe la malla de integración que arma
+        \codigo{desk/api/risk/xva.py}{integration_days} desde las especificaciones; el perfil que se publica se reduce
+        después a las fechas mensuales (\codigo{desk/api/risk/xva.py}{_shown}), y los máximos de EPE y PFE salen de ese perfil. El
+        crédito sale de \codigo{desk/api/risk/xva.py}{credit_for} y \codigo{desk/api/risk/xva.py}{own_credit}. El
+        \texttt{GET /api/xva} declara la malla en \texttt{assumptions} (\codigo{desk/api/risk/xva.py}{INTEGRATION_NOTE}).
 \end{enumerate}
 La pestaña de exposición de crédito (\texttt{GET /api/credit/exposure},
 \codigo{desk/api/risk/credit.py}{exposure}) usa la misma corrida (\codigo{desk/api/risk/xva.py}{compute_detailed}), de
@@ -527,7 +559,7 @@ $100$~\pb\ el bootstrap lanza «quote at 2y implies a negative hazard rate».
 
 Un swap \MXN\ pagador de un solo periodo, $0\to730$ días, $\Nom=10^{8}$, $\K=8.5\%$, curva TIIE-F plana a $9\%$ continuo
 (y SOFR plana a $4\%$, spot $18.6$), $a_{\mathrm M}=0.05$, $\sigma_{\mathrm M}=0.01$, riesgo de crédito plano
-($\lambda_c=2\%$, $\lambda_o=1\%$, $\mathrm{LGD}=0.6$ ambas), $s_f=0.5\%$ y malla de reporte cada 10 días. Con
+($\lambda_c=2\%$, $\lambda_o=1\%$, $\mathrm{LGD}=0.6$ ambas), $s_f=0.5\%$ y una malla de integración de 10 en 10 días. Con
 descuento y proyección en \cTIIE, la ecuación~\eqref{eq:cap14-pata} da $V(t)=\Nom\,[\mathcal B(t)-(1+\K\tau)P_{\mathrm M}(t,T)]$
 con $\tau=730/360$, así que
 \begin{equation}\label{eq:cap14-cerrada}
@@ -580,27 +612,39 @@ respecto del desk: el IRS vale $\verif{cap14-desk-pv-irs}{-1627937.9773}$ y el X
 $\verif{cap14-desk-pv-xccy}{515317.9126}$ \MXN, y el PV neto es $\verif{cap14-desk-pv-neto}{-1112620.0647}$ (tolerancia
 $5\times10^{-5}$).
 
-\emph{XVA} (tolerancia $5\times10^{-3}$ en \MXN). Con la malla mensual de 25 fechas,
+\emph{XVA} (tolerancia $5\times10^{-3}$ en \MXN). Con la malla de integración de \verif{cap14-malla-puntos}{326} fechas
+(el perfil publicado conserva las 25 mensuales),
 \[
-  \mathrm{CVA}=\verif{cap14-desk-cva}{91386.08}\ (\pm\verif{cap14-desk-cva-ee}{3125.94}),\quad
-  \mathrm{DVA}=\verif{cap14-desk-dva}{216723.02},\quad
-  \mathrm{FVA}=\verif{cap14-desk-fva}{-85043.91},
+  \mathrm{CVA}=\verif{cap14-desk-cva}{94549.03}\ (\pm\verif{cap14-desk-cva-ee}{3226.24}),\quad
+  \mathrm{DVA}=\verif{cap14-desk-dva}{225069.85},\quad
+  \mathrm{FVA}=\verif{cap14-desk-fva}{-87890.57},
 \]
 \[
-  \mathrm{Total}=\mathrm{CVA}-\mathrm{DVA}+\mathrm{FVA}=\verif{cap14-desk-total}{-210380.85},\qquad
+  \mathrm{Total}=\mathrm{CVA}-\mathrm{DVA}+\mathrm{FVA}=\verif{cap14-desk-total}{-218411.39},\qquad
   \max_i\mathrm{EPE}(t_i)=\verif{cap14-desk-epe-max}{7696645.47}.
 \]
 El total es negativo (un beneficio): el conjunto vale menos de cero, así que su exposición negativa es mayor que la
 positiva (DVA mayor que CVA) y el FVA es un beneficio. Cada cifra lleva su error estándar de Monte Carlo (el del CVA es $3.4\%$ del valor).
 
-\emph{Compensación.} Con las mismas trayectorias, el CVA del IRS solo es $\verif{cap14-sub-cva-irs}{2600.39}$ y el
-del XCCY solo $\verif{cap14-sub-cva-xccy}{98575.23}$, y el del conjunto $\verif{cap14-sub-cva-union}{91386.08}$ es menor
-que la suma: el ahorro por compensar es $\verif{cap14-sub-ahorro}{9789.54}$.
+\emph{Compensación.} Con las mismas trayectorias, el CVA del IRS solo es $\verif{cap14-sub-cva-irs}{2622.97}$ y el
+del XCCY solo $\verif{cap14-sub-cva-xccy}{101871.71}$, y el del conjunto $\verif{cap14-sub-cva-union}{94549.03}$ es menor
+que la suma: el ahorro por compensar es $\verif{cap14-sub-ahorro}{9945.65}$.
 
-\emph{Malla de reporte.} Con las mismas trayectorias y una malla \emph{diaria} en lugar de la mensual, el CVA sube a
-$\verif{cap14-malla-cva-diaria}{94347.53}$, es decir $\verif{cap14-malla-cambio}{3.2406}\,\%$ más (tolerancia $5\times10^{-5}$
-en el porcentaje): la malla mensual con el extremo derecho pierde la exposición del último intervalo, donde el
-XCCY aún tiene su intercambio final (límite de la sección~\ref{sec:cap14-limites}, hallazgo H21).
+\emph{Malla de integración.} Con las mismas trayectorias (el motor simula por días: la malla solo cambia en qué fechas se
+mide la exposición), el CVA con la malla \emph{mensual} sola es $\verif{cap14-malla-cva-mensual}{91386.08}$; con la
+\emph{diaria} ($\verif{cap14-malla-puntos-diaria}{730}$ fechas) es $\verif{cap14-malla-cva-diaria}{94347.53}$, es decir
+$\verif{cap14-malla-cambio}{3.2406}\,\%$ más (tolerancia $5\times10^{-5}$ en el porcentaje): la malla mensual con el extremo
+derecho pierde la exposición del último intervalo, donde el XCCY aún tiene su intercambio final (hallazgo H21, resuelto con
+la malla de integración). El CVA de arriba, con la malla de integración, difiere de la diaria en
+$\verif{cap14-malla-integracion-cva}{0.21}\,\%$, el DVA en $\verif{cap14-malla-integracion-dva}{0.07}\,\%$ y el FVA en
+$\verif{cap14-malla-integracion-fva}{-0.01}\,\%$ (cotas: $0.5\%$, $1\%$ y $1\%$).
+
+\emph{Swap de 28 días.} Un swap receptor de $100$ millones a $7.5\%$ con un solo periodo de 28 días, intensidad plana de
+$2\%$ para ambas partes y $\mathrm{LGD}=0.6$, vence antes de la primera fecha mensual (días 0 y 30). Con la malla mensual
+sola el CVA es $\verif{cap14-corto-cva-mensual}{0.00}$: el intervalo $(0,30]$ lleva la exposición de la fecha 30, ya sin el flujo. Con la
+malla de integración (que añade los días 27 y 28 y un día de cada tres) es $\verif{cap14-corto-cva-integracion}{35.72}$, y con la malla diaria
+$\verif{cap14-corto-cva-diaria}{35.72}$: difiere $\verif{cap14-corto-cva-dif}{0.002}\,\%$ en el CVA y
+$\verif{cap14-corto-fva-dif}{-0.010}\,\%$ en el FVA.
 
 \subsection{XVA incremental}\label{sec:cap14-ej-incremental}
 
@@ -612,19 +656,20 @@ ecuación~\eqref{eq:cap14-incremental} son (en \MXN, tolerancia $5\times10^{-3}$
 \toprule
 Sentido de la candidata & $\Delta$CVA & $\Delta$DVA & $\Delta$FVA & $\Delta$Total \\
 \midrule
-Pagador & \verif{cap14-inc-cva}{-2374.06} & \verif{cap14-inc-dva}{-480.44} & \verif{cap14-inc-fva}{-897.19} & \verif{cap14-inc-total}{-2790.81} \\
-Receptor (solo $\Delta$CVA) & \verif{cap14-inc-cva-receptor}{2839.71} & --- & --- & --- \\
+Pagador & \verif{cap14-inc-cva}{-2390.83} & \verif{cap14-inc-dva}{-508.53} & \verif{cap14-inc-fva}{-883.29} & \verif{cap14-inc-total}{-2765.59} \\
+Receptor (solo $\Delta$CVA) & \verif{cap14-inc-cva-receptor}{2869.85} & --- & --- & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
-y el incremental del total en puntos base del nocional es $\verif{cap14-inc-total-pb}{-0.1861}$~\pb\ (tolerancia $5\times10^{-5}$).
+y el incremental del total en puntos base del nocional es $\verif{cap14-inc-total-pb}{-0.1844}$~\pb\ (tolerancia $5\times10^{-5}$).
 Las dos candidatas tienen PV cero y el mismo nocional, y sin embargo el pagador reduce el CVA y el receptor lo
 aumenta: el signo del incremento depende de cómo se mueve la exposición de la candidata junto con la del conjunto, no de su
-PV. El «antes» coincide bit a bit con \texttt{GET /api/xva} (el script lo comprueba) y los incrementos son la
+PV. El «antes» coincide bit a bit con \texttt{GET /api/xva} (el script lo comprueba: las fechas de la candidata, que
+comparte calendario con el cross currency swap, ya estaban en la malla del conjunto) y los incrementos son la
 diferencia exacta de flotantes entre el «después» y el «antes».
 
 \emph{Espejo exacto.} Banco Espejo sólo tiene un IRS pagador como el de arriba; con su CVA y su total
-$\verif{cap14-espejo-cva-antes}{2600.39}$ y $\verif{cap14-espejo-total-antes}{-18639.04}$, la candidata espejo (el mismo swap
+$\verif{cap14-espejo-cva-antes}{2624.01}$ y $\verif{cap14-espejo-total-antes}{-19447.22}$, la candidata espejo (el mismo swap
 como receptor) deja el conjunto con exposición cero: CVA, DVA, FVA, EPE y PFE «después» valen $0$ y cada incremento
 es exactamente el negativo del «antes» (comparación de igualdad de flotantes en el script).
 
@@ -706,7 +751,13 @@ y \codigo{tests/test_ExposureEngine.cpp}{StandardErrorShrinksWithPathsAndCoversT
 \codigo{desk/api/tests/test_xva.py}{test_included_and_excluded_trades_are_listed_in_spanish}; el incremental:
 \codigo{desk/api/tests/test_xva_incremental.py}{test_mirror_of_the_only_trade_removes_all_the_xva_exactly},
 \codigo{desk/api/tests/test_xva_incremental.py}{test_saving_the_candidate_gives_the_after_state_and_the_before_is_the_previous_get}
-y \codigo{desk/api/tests/test_xva_incremental.py}{test_nothing_is_saved}. La auditoría del corte rehízo en
+y \codigo{desk/api/tests/test_xva_incremental.py}{test_nothing_is_saved}. La malla de integración
+(H21) se prueba en \codigo{desk/api/tests/test_xva_grid.py}{test_integration_days_hold_the_required_dates} (fechas que
+contiene), \codigo{desk/api/tests/test_xva_grid.py}{test_seeded_counterparties_integrate_within_the_bounds_of_the_daily_grid},
+\codigo{desk/api/tests/test_xva_grid.py}{test_the_finding_case_integrates_within_the_bounds_of_the_daily_grid} y
+\codigo{desk/api/tests/test_xva_grid.py}{test_a_28_day_swap_has_positive_cva} (las cotas frente a la malla diaria con las mismas trayectorias)
+y \codigo{desk/api/tests/test_xva_grid.py}{test_published_profiles_and_maxima_are_the_monthly_ones} (lo publicado sigue mensual); el reparto
+de trayectorias entre hilos, en \codigo{tests/test_ExposureEngine.cpp}{ThePathRowsDoNotDependOnHowPathsAreSplitAcrossThreads}. La auditoría del corte rehízo en
 papel la derivación del motor (documento del corte, fuera de este capítulo). El XVA \textbf{no} está contrastado con QuantLib:
 el capítulo~\ref{cap:validacion} compara otros siete productos y no incluye el motor de exposición ni el bootstrap de CDS.
 
@@ -776,11 +827,14 @@ curva plana, y con margen delgado precisamente por este sesgo. \texttt{CVACalcul
           cada operación; sin KVA ni MVA.
     \item \textbf{Periodo en curso en continuo.} Para $d>0$ el factor compuesto del periodo en curso usa la tasa corta simulada en
           continuo, mientras el desk capitaliza día por día con fijaciones (diferencia de segundo orden).
-    \item \textbf{Malla de reporte mensual con el extremo derecho.} El CVA, el DVA y el FVA se integran sobre las fechas mensuales, con el perfil
-          descontado del extremo derecho de cada intervalo. Una operación cuyo último flujo cae antes de la primera fecha
-          mensual tiene CVA exactamente cero, y el intervalo donde vence una operación con intercambio final aporta exposición
-          cero. En el ejemplo de la sección~\ref{sec:cap14-ej-desk} la malla mensual da un CVA $3.1\%$ menor que la diaria, comparable con su error
-          estándar; no está declarado en la Metodología (hallazgo H21).
+    \item \textbf{Malla de integración con el extremo derecho.} El CVA, el DVA y el FVA se integran sobre una malla más fina que
+          el perfil que se publica (mensual): cada 3 días más cada fecha de pago y de intercambio de nocional y el día anterior
+          a cada una, con la exposición de la fecha al final de cada intervalo. El sesgo respecto de una integración diaria es de
+          primer orden en el paso y positivo mientras la exposición crece; con las mismas trayectorias es menor que $0.5\%$ en el
+          CVA y que $1\%$ en el DVA y el FVA en el portafolio sembrado y en el ejemplo de la
+          sección~\ref{sec:cap14-ej-desk}, no una cota general. La malla mensual sola daba un CVA $3.1\%$ menor que la diaria y
+          CVA cero a una operación que vence antes del primer mes (hallazgo H21, resuelto). La memoria y el tiempo del motor
+          crecen con trayectorias $\times$ fechas de la malla.
     \item \textbf{Error de Monte Carlo.} Se informa el error estándar del CVA (con 2000 trayectorias por omisión, $3.4\%$ en el ejemplo);
           no el del DVA ni el del FVA, y los cuantiles del PFE son ruidosos con pocas trayectorias. La reproducibilidad depende de
           la biblioteca estándar usada (\texttt{std::normal\_distribution}).

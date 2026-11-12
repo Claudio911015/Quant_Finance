@@ -184,7 +184,8 @@ def sin_volatilidad():
 
 
 def malla_corta():
-    """Un swap de 28 días cuyo último pago cae antes de la primera fecha mensual: CVA exactamente 0 en la malla mensual."""
+    """Swap de 28 días cuyo último pago cae antes de la primera fecha mensual: CVA exactamente 0 con la malla
+    mensual sola (H21) y positivo con la malla de integración, a menos de 2 % de la diaria (mismas trayectorias)."""
     with tempfile.TemporaryDirectory() as carpeta:
         conn = db.connect(os.path.join(carpeta, "corto.db"))
         db.init_schema(conn)
@@ -199,11 +200,21 @@ def malla_corta():
         plana_cp = qfxva.FlatHazardRate(lambda_=0.02)
         mensual = xva.report_days(mkt.as_of, trades[0]["maturity_date"])
         assert mensual == [0, 30]
-        cvas = []
-        for dias in (mensual, list(range(0, 29))):
+        integracion = xva.integration_days(mensual, spec)
+        assert integracion == [0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 28, 30]
+        cvas, fvas = [], []
+        for dias in (mensual, integracion, list(range(0, 29))):
             p = xva.engine(mkt, modelo, params, dias).simulate([spec])[0]
-            cvas.append(qfxva.compute_xva(p, plana_cp, 0.6, plana_cp, 0.6, 0.005).cva)
-        assert cvas[0] == 0.0 and cvas[1] > 0.0
+            x = qfxva.compute_xva(p, plana_cp, 0.6, plana_cp, 0.6, 0.005)
+            cvas.append(x.cva)
+            fvas.append(x.fva)
+        assert cvas[0] == 0.0 and cvas[1] > 0.0 and cvas[2] > 0.0
+        assert abs(cvas[1] / cvas[2] - 1.0) < 0.02
+        comun.comprobar("cap14-corto-cva-mensual", cvas[0], 5e-3)
+        comun.comprobar("cap14-corto-cva-integracion", cvas[1], 5e-3)
+        comun.comprobar("cap14-corto-cva-diaria", cvas[2], 5e-3)
+        comun.comprobar("cap14-corto-cva-dif", 100.0 * (cvas[1] / cvas[2] - 1.0), 5e-4)
+        comun.comprobar("cap14-corto-fva-dif", 100.0 * (fvas[1] / fvas[2] - 1.0), 5e-4)
         conn.close()
     return cvas
 
@@ -254,18 +265,19 @@ def xva_del_desk(conn):
     # arranque exacto: el valor del motor en t = 0 es el PV del desk, operación por operación
     modelo = xva.model_from_snapshot(mkt)[0]
     params = xva.load_params(conn)
-    dias = xva.report_days(mkt.as_of, max(t["maturity_date"] for t in trades))
+    reporte = xva.report_days(mkt.as_of, max(t["maturity_date"] for t in trades))
+    dias = xva.integration_days(reporte, spec)
     motor = xva.engine(mkt, modelo, params, dias)
     del_motor = motor.trade_values_at_zero(spec)   # swaps primero, luego xccys: el mismo orden que `trades`
     for valor, fila, nocional in zip(del_motor, incluidas, (200e6, 10e6 * 18.2)):
         assert abs(valor - fila["pv_mxn"]) < 1e-6 * nocional
     comun.comprobar("cap14-desk-pv-irs", incluidas[0]["pv_mxn"], 5e-5)
     comun.comprobar("cap14-desk-pv-xccy", incluidas[1]["pv_mxn"], 5e-5)
-    return mkt, trades, spec, modelo, params, dias, motor
+    return mkt, trades, spec, modelo, params, reporte, dias, motor
 
 
 def xva_por_contraparte(conn):
-    mkt, trades, spec, modelo, params, dias, motor = xva_del_desk(conn)
+    mkt, trades, spec, modelo, params, reporte, dias, motor = xva_del_desk(conn)
     cuerpo = xva.compute(conn, "MX-DEMO")
     cp = [c for c in cuerpo["counterparties"] if c["counterparty"] == CP][0]
     comun.comprobar("cap14-desk-pv-neto", cp["pv_mxn"], 5e-5)
@@ -293,12 +305,24 @@ def xva_por_contraparte(conn):
     comun.comprobar("cap14-sub-cva-union", cva[2], 5e-3)
     comun.comprobar("cap14-sub-ahorro", cva[0] + cva[1] - cva[2], 5e-3)
 
-    # la malla mensual frente a la diaria, con las mismas trayectorias
+    # las tres mallas con las mismas trayectorias: mensual sola, de integración (la que usa el desk) y diaria
     ultimo = (max(t["maturity_date"] for t in trades) - mkt.as_of).days
-    diaria = xva.engine(mkt, modelo, params, list(range(0, ultimo + 2))).simulate([spec])[0]
-    x_diaria = qfxva.compute_xva(diaria, cp_curva, 0.6, propia, 0.6, params["funding_spread"])
+    por_malla = {}
+    for nombre, malla in (("mensual", reporte), ("diaria", list(range(0, ultimo + 2)))):
+        perfil = xva.engine(mkt, modelo, params, malla).simulate([spec])[0]
+        por_malla[nombre] = qfxva.compute_xva(perfil, cp_curva, 0.6, propia, 0.6, params["funding_spread"])
+    x_diaria, x_mensual = por_malla["diaria"], por_malla["mensual"]
+    assert x_mensual.cva < cp["cva_mxn"] < 1.005 * x_diaria.cva and x_mensual.cva < x_diaria.cva
+    comun.comprobar("cap14-malla-cva-mensual", x_mensual.cva, 5e-3)
     comun.comprobar("cap14-malla-cva-diaria", x_diaria.cva, 5e-3)
-    comun.comprobar("cap14-malla-cambio", 100.0 * (x_diaria.cva / cva[2] - 1.0), 5e-5)
+    comun.comprobar("cap14-malla-cambio", 100.0 * (x_diaria.cva / x_mensual.cva - 1.0), 5e-5)
+    comun.comprobar("cap14-malla-puntos", float(len(dias)), 0.5)
+    comun.comprobar("cap14-malla-puntos-diaria", float(ultimo + 2), 0.5)
+    for nombre, integrado, diario, cota in (("cva", cp["cva_mxn"], x_diaria.cva, 0.005),
+                                            ("dva", cp["dva_mxn"], x_diaria.dva, 0.01),
+                                            ("fva", cp["fva_mxn"], x_diaria.fva, 0.01)):
+        assert abs(integrado / diario - 1.0) < cota, nombre
+        comun.comprobar("cap14-malla-integracion-%s" % nombre, 100.0 * (integrado / diario - 1.0), 5e-3)
     return cp
 
 
