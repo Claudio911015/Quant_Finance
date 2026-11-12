@@ -358,6 +358,51 @@ def test_flat_model_delta_keeps_the_volatility_of_the_unbumped_spot(ctx, flat):
     assert _res(NT, p, ctx)["risk"]["delta"] == pytest.approx(_res(NT, p, flat(sigma))["risk"]["delta"], rel=1e-9)
 
 
+# ----------------------------------------------------------------------------- H23: nodo más allá de la barrera y choque de la delta
+
+
+@pytest.mark.parametrize("model", ["flat", "smile"])
+@pytest.mark.parametrize("sides,spot", [
+    ([(18.5, 1)], 18.6), ([(18.6, 1)], 18.6), ([(18.7, -1)], 18.6), ([(18.6, -1)], 18.6),  # una barrera: más allá y encima
+    ([(18.0, -1), (18.5, 1)], 18.6), ([(18.7, -1), (19.5, 1)], 18.6), ([(18.6, -1), (19.5, 1)], 18.6),  # dos barreras
+])
+def test_a_node_on_or_beyond_a_barrier_kills_the_path_even_if_every_node_is_on_the_dead_side(ctx, model, sides, spot):
+    """El puente da probabilidad de cruce < 1 si los dos extremos de un paso están del mismo lado, también del muerto."""
+    _, proc, sigma, ks, tab = fx_exotics._build({"days": 91, "model": model}, ctx, spot, 0.0)
+    assert fx_exotics._mc(proc, sigma, ks, tab, sides, 91 / 365.0, 2000) == (0.0, 0.0)
+
+
+def _distance(params):
+    return min(abs(SPOT - params[k]) for k in ("barrier", "lower", "upper") if k in params)
+
+
+NEAR = [pytest.param(NT, _nt(91, round(SPOT * (1 + sign * pct), 6), kind), id="nt-%s-%s" % (kind, pct))
+        for pct in (0.001, 0.005, 0.02) for kind, sign in (("up", 1), ("down", -1))] + [
+    pytest.param(DNT, _dnt(7, round(SPOT * 0.985, 6), round(SPOT * 1.005, 6)), id="dnt-narrow-spot-near-upper"),
+    pytest.param(DNT, _dnt(7, round(SPOT * 0.995, 6), round(SPOT * 1.015, 6)), id="dnt-narrow-spot-near-lower"),
+]
+
+
+@pytest.mark.parametrize("name,params", NEAR)
+def test_delta_with_a_barrier_near_the_spot_has_the_closed_form_sign_and_size(ctx, name, params):
+    """El choque no cruza la barrera: la delta de Monte Carlo sigue a la de la forma cerrada con el mismo choque."""
+    mc, an = _res(name, params, ctx), _res(name, dict(params, method="analytic"), ctx)
+    h = min(0.01 * SPOT, _distance(params) / 2)
+    assert mc["risk"]["delta"] * an["risk"]["delta"] > 0
+    assert abs(mc["risk"]["delta"] - an["risk"]["delta"]) <= max(0.10 * abs(an["risk"]["delta"]), 3 * _se(mc) / h)
+
+
+@pytest.mark.parametrize("name,params,h", [
+    (NT, _nt(91, 18.62, "up", method="analytic"), 0.01), (NT, _nt(91, 18.5, "down", method="analytic"), 0.05),  # también si se aleja
+    (DNT, _dnt(91, 18.59, 19.8, method="analytic"), 0.005), (NT, _nt(91, 19.5, "up", method="analytic"), 0.01 * SPOT),
+])
+def test_delta_bump_is_up_and_the_smaller_of_one_percent_and_half_the_distance_to_the_nearest_barrier(flat, monkeypatch, name, params, h):
+    base = _res(name, params, flat(0.12))
+    up = flat(0.12)
+    monkeypatch.setattr(up, "spot", SPOT + h)
+    assert base["risk"]["delta"] == pytest.approx((_res(name, params, up)["pv"] - base["pv"]) / h, rel=1e-9, abs=1e-6)
+
+
 def test_prices_at_once_with_different_valuation_dates_equal_the_serial_ones(ctx):
     """La fecha de valuación de QuantLib es global: dos hilos con fechas distintas no deben pisarse."""
     other = copy.copy(ctx)

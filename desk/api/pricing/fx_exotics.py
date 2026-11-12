@@ -78,20 +78,22 @@ def _build(p, mkt, spot, dvol):
     return dom, ql.GeneralizedBlackScholesProcess(q, fgn, dom, h, local), sigma, ks, tab
 
 
-def _mc(proc, sigma, ks, tab, bars, T, n):
-    """Probabilidad de no tocar (sin descontar) y su error estándar."""
+def _mc(proc, sigma, ks, tab, sides, T, n):
+    """Probabilidad de no tocar (sin descontar) y su error estándar; `sides` = [(barrera, +1 si queda arriba del spot)]."""
     rsg = ql.GaussianRandomSequenceGenerator(ql.UniformRandomSequenceGenerator(STEPS, ql.UniformRandomGenerator(SEED)))
     pg = ql.GaussianPathGenerator(proc, T, STEPS, rsg, False)
     X = np.array([list(pg.next().value()) for _ in range(n)])  # copia: el Path es un búfer reutilizado
     sig = sigma if tab is None else np.column_stack([np.interp(X[:, i], ks, tab[:, i]) for i in range(STEPS)])
-    s2, surv = sig ** 2 * T / STEPS, 1.0
-    for b in bars:
+    s2, surv, alive = sig ** 2 * T / STEPS, 1.0, True
+    for b, side in sides:
         lb = np.log(X / b)
         # Única matemática propia: P(cruzar b entre nodos) = exp(-2 ln(X_i/b) ln(X_i+1/b) / (s^2 dt)), puente browniano
-        # (Beaglehole-Dybvig-Zhou 1997; Glasserman 2004, 6.4). Un nodo al otro lado da probabilidad > 1 y supervivencia < 0.
+        # (Beaglehole-Dybvig-Zhou 1997; Glasserman 2004, 6.4). Un nodo al otro lado da probabilidad > 1 y supervivencia < 0;
+        # con los dos extremos del lado muerto da < 1, así que un nodo en la barrera o más allá mata la trayectoria aparte.
         # QuantLib 1.42 (Python) no da la probabilidad de cruce ni Monte Carlo de doble barrera; el no touch de una barrera podría replicarse con MCBarrierEngine y un diferencial de knock-outs, y se eligió un solo motor para los dos productos.
         surv = surv - np.exp(-2 * lb[:, :-1] * lb[:, 1:] / s2)
-    v = np.maximum(surv, 0).prod(axis=1)
+        alive = alive & (side * lb < 0).all(axis=1)
+    v = np.maximum(surv, 0).prod(axis=1) * alive
     return v.mean(), v.std(ddof=1) / n ** 0.5
 
 
@@ -122,7 +124,7 @@ def _value(p, mkt, spot, dvol, n):
     dom, proc, sigma, ks, tab = _build(p, mkt, spot, dvol)
     df = dom.discount(T)
     u, se = (_analytic(p, proc) / df, 0.0) if p["method"] == "analytic" else _mc(
-        proc, sigma, ks, tab, [p[f] for f, *_ in _sides(p)], T, n)
+        proc, sigma, ks, tab, [(p[f], side) for f, side, _ in _sides(p)], T, n)
     return k * df * u, abs(k) * df * se, u
 
 
@@ -133,7 +135,8 @@ def _result(p, mkt):
         ref = pv if p["method"] == "analytic" else _value(dict(p, model="flat", method="analytic"), mkt, spot, 0.0, 0)[0]
     except ApiError:  # sin referencia; con method=analytic ya falló arriba
         ref = None
-    delta = (_value(p, mkt, spot * (1 + SPOT_BUMP), 0.0, PATHS)[0] - pv) / (SPOT_BUMP * spot)
+    h = min(SPOT_BUMP * spot, min(abs(spot - p[f]) for f, *_ in _sides(p)) / 2)  # el choque nunca alcanza una barrera
+    delta = (_value(p, mkt, spot + h, 0.0, PATHS)[0] - pv) / h
     vega = _value(p, mkt, spot, VOL_BUMP, PATHS)[0] - pv
     return {
         "product": p["product"], "currency": "MXN", "pv": pv, "pv_mxn": pv,
