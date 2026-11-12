@@ -62,11 +62,15 @@ cd docs/tex && latexmk -pdf -interaction=nonstopmode -halt-on-error qfdesk.tex; 
 ```
 
 Debe terminar con `rc=0` y producir `qfdesk.pdf`. El PDF y los auxiliares **no se versionan** (`.gitignore`).
-Comprobaciones sobre `qfdesk.log` (ambas deben dar `0`):
+El documento completo necesita varias pasadas (cada capítulo desplaza páginas, índice y referencias): el
+`latexmkrc` fija `$max_repeat = 12`, así que la compilación en frío no depende del número de capítulos. Si
+vienes de otra versión del árbol, borra antes los auxiliares viejos (`latexmk -C`, o
+`rm -f *.aux *.toc *.out *.bbl *.blg capitulos/*.aux`): mezclados con los nuevos confunden a `latexmk`.
+Comprobaciones sobre `qfdesk.log` (ambas deben dar `0`; el log está en latin-1, por eso `grep -a`):
 
 ```bash
-grep -cE "(Citation|Reference) .* undefined" qfdesk.log
-grep -oE 'Overfull \\[hv]box \(([0-9.]+)pt' qfdesk.log | grep -oE '[0-9.]+' | awk '$1>10' | wc -l
+grep -aE "(Citation|Reference) .* undefined" qfdesk.log | wc -l
+grep -aoE 'Overfull \\[hv]box \(([0-9.]+)pt' qfdesk.log | grep -oE '[0-9.]+' | awk '$1>10' | wc -l
 ```
 
 Compilación privada (varios redactores en paralelo sin pisar los `.aux` unos de otros; `TAREA` = un nombre
@@ -109,7 +113,8 @@ python docs/tex/verificacion/referencias_codigo.py  # referencias \codigo; códi
   (`Clase.metodo` exige la clase y el método); en C++ `Clase::metodo(`, o `class|struct Clase` más
   `metodo(`, o el nombre simple como `class|struct|enum|namespace|using NOMBRE`, `NOMBRE(`, `NOMBRE =` o el
   literal `"NOMBRE"` de un binding pybind11; en `.ts/.tsx`, `function|const|class|interface|type NOMBRE`; en
-  `.json/.md/.sh/.txt`, que el texto aparezca. Imprime cada fallo y `N referencias, F fallos`; código 0 si
+  `.json/.md/.sh/.txt`, que el texto aparezca. Una prueba de GoogleTest se cita por el nombre del caso
+  (`\codigo{tests/test_ois_swap.cpp}{NpvAtParRateIsZero}` casa con `TEST(OisSwap, NpvAtParRateIsZero)`). Imprime cada fallo y `N referencias, F fallos`; código 0 si
   `F = 0` y `N >= 120` (`--min K` cambia el mínimo). No se citan números de línea (caducan). Las rutas
   deben ser archivos, no directorios, y el símbolo se escribe con `_` normal (no `\_`).
 
@@ -139,14 +144,15 @@ tolerancia es al menos media unidad del último dígito impreso (`comprobar` avi
 
 | Macro | Uso |
 |---|---|
-| `\codigo{ruta}{símbolo}` | referencia al código; imprime `ruta: símbolo` en monoespaciada y parte la línea en `/`, `_`, `.`, `:`, `-` |
+| `\codigo{ruta}{símbolo}` | referencia al código; imprime `ruta: símbolo` en monoespaciada y parte la línea en `/`, `_`, `.`, `-` y tras el segundo `:` de un `::` (nunca entre los dos) |
 | `\verif{id}{valor}` | número de un ejemplo verificable (`id` = `capNN-nombre`, único en el documento; `valor` decimal con punto, signo y exponente `e` opcionales) |
 | `\DF`, `\DFt`, `\zr`, `\fwd`, `\yf` | factor de descuento, tasa cero, forward simple, fracción de año |
 | `\Nom \K \ON \Rcomp \Ann \Spar \Spot \FxF \vol \Ncdf \PV \PnL \DVO \VaR \ES \hwa \hwsig \hwtheta \basis \E \Q` | símbolos comunes (apéndice A) |
-| `\cTIIE \cSOFR \cMXNcol` | etiquetas de curva (subíndices; modo matemático) |
+| `\cTIIE \cSOFR \cMXNcol` | etiquetas de curva (subíndices; imprimen TIIE, SOFR y MXN-USD, en cualquier modo) |
 | `\MXN \USD \pb` | texto; punto base se escribe `1~\pb` |
 
-Los símbolos sin argumento se usan en modo matemático (`$\Nom$`). Entornos: `diferencia` (recuadro «Diferencia
+Los símbolos sin argumento se usan en modo matemático (`$\Nom$`). Los pies de tabla dicen «Tabla N» (no
+«Cuadro»); el texto remite con «tabla~\ref{…}» o `\cref`. Entornos: `diferencia` (recuadro «Diferencia
 con la referencia»), `limites` (recuadro «Límites y supuestos») y `aviso` (aviso destacado; título opcional
 `\begin{aviso}[Aviso IFRS 9]`). Ecuaciones con `equation`/`align`, numeradas por capítulo; sin teoremas.
 `\todo[inline]{…}` solo en los capítulos marcador 14 y 15. `\cref`/`\Cref` y `\eqref` están disponibles.

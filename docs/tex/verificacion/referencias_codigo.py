@@ -27,7 +27,7 @@ def definido(ruta, sim, texto):
                 return True
             return buscar(r"\b(class|struct|namespace)\s+(\w+::)*%s\b" % e(partes[-2]), texto) and buscar(r"\b%s\s*[(=]" % nombre, texto)
         # nombre simple (o literal "nombre" de un binding pybind11)
-        return buscar(r"\b(class|struct|enum\s+class|enum|namespace|using)\s+%s\b|\b%s\s*[(=]|\"%s\"" % (nombre, nombre, nombre), texto)
+        return buscar(r"\b(class|struct|enum\s+class|enum|namespace|using)\s+%s\b|\b%s\s*[(=]|\"%s\"|\bTEST(_[FP])?\(\s*\w+\s*,\s*%s\s*\)" % (nombre, nombre, nombre, nombre), texto)
     if ext in (".ts", ".tsx"):
         return buscar(r"\b(function|const|class|interface|type)\s+%s\b" % e(sim.split(".")[-1]), texto)
     return sim in texto  # .json, .md, .sh, .txt y demas

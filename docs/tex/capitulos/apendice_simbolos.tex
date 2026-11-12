@@ -5,7 +5,7 @@
 % el archivo nunca queda sin filas: si no hay símbolos propios, deja la fila «Sin símbolos propios».
 \chapter{Tabla de símbolos}\label{ap:simbolos}
 
-Los símbolos comunes se definen una sola vez en \texttt{preambulo.tex}; los capítulos no los redefinen. Cada capítulo declara además, en su sección «Notación», los símbolos propios, que se recogen aquí por capítulo. Las macros sin argumento se usan en modo matemático (por ejemplo \texttt{\$\textbackslash Nom\$}).
+Los símbolos comunes se definen una sola vez en \texttt{preambulo.tex}; los capítulos no los redefinen. Cada capítulo declara además, en su sección «Notación», los símbolos propios, que se recogen aquí por capítulo. Las macros sin argumento se usan en modo matemático (por ejemplo \texttt{\$\textbackslash Nom\$}). Las letras sueltas ($s$, $f$, $h$, $d_k$, $\tau_i$, \ldots) se reutilizan entre capítulos con un significado local; en cada capítulo rige el de su sección «Notación», que es el que recoge la tabla bajo el encabezado de ese capítulo.
 
 {\small
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.19\textwidth}>{\raggedright\arraybackslash}p{0.38\textwidth}>{\raggedright\arraybackslash}p{0.18\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}@{}}
@@ -47,9 +47,9 @@ $\hwtheta$ & deriva dependiente del tiempo de Hull--White & tasa anual por año 
 $\basis$ & base de cross currency & \pb & \texttt{\textbackslash{}basis} \\
 $\E$ & esperanza & --- & \texttt{\textbackslash{}E} \\
 $\Q$ & medida de probabilidad & --- & \texttt{\textbackslash{}Q} \\
-$\mathrm{TIIE}$ & etiqueta (subíndice) de la curva OIS TIIE-F & --- & \texttt{\textbackslash{}cTIIE} \\
-$\mathrm{SOFR}$ & etiqueta de la curva OIS SOFR & --- & \texttt{\textbackslash{}cSOFR} \\
-$\mathrm{MXN|USD}$ & etiqueta de la curva de descuento MXN colateralizada en USD & --- & \texttt{\textbackslash{}cMXNcol} \\
+$\cTIIE$ & etiqueta (subíndice) de la curva OIS TIIE-F & --- & \texttt{\textbackslash{}cTIIE} \\
+$\cSOFR$ & etiqueta de la curva OIS SOFR & --- & \texttt{\textbackslash{}cSOFR} \\
+$\cMXNcol$ & etiqueta de la curva de descuento MXN colateralizada en USD & --- & \texttt{\textbackslash{}cMXNcol} \\
 \MXN & peso mexicano (texto) & --- & \texttt{\textbackslash{}MXN} \\
 \USD & dólar estadounidense (texto) & --- & \texttt{\textbackslash{}USD} \\
 \pb & punto base ($10^{-4}$); se escribe «1~\texttt{\textbackslash pb}» & --- & \texttt{\textbackslash{}pb} \\

@@ -4,3 +4,5 @@ use Cwd;
 my $aqui = getcwd();
 $ENV{'BSTINPUTS'} = $aqui . ':' . ($ENV{'BSTINPUTS'} // '');
 $ENV{'BIBINPUTS'} = $aqui . ':' . ($ENV{'BIBINPUTS'} // '');
+# El documento completo necesita mas de las 5 pasadas por omision (cada capitulo desplaza paginas, .toc y .aux).
+$max_repeat = 12;

@@ -11,10 +11,11 @@
 \usepackage{lmodern}
 \usepackage[english]{babel}
 \babelprovide[import,main]{spanish}
+\addto\captionsspanish{\renewcommand{\tablename}{Tabla}\renewcommand{\listtablename}{Índice de tablas}}
 \usepackage{csquotes}
-\usepackage[a4paper,top=2.6cm,bottom=2.6cm,left=2.8cm,right=2.8cm]{geometry}
+\usepackage[a4paper,top=2.6cm,bottom=2.6cm,left=2.8cm,right=2.8cm,marginparwidth=2.1cm,marginparsep=0.3cm]{geometry}
 \usepackage{microtype}
-\emergencystretch=2em
+\emergencystretch=6em
 
 % ---------------------------------------------------------------------------------------------------
 % Matemáticas, tablas, color y números
@@ -93,25 +94,36 @@
 
 % ---------------------------------------------------------------------------------------------------
 % \codigo{ruta}{símbolo}: referencia al código (R4). Imprime «ruta: símbolo» en monoespaciada, con
-% posibles cortes de línea tras `/`, `_`, `.`, `:` y `-`. La ruta es relativa a la raíz del repositorio y
+% posibles cortes de línea tras `/`, `_`, `.` y `-`, y tras el segundo `:` de un `::` (nunca entre los dos). La ruta es relativa a la raíz del repositorio y
 % no lleva números de línea. Se escribe con `_` normal (NO `\_`): scripts de verificación leen el .tex.
 % ---------------------------------------------------------------------------------------------------
 \ExplSyntaxOn
+\bool_new:N \l_qf_colon_bool
+% Punto de corte dentro de una ruta o un simbolo (sin glue: no se quiere ver huecos dentro de una ruta;
+% los parrafos con varias rutas seguidas se acomodan con \emergencystretch).
+\cs_new_protected:Npn \qf_codigo_corte:
+  { \allowbreak \bool_set_false:N \l_qf_colon_bool }
 \cs_new_protected:Npn \qf_codigo_cadena:n #1
   {
     \group_begin:
     \ttfamily
+    \bool_set_false:N \l_qf_colon_bool
     \str_map_inline:nn {#1}
       {
         \str_case:nnF {##1}
           {
-            { / } { /\allowbreak }
-            { _ } { \char95 \allowbreak }
-            { . } { .\allowbreak }
-            { : } { :\allowbreak }
-            { - } { -\allowbreak }
+            { / } { /\qf_codigo_corte: }
+            { _ } { \char95 \qf_codigo_corte: }
+            { . } { .\qf_codigo_corte: }
+            { - } { -\qf_codigo_corte: }
+            { : }
+              {
+                \bool_if:NTF \l_qf_colon_bool
+                  { :\qf_codigo_corte: }
+                  { : \bool_set_true:N \l_qf_colon_bool }
+              }
           }
-          { ##1 }
+          { ##1 \bool_set_false:N \l_qf_colon_bool }
       }
     \group_end:
   }
@@ -163,9 +175,9 @@
 \newcommand{\basis}{\ensuremath{b}}                     % base de cross currency
 \newcommand{\E}{\ensuremath{\mathbb{E}}}                % esperanza
 \newcommand{\Q}{\ensuremath{\mathbb{Q}}}                % medida
-\newcommand{\cTIIE}{\mathrm{TIIE}}                      % etiquetas de curva (subíndices, modo matemático)
-\newcommand{\cSOFR}{\mathrm{SOFR}}
-\newcommand{\cMXNcol}{\mathrm{MXN|USD}}
+\newcommand{\cTIIE}{\ensuremath{\mathrm{TIIE}}}               % etiquetas de curva (subíndices)
+\newcommand{\cSOFR}{\ensuremath{\mathrm{SOFR}}}
+\newcommand{\cMXNcol}{\ensuremath{\mathrm{MXN\text{-}USD}}}
 \newcommand{\MXN}{\textup{MXN}\xspace}                  % monedas (texto)
 \newcommand{\USD}{\textup{USD}\xspace}
 \newcommand{\pb}{\textup{pb}\xspace}                    % punto base; se escribe «1~\pb»

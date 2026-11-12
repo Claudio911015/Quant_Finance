@@ -9,10 +9,19 @@
 
 \begin{document}
 
-% T1: \nocite provisional, lo quita T11 (mientras los capítulos no citan las entradas base del .bib)
-\nocite{hull1990,jamshidian1989,garman1983,black1976,black1973,brigo2006,andersen2010,hull2018,gregory2015,glasserman2003,jorion2007,mcneil2015,hagan2006,iasb2014,nyfed2026,banxico2021}
-
-\maketitle
+\begin{titlepage}
+  \centering
+  \vspace*{0.2\textheight}
+  {\Huge\bfseries QF Desk\par}
+  \vspace{0.8cm}
+  {\LARGE Documentación técnica\par}
+  \vspace{0.5cm}
+  {\large Fórmulas, convenciones y referencias al código\par}
+  \vspace{2.5cm}
+  {\large Rama \texttt{feat/qf-desk}\par}
+  \vspace{0.3cm}
+  {\large \today\par}
+\end{titlepage}
 \tableofcontents
 
 \include{capitulos/cap01_introduccion}
@@ -34,6 +43,9 @@
 \appendix
 \include{capitulos/apendice_simbolos}
 
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{\bibname}
 \bibliographystyle{plainnat-es}
 \bibliography{referencias}
 
