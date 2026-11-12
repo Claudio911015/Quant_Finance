@@ -41,6 +41,7 @@ add_library(qf
     xva/netting_set.cpp
     xva/cva_calculator.cpp
     xva/exposure_profile.cpp
+    xva/piecewise_hazard_curve.cpp
 )
 
 target_include_directories(qf

@@ -1,6 +1,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <qf/xva/credit_curve.hpp>
+#include <qf/xva/piecewise_hazard_curve.hpp>
+#include <qf/termstructure/yieldcurve.hpp>
 #include <qf/xva/netting_set.hpp>
 #include <qf/xva/cva_result.hpp>
 #include <qf/xva/cva_calculator.hpp>
@@ -36,6 +38,43 @@ PYBIND11_MODULE(qfxva, m) {
              "Flat hazard rate: SP(t) = exp(-lambda * t). "
              "lambda_ in decimal (e.g. 0.02 = 200 bps).")
         .def("survival_probability", &FlatHazardRate::survivalProbability, py::arg("t"));
+
+    // ── PiecewiseHazardCurve / CDS bootstrap ──────────────────────
+    py::class_<PiecewiseHazardCurve, ICreditCurve>(m, "PiecewiseHazardCurve")
+        .def(py::init<std::vector<double>, std::vector<double>>(),
+             py::arg("times"), py::arg("hazards"),
+             "Piecewise-constant hazard curve: hazards[i] applies on (times[i-1], times[i]] "
+             "(times[-1] = 0), flat beyond the last vertex. ValueError on invalid input.")
+        .def("survival_probability", &PiecewiseHazardCurve::survivalProbability, py::arg("t"))
+        .def("hazard_rate", &PiecewiseHazardCurve::hazardRate, py::arg("t"))
+        .def("times", &PiecewiseHazardCurve::times)
+        .def("hazards", &PiecewiseHazardCurve::hazards);
+
+    py::class_<CdsQuote>(m, "CdsQuote")
+        .def(py::init([](double tenorYears, double spread) { return CdsQuote{tenorYears, spread}; }),
+             py::arg("tenor_years"), py::arg("spread"),
+             "Par CDS quote: tenor in years and spread in decimal (0.0080 = 80 bp).")
+        .def_readwrite("tenor_years", &CdsQuote::tenorYears)
+        .def_readwrite("spread",      &CdsQuote::spread);
+
+    // `discount` is a qfpy.YieldCurve: import qfpy BEFORE qfxva so both share the C++ type.
+    m.def("bootstrap_cds_curve",
+          [](const std::vector<CdsQuote>& quotes, double recovery,
+             const qf::termstructure::YieldCurve& discount) {
+              return bootstrapCdsCurve(quotes, recovery, discount);
+          },
+          py::arg("quotes"), py::arg("recovery"), py::arg("discount"),
+          "Bootstrap a PiecewiseHazardCurve so that every CdsQuote reprices to zero. "
+          "ValueError if the quotes imply a negative hazard rate or are invalid.");
+
+    m.def("cds_value",
+          [](const CdsQuote& quote, double recovery, const ICreditCurve& curve,
+             const qf::termstructure::YieldCurve& discount, double notional) {
+              return cdsValue(quote, recovery, curve, discount, notional);
+          },
+          py::arg("quote"), py::arg("recovery"), py::arg("curve"), py::arg("discount"),
+          py::arg("notional") = 1.0,
+          "Value of the CDS for the protection buyer (protection leg - premium leg), times notional.");
 
     // ── SwapType enum ─────────────────────────────────────────────
     // qfpy registers the same C++ enum; registering it twice makes `import qfxva` fail with
