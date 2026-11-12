@@ -332,7 +332,7 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Derivado fuera de mercado',
-        text: `${DECL_OFF_MARKET} Al designar, el alta avisa de esto, de que la prueba prospectiva no muestre relación económica, de una razón de cobertura que difiere de la de los nocionales en más de 1 %, de un flujo pronosticado en fin de semana (se liquidará con el spot del snapshot) y de una cobertura documentada más de un día después de su fecha de designación.`,
+        text: `${DECL_OFF_MARKET} Al designar, el alta avisa de esto, de que la prueba prospectiva no muestre relación económica, de una razón de cobertura que difiere de la de los nocionales en más de 1 %, de un flujo pronosticado en fin de semana (se liquidará con el spot del snapshot), de un flujo pronosticado en un día inhábil de México entre semana (se liquidará con el último FIX publicado) y de una cobertura documentada más de un día después de su fecha de designación.`,
       },
       {
         label: 'Simplificaciones',

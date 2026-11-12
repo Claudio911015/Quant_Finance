@@ -181,6 +181,7 @@ describe('MethodologyScreen', () => {
       renderScreen();
       expect(hedgeRow('Derivado fuera de mercado')).toContain('fuente de inefectividad');
       expect(hedgeRow('Derivado fuera de mercado')).toContain('fin de semana');
+      expect(hedgeRow('Derivado fuera de mercado')).toContain('día inhábil de México entre semana'); // H08
       const date = hedgeRow('Fecha de designación');
       expect(date).not.toContain('no es retroactiva'); // el sistema no puede garantizarlo
       expect(date).toContain('orden cronológico');
