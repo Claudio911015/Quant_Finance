@@ -100,7 +100,8 @@ con $T_i=\text{días}_i/365$ y la interpolación por omisión, lineal en strike
 \end{enumerate}
 El ancla $(0,0)$ hace que, para $T\le T_1$, $w=w_1\,T/T_1$ y por tanto $\vol(\K,T)=\sigma_1(\K)$: la
 extrapolación es plana \emph{en volatilidad} tanto antes del primer plazo como después del último, no plana
-en varianza. El constructor rechaza volatilidades no positivas, pilares no crecientes, menos de dos plazos o
+en varianza. (El comentario de contrato de la clase \texttt{VolSurface} dice «flat extrapolation on w»; el
+código hace lo descrito aquí y la discrepancia es el hallazgo H16 de \texttt{HALLAZGOS.md}.) El constructor rechaza volatilidades no positivas, pilares no crecientes, menos de dos plazos o
 dos strikes, y varianza total decreciente en el plazo en algún strike de la rejilla
 (\codigo{src/termstructure/volsurface.cpp}{VolSurface::validate}). El entorno de mercado prefiere la superficie
 al escalar plano cuando hay una registrada
@@ -279,21 +280,26 @@ valor del comprador.
 % -------------------------------------------------------------------------------------------------
 \section{Validación}\label{sec:cap04-validacion}
 
-Las pruebas de C++ comparan el valor con la fórmula calculada en la propia prueba: para el forward,
-paridad cubierta con factores de descuento de la curva, tasa forward, delta contra diferencia finita, compra
-igual a menos venta y que un choque al spot o a una curva se propaga al precio
-(casos \texttt{FxForward.NpvMatchesCoveredParityFormulaWithCurveDiscountFactors}, \texttt{ForwardRateIsSpotTimesDfRatio},
-\texttt{DeltaMatchesFiniteDifferenceOfSpot}, \texttt{BuyIsMinusSell} y \texttt{ReadsCurvesAndSpotByNameSoShocksAffectIt} de
-\codigo{tests/test_fx_forward.cpp}{FxForward}); para la opción de FX, que $c-p$ iguala al forward, que el
-precio coincide con Black--Scholes con la tasa foránea como dividendo, que delta y gamma coinciden con
-diferencias finitas y que la vega es por punto (casos \texttt{FxOption.CallMinusPutEqualsForwardNpvAtSameStrike},
-\texttt{PriceMatchesBlackScholesWithForeignRateAsDividendYield},
-\texttt{DeltaAndGammaMatchFiniteDifferencesOfSpot}, \texttt{VegaIsPerOneVolPoint} y
-\texttt{VolIsTakenFromSurfaceWhenPresent} de \codigo{tests/test_fx_option.cpp}{FxOption}). La superficie se prueba en
-\codigo{tests/test_volsurface.cpp}{VolSurface} (recuperación en los pilares, extrapolación plana en volatilidad,
-ancla del extremo corto y rechazo de arbitraje de calendario) y Black--Scholes en
-\codigo{tests/test_pricingengines.cpp}{blackScholes} (paridad put-call, valores conocidos, signos de las griegas).
-En el backend, \codigo{desk/api/tests/test_price_fx.py}{test_fx_forward_matches_interest_parity},
+Las pruebas de C++ calculan el valor esperado en la propia prueba. Para el forward
+(\codigo{tests/test_fx_forward.cpp}{FxForward}, suite \texttt{FxForward}):
+\begin{itemize}
+  \item \texttt{NpvMatchesCoveredParityFormulaWithCurveDiscountFactors}: el valor es la paridad cubierta con los factores de la curva;
+  \item \texttt{ForwardRateIsSpotTimesDfRatio} y \texttt{DeltaMatchesFiniteDifferenceOfSpot}: tasa forward y delta contra diferencia finita;
+  \item \texttt{BuyIsMinusSell}: compra igual a menos venta;
+  \item \texttt{ReadsCurvesAndSpotByNameSoShocksAffectIt}: un choque al spot o a una curva llega al precio.
+\end{itemize}
+Para la opción de FX (\codigo{tests/test_fx_option.cpp}{FxOption}, suite \texttt{FxOption}):
+\begin{itemize}
+  \item \texttt{CallMinusPutEqualsForwardNpvAtSameStrike}: $c-p$ iguala al valor del forward;
+  \item \texttt{PriceMatchesBlackScholesWithForeignRateAsDividendYield}: el precio es Black--Scholes con la tasa foránea como dividendo;
+  \item \texttt{DeltaAndGammaMatchFiniteDifferencesOfSpot} y \texttt{VegaIsPerOneVolPoint}: griegas y escala de la vega;
+  \item \texttt{VolIsTakenFromSurfaceWhenPresent}: la volatilidad sale de la superficie cuando existe.
+\end{itemize}
+La superficie se prueba en \codigo{tests/test_volsurface.cpp}{VolSurface} (recuperación en los pilares,
+extrapolación plana en volatilidad, ancla del extremo corto y rechazo de arbitraje de calendario) y
+Black--Scholes en \codigo{tests/test_pricingengines.cpp}{blackScholes} (paridad put-call, valores conocidos, signos
+de las griegas). En el backend,
+\codigo{desk/api/tests/test_price_fx.py}{test_fx_forward_matches_interest_parity},
 \codigo{desk/api/tests/test_price_fx.py}{test_fx_option_put_call_parity_against_forward},
 \codigo{desk/api/tests/test_price_fx.py}{test_equity_option_matches_black_scholes_times_quantity} y
 \codigo{desk/api/tests/test_price_fx.py}{test_equity_option_does_not_depend_on_market} cubren la composición con el
@@ -330,8 +336,10 @@ superficie, que solo prueban las pruebas propias de este capítulo.
           sin la curva, usa \texttt{TIIE-F} con el aviso \texttt{no\_csa\_curve}. Los puntos forward cotizados se
           mantienen fijos al recalibrar \texttt{MXN-USD}, así que un forward con colateral en dólares apenas
           reacciona a un choque de SOFR (Metodología, «Efecto del colateral»).
-    \item \emph{Datos.} En MX-DEMO la superficie y las curvas son sintéticas; en MKT-LIVE el spot y las
-          volatilidades USDMXN vienen de fuentes reales y el resto es sintético (Metodología, «Datos»).
+    \item \emph{Datos.} En MX-DEMO la superficie y las curvas son sintéticas. En MKT-LIVE solo el spot es de
+          una fuente real (FRED, no el FIX de Banxico); la curva SOFR es aproximada, la TIIE-F y la superficie
+          de volatilidad USDMXN son sintéticas porque no hay datos libres, y lo medido son las volatilidades
+          históricas de los factores de riesgo, que no entran en estos productos (Metodología, «Datos»).
     \item \emph{Opción sobre acción.} Europea, sin lado (la cantidad es positiva, así que la posición es
           siempre larga), con tasa, rendimiento por dividendos y volatilidad constantes capturados en la
           operación (no usa las curvas ni la superficie), sin dividendos discretos. La moneda se etiqueta como
