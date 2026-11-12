@@ -69,7 +69,7 @@ La API no confía en el llamador (\codigo{desk/api/events.py}{post_event}). Solo
 
 Los calendarios (\codigo{desk/api/calendars.py}{is_business_day}) existen solo para decidir si una fijación sin publicar es un hueco de datos o un día en que el índice no se publica. Un día es hábil del calendario $c$ si es de lunes a viernes y no es feriado de $c$:
 \begin{equation}\label{eq:cap08-habil}
-  B_c(d) = \mathbf{1}\bigl[\text{lunes} \le \mathrm{díasem}(d) \le \text{viernes}\bigr]\cdot\mathbf{1}\bigl[d \notin H_c\bigr],
+  B_c(d) = \mathbf{1}\bigl[\text{lunes} \le \text{díasem}(d) \le \text{viernes}\bigr]\cdot\mathbf{1}\bigl[d \notin H_c\bigr],
 \end{equation}
 con $H_c$ el conjunto de feriados de \codigo{desk/api/calendars.py}{holidays} para los años 2020--2040; fuera de ese rango no hay feriados, pero los fines de semana siguen cerrados (\codigo{desk/api/calendars.py}{is_holiday}). El calendario de cada índice es \codigo{desk/api/calendars.py}{INDEX_CALENDAR}: $\mathrm{MX}$ para TIIE-F y para el FIX USDMXN, $\mathrm{US}$ para SOFR. La TIIE de Fondeo se calcula con operaciones de reporto a plazo de un día hábil bancario \citep{banxico2021}, y SOFR se publica cada día hábil \citep{nyfed2026}: de ahí que el calendario del índice mande y no el del swap.
 

@@ -93,7 +93,7 @@ con $T_i=\text{días}_i/365$ y la interpolación por omisión, lineal en strike
         $[K_1,K_J]$ la extrapolación es plana (\codigo{src/math/interpolation.cpp}{Interpolator::operator()}).
         Se define $w_i(\K)=\sigma_i(\K)^2\,T_i$.
   \item \emph{Plazo.} Se interpola linealmente en $T$ la varianza total sobre los nodos
-        $(0,0),(T_1,w_1),\dots,(T_n,w_n)$ y se devuelve
+        $(0,0),\allowbreak(T_1,w_1),\allowbreak\dots,\allowbreak(T_n,w_n)$ y se devuelve
         \begin{equation}\label{eq:cap04-vol}
           \vol(\K,T)=\sqrt{\frac{w(\K,T)}{T}}\quad (T<T_n),\qquad \vol(\K,T)=\sigma_n(\K)\quad (T\ge T_n).
         \end{equation}
@@ -160,14 +160,16 @@ $r$ y rendimiento por dividendos $q$ constantes, todos capturados en la operaci�
 \end{equation}
 (\codigo{src/pricingengines/blackscholes.cpp}{blackScholes}) y el valor de la posición es $m\,c$ o $m\,p$ con
 $m>0$ títulos. Las medidas de riesgo del call, por título, son
-\begin{align}
-  \Delta &= e^{-qT}\Ncdf(d_1), &
-  \Gamma &= \frac{e^{-qT}\varphi(d_1)}{S_0\,\vol\sqrt T}, &
-  \nu &= \frac{S_0 e^{-qT}\varphi(d_1)\sqrt T}{100}, \nonumber\\
+\begin{equation}\label{eq:cap04-bs-griegas}
+\begin{aligned}
+  \Delta &= e^{-qT}\Ncdf(d_1), \qquad
+  \Gamma = \frac{e^{-qT}\varphi(d_1)}{S_0\,\vol\sqrt T}, \qquad
+  \nu = \frac{S_0 e^{-qT}\varphi(d_1)\sqrt T}{100}, \\
   \Theta &= \frac{1}{365}\Bigl[-\frac{S_0 e^{-qT}\varphi(d_1)\vol}{2\sqrt T} - r\K e^{-rT}\Ncdf(d_2)
-            + q S_0 e^{-qT}\Ncdf(d_1)\Bigr], &
-  \rho_r &= \frac{\K T e^{-rT}\Ncdf(d_2)}{100}, \label{eq:cap04-bs-griegas}
-\end{align}
+            + q S_0 e^{-qT}\Ncdf(d_1)\Bigr], \\
+  \rho_r &= \frac{\K T e^{-rT}\Ncdf(d_2)}{100},
+\end{aligned}
+\end{equation}
 y las del put son $\Delta=-e^{-qT}\Ncdf(-d_1)$,
 $\Theta=\frac{1}{365}\bigl[-\tfrac{S_0 e^{-qT}\varphi(d_1)\vol}{2\sqrt T}+r\K e^{-rT}\Ncdf(-d_2)-qS_0e^{-qT}\Ncdf(-d_1)\bigr]$
 y $\rho_r=-\K T e^{-rT}\Ncdf(-d_2)/100$, con la misma gamma y vega. El backend las multiplica por $m$

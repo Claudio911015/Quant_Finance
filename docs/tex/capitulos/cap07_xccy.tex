@@ -236,7 +236,7 @@ $\mathrm{DV01}_{\cMXNcol}=\verif{cap07-dv01-mxn-usd}{17402.6118}$ \MXN{} por $1$
 \section{Validación}\label{sec:cap07-validacion}
 
 La suite de C++ (\codigo{tests/test_xccy_swap.cpp}{XccySwap}, suite \texttt{XccySwap}) comprueba:
-\begin{itemize}
+\begin{itemize}\raggedright
   \item \texttt{ParSpreadMakesTheValueZero}: el valor al diferencial par es cero, al inicio, con inicio diferido y con un periodo en curso, y el par no depende del diferencial de partida ni del lado;
   \item \texttt{ValueIsLinearInTheSpreadWithTheMxnAnnuity}: el valor es lineal en el diferencial con la anualidad de la pata en pesos;
   \item \texttt{PayUsdIsMinusPayMxn}: los dos lados son opuestos;

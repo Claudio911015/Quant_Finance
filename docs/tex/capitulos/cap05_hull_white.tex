@@ -127,10 +127,11 @@ Un cap (floor) es la suma de $n$ caplets (floorlets). El calendario sale de uno 
 $t_i=i/f$ y $\delta=1/f$, y el de calendario explícito $t_0<t_1<\dots<t_n$ con $t_0\ge0$ (el que usa el
 envejecimiento, sección~\ref{sec:cap05-envejecimiento}). En ambos la fracción de devengo del periodo es
 \[
-  \tau_i = \texttt{periodFraction}(1/\delta_i,\ \mathrm{dcc}),
-  \qquad
+\begin{gathered}
+  \tau_i = \texttt{periodFraction}(1/\delta_i,\ \mathrm{dcc}), \\
   \tau_i = \delta_i\cdot\tfrac{365}{360}\ \text{si dcc = ACT/360},\quad
   \tau_i=\delta_i\ \text{si dcc = ACT/365},
+\end{gathered}
 \]
 definida en \codigo{src/math/daycount.cpp}{periodFraction}; el desk siempre usa ACT/360. Con
 \begin{equation}\label{eq:cap05-caplet-parametros}
@@ -296,9 +297,11 @@ explícito en \codigo{desk/api/aging.py}{aged_cap_floor}. Sean $e$ los días tra
 El caplet $k$ ($k=1,\dots,m$) empieza en el día $(k-1)p$ y entra en el valor si ese inicio es posterior o igual
 a $e$:
 \begin{equation}\label{eq:cap05-envejecido}
-  k_0=\max\bigl(1,\ \lceil e/p\rceil+1\bigr),\qquad
-  t^{(k)}=\frac{k\,p-e}{365}\ \ \text{para } k=k_0-1,\dots,m,\qquad
-  \mathrm{Cap}_{\text{envejecido}}=\sum_{k=k_0}^{m}\mathrm{Caplet}_k,
+\begin{aligned}
+  k_0&=\max\bigl(1,\ \lceil e/p\rceil+1\bigr),\qquad
+  t^{(k)}=\frac{k\,p-e}{365}\ \ \text{para } k=k_0-1,\dots,m,\\
+  \mathrm{Cap}_{\text{envejecido}}&=\sum_{k=k_0}^{m}\mathrm{Caplet}_k,
+\end{aligned}
 \end{equation}
 donde los $t^{(k)}$ son las fronteras que recibe el constructor de calendario explícito. Un caplet cuyo inicio
 coincide con la fecha de valuación entra con su valor intrínseco (frontera $0$); el caplet ya fijado, con inicio
@@ -348,7 +351,7 @@ en $7\%$, la ecuación~\eqref{eq:cap05-doble-curva} multiplica por $\DF{d}{t_1}/
 
 Curva plana a $5\%$ continuo, $\Nom=10^{6}$, $\K=5\%$, expiración $T_e=1$, plazo 2 años, frecuencia anual
 ($n=2$, $\delta=1$, $\tau=365/360$), $\hwa=0.03$, $\hwsig=0.008$ (los parámetros de SOFR del
-cuadro~\ref{tab:cap05-parametros}). Entonces $c_1=50\,694.4444$, $c_2=1\,050\,694.4444$,
+tabla~\ref{tab:cap05-parametros}). Entonces $c_1=50\,694.4444$, $c_2=1\,050\,694.4444$,
 $\DF{c}{T_e}=0.9512294$, $\DF{c}{T_1}=0.9048374$, $\DF{c}{T_2}=0.8607080$, $V_e=6.2118\times10^{-5}$,
 $B_1=0.9851489$, $B_2=1.9411822$. La ecuación~\eqref{eq:cap05-critica} tiene la raíz
 \[
@@ -420,7 +423,7 @@ nueve caplets calculados con la ecuación~\eqref{eq:cap05-caplet}.
 
 \begin{limites}
   \begin{itemize}
-    \item $\hwa$ y $\hwsig$ son datos sintéticos del snapshot (cuadro~\ref{tab:cap05-parametros}), no se
+    \item $\hwa$ y $\hwsig$ son datos sintéticos del snapshot (tabla~\ref{tab:cap05-parametros}), no se
           calibran a precios de caps o swaptions y son iguales para todos los strikes y plazos de una curva:
           el modelo no tiene sonrisa ni sesgo y los precios no reproducen cotizaciones de mercado.
     \item Modelo de un factor y una curva. La doble curva es una base determinista (cociente de factores en el
