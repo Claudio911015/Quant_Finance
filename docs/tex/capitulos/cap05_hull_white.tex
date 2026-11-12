@@ -308,7 +308,9 @@ fijaron todos los caplets, \codigo{desk/api/aging.py}{cap_floor_pv_mxn} devuelve
 proyecta con la curva de la operación y descuenta con \texttt{price\_dual}.
 
 La swaption no usa \texttt{aging.py}: se envejece acortando la expiración a los días que faltan, sin cambiar
-el plazo del swap, en \codigo{desk/api/valuation.py}{shortened}.
+el plazo del swap, en \codigo{desk/api/valuation.py}{shortened}. Esa función conserva además ramas de cap/floor y
+bono sin llamador y el docstring de su módulo describe un envejecimiento por periodos enteros que ya no se usa
+(\texttt{HALLAZGOS.md}, H14).
 
 % -------------------------------------------------------------------------------------------------
 \section{Ejemplo numérico verificable}\label{sec:cap05-ejemplo}
@@ -409,7 +411,8 @@ nueve caplets calculados con la ecuación~\eqref{eq:cap05-caplet}.
         \texttt{AnalyticCapFloorEngine} y \texttt{JamshidianSwaptionEngine} sobre un \texttt{HullWhite}
         ajustado a la misma curva. En el reporte \codigo{desk/validation/report.json}{swaption-03} los 8 casos
         de cada producto caen dentro de la tolerancia de $5\times10^{-4}$ del nocional y la mayor diferencia
-        relativa al nocional es $2.8\times10^{-16}$ en cap/floor y $3.0\times10^{-9}$ en swaptions.
+        relativa al nocional es $2.8\times10^{-16}$ en cap/floor y $3.0\times10^{-9}$ en swaptions; que la tolerancia
+        quede cinco órdenes por encima de lo observado se anota en \texttt{HALLAZGOS.md} (H05).
 \end{itemize}
 
 % -------------------------------------------------------------------------------------------------
