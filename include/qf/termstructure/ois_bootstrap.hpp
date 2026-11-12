@@ -36,18 +36,20 @@ std::vector<int> oisPaymentDays(int maturityDays, int periodDays);
 ///   curve being built (including the new pillar); the new pillar's zero rate is
 ///   solved with Brent (tolerance 1e-14).
 ///
-/// Every quote reprices exactly when @p method is local (Linear, LogLinear);
-/// with CubicSpline a later pillar can move earlier segments, so earlier quotes
-/// reprice only approximately.
+/// Every quote reprices exactly with Linear (a local method). With CubicSpline a
+/// later pillar can move earlier segments, so earlier quotes reprice only
+/// approximately (about 1e-6 in the par rate). LogLinear is rejected: Interpolator
+/// applies it to the log of the zero rate, which is NaN for non-positive rates, so
+/// the solve would silently return a curve that does not reprice.
 ///
 /// @param quotes       Quotes sorted by strictly increasing `days`, all > 0.
 /// @param periodDays   OIS coupon period in days (> 0).
 /// @param accrualDcc   Day-count convention for accrual periods (default ACT/360).
-/// @param method       Interpolation of the zero rate between pillars (default Linear).
+/// @param method       Interpolation of the zero rate between pillars: Linear (default) or CubicSpline.
 /// @return             YieldCurve with one pillar per quote at t = days/365.
 /// @throws std::invalid_argument if @p quotes is empty, has fewer than two entries
 ///         (a YieldCurve needs two pillars), `days` is not strictly increasing and
-///         positive, or @p periodDays <= 0.
+///         positive, @p periodDays <= 0, or @p method is LogLinear.
 /// @throws std::runtime_error    if a pillar cannot be solved (non-positive DF or no root in the search range).
 YieldCurve bootstrapOis(const std::vector<OisQuote>& quotes, int periodDays,
                         math::DayCountConvention accrualDcc = math::DayCountConvention::ACT_360,

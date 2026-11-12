@@ -60,6 +60,10 @@ YieldCurve bootstrapOis(const std::vector<OisQuote>& quotes, int periodDays,
         throw std::invalid_argument("bootstrapOis: quotes vector is empty");
     if (periodDays <= 0)
         throw std::invalid_argument("bootstrapOis: periodDays must be > 0");
+    if (method == math::InterpolationMethod::LogLinear)
+        throw std::invalid_argument(
+            "bootstrapOis: LogLinear interpolation is not supported (it interpolates the log of the "
+            "zero rate, so the quotes would not reprice); use Linear or CubicSpline");
     if (quotes.front().days <= 0)
         throw std::invalid_argument("bootstrapOis: quote days must be > 0");
     for (std::size_t i = 1; i < quotes.size(); ++i)

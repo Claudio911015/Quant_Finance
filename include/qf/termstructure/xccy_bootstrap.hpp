@@ -34,9 +34,11 @@ struct XccyBasisQuote {
 ///   construction (including the new pillar) as MXN discount curve.
 ///
 /// With zero points on parity and a zero basis the result equals the MXN projection curve; a
-/// negative basis lifts the MXN discount factors above it. Every quote reprices exactly when
-/// @p method is local (Linear, LogLinear); with CubicSpline a later pillar can move earlier
-/// segments, so earlier quotes reprice only approximately.
+/// negative basis lifts the MXN discount factors above it. Every quote reprices exactly with
+/// Linear (a local method); with CubicSpline a later pillar can move earlier segments, so earlier
+/// quotes reprice only approximately. LogLinear is not usable: Interpolator applies it to the log
+/// of the zero rate, which is NaN for non-positive rates, and the solve fails with
+/// std::runtime_error.
 ///
 /// @param forwards       Forward quotes sorted by strictly increasing `days`, all > 0 (may be empty).
 /// @param basis          Basis quotes sorted by strictly increasing `days`, all > 0 (may be empty); the
@@ -46,7 +48,7 @@ struct XccyBasisQuote {
 /// @param mxnProjection  MXN projection curve of the floating TIIE-F coupons.
 /// @param periodDays     Coupon period of the basis swap in days (> 0, 28 in the market convention).
 /// @param accrualDcc     Day-count convention of the coupon accruals (default ACT/360).
-/// @param method         Interpolation of the zero rate between pillars (default Linear).
+/// @param method         Interpolation of the zero rate between pillars: Linear (default) or CubicSpline.
 /// @return               YieldCurve with one pillar per quote, forwards then basis.
 /// @throws std::invalid_argument if forwards and basis together have fewer than two quotes, `days`
 ///         is not strictly increasing and positive within each list, the first basis `days` is not

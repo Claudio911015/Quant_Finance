@@ -95,8 +95,15 @@ class DeskBindings(unittest.TestCase):
     def test_bootstrap_ois_accepts_dcc_and_method(self):
         curve = qfpy.bootstrap_ois(
             _quotes([0.0705, 0.0675, 0.0660]), 28,
-            qfpy.DayCountConvention.ACT_365, qfpy.InterpolationMethod.LogLinear)
+            qfpy.DayCountConvention.ACT_365, qfpy.InterpolationMethod.CubicSpline)
         self.assertIsInstance(curve, qfpy.YieldCurve)
+
+    def test_bootstrap_ois_rejects_loglinear(self):
+        # H01: antes devolvía una curva con todas las tasas en el punto medio de la búsqueda, sin error.
+        with self.assertRaises(ValueError):
+            qfpy.bootstrap_ois(
+                _quotes([0.0705, 0.0675, 0.0660]), 28,
+                qfpy.DayCountConvention.ACT_360, qfpy.InterpolationMethod.LogLinear)
 
     def test_bootstrap_ois_rejects_single_quote(self):
         with self.assertRaises(ValueError):

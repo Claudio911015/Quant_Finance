@@ -85,6 +85,18 @@ TEST(OisBootstrap, PaymentDaysSchedule) {
     EXPECT_EQ(oisPaymentDays(400, 365), (std::vector<int>{365, 400}));
 }
 
+// H01: LogLinear interpolates the log of the zero rate, so the pillar solve returned garbage
+// (every zero at the search-interval midpoint) without raising. It must be rejected up front.
+TEST(OisBootstrap, LogLinearIsRejected) {
+    using qf::math::InterpolationMethod;
+    EXPECT_THROW(bootstrapOis(mixedQuotes(), kPeriod, DayCountConvention::ACT_360,
+                              InterpolationMethod::LogLinear), std::invalid_argument);
+    EXPECT_NO_THROW(bootstrapOis(mixedQuotes(), kPeriod, DayCountConvention::ACT_360,
+                                 InterpolationMethod::Linear));
+    EXPECT_NO_THROW(bootstrapOis(mixedQuotes(), kPeriod, DayCountConvention::ACT_360,
+                                 InterpolationMethod::CubicSpline));
+}
+
 TEST(OisBootstrap, InvalidInputsThrow) {
     EXPECT_THROW(bootstrapOis({}, kPeriod), std::invalid_argument);
     EXPECT_THROW(bootstrapOis(mixedQuotes(), 0), std::invalid_argument);
