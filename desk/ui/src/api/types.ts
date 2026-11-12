@@ -464,7 +464,7 @@ export interface HedgeDetail {
 }
 
 export interface CriticalTerm {
-  term: 'notional' | 'index' | 'currency' | 'start_date' | 'maturity_date' | 'side';
+  term: 'notional' | 'index' | 'start_date' | 'maturity_date' | 'side';
   label: string;
   /** En `side`: `payer`/`receiver` (lado del swap) o `buy`/`sell` (forward). */
   instrument: string | number;

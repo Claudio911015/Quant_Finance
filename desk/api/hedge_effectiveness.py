@@ -20,7 +20,6 @@ REFERENCE_NOTE = "IFRS 9 no fija un umbral de efectividad: el rango 80 %–125 %
 _TERM_LABEL = {
     "notional": "Nocional",
     "index": "Índice",
-    "currency": "Moneda",
     "start_date": "Inicio",
     "maturity_date": "Vencimiento",
     "side": "Sentido",
@@ -61,7 +60,6 @@ def critical_terms(rel: Dict[str, Any], trade: Dict[str, Any], on: date) -> List
         forward_side = state["terms"]["side"]
         return [
             _term("notional", inst_notional, item_notional, _same_amount(inst_notional, item_notional)),
-            _term("currency", "USD", "USD"),
             _term("maturity_date", trade["maturity_date"].isoformat(), terms["date"].isoformat()),
             _term("side", forward_side, terms["side"], forward_side == _FORWARD_SIDE_FOR[terms["side"]]),
         ]

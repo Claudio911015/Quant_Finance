@@ -191,6 +191,7 @@ describe('MethodologyScreen', () => {
       expect(date).toContain('más de un día después');
       expect(hedgeRow('Derivado fuera de mercado')).toContain('documentada más de un día después');
       expect(hedgeRow('Efectividad prospectiva')).toContain('sentido');
+      expect(hedgeRow('Efectividad prospectiva')).not.toContain('índice o moneda'); // H11: la moneda no es un término
     });
 
     it('declara que la razón de cobertura capturada es informativa y que el alta avisa si difiere (H07)', () => {

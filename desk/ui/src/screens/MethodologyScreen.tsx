@@ -316,7 +316,7 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Efectividad prospectiva',
-        text: 'Términos críticos (nocional, índice o moneda, fechas y sentido: el swap debe ser el que compensa la partida) y escenarios del escritorio. Hay relación económica si todas las razones son positivas. El rango 80 %–125 % es solo referencia; IFRS 9 no fija umbral.',
+        text: 'Términos críticos (nocional, índice, fechas y sentido: el instrumento debe ser el que compensa la partida; la moneda no se compara porque el único flujo pronosticado admitido es USDMXN) y escenarios del escritorio. Hay relación económica si todas las razones son positivas. El rango 80 %–125 % es solo referencia; IFRS 9 no fija umbral.',
       },
       {
         label: 'Jerarquía de valor razonable',

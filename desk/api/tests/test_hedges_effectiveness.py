@@ -128,12 +128,12 @@ def test_scenarios_that_do_not_move_the_item_have_a_null_ratio_and_are_not_count
 def test_identical_forward_matches_every_term_and_every_ratio_is_one(client):
     trade = market_forward(client, "buy", 10e6, FX_END)
     body = _ok(client, _hedge(client, trade, "forecast_fx", _fx()))
-    assert [t["term"] for t in body["critical_terms"]] == ["notional", "currency", "maturity_date", "side"]
-    assert [t["label"] for t in body["critical_terms"]] == ["Nocional", "Moneda", "Vencimiento", "Sentido"]
+    # H11: la moneda del flujo pronosticado comparaba la constante "USD" consigo misma (siempre «match»): ya no es un término
+    assert [t["term"] for t in body["critical_terms"]] == ["notional", "maturity_date", "side"]
+    assert [t["label"] for t in body["critical_terms"]] == ["Nocional", "Vencimiento", "Sentido"]
     assert set(_results(body).values()) == {"match"}
-    side = body["critical_terms"][3]
+    side = body["critical_terms"][2]
     assert (side["instrument"], side["item"]) == ("buy", "buy_usd")
-    assert (body["critical_terms"][1]["instrument"], body["critical_terms"][1]["item"]) == ("USD", "USD")
     ratios = _ratios(body)
     assert ratios["USDMXN +10 %"] == pytest.approx(1.0, abs=1e-6)
     assert ratios["USDMXN -10 %"] == pytest.approx(1.0, abs=1e-6)
