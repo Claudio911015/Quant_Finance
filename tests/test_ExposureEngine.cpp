@@ -1074,6 +1074,41 @@ TEST(ExposureEngine, CvaMatchesTheClosedFormOnFlatAndSlopedCurves) {
     }
 }
 
+// Valores impresos con %.17g desde el motor ANTES de templarlo sobre el escalar: el refactor no puede cambiar
+// ni el último bit de ningún número en double (por eso EXPECT_EQ y no EXPECT_DOUBLE_EQ). Dependen del
+// compilador y de las banderas (sin FMA, como el build del proyecto): si cambian por eso, regenerarlos.
+TEST(ExposureEngine, GoldenValuesUnchangedByTemplating) {
+    const NettingSetSpec set = setOf({s0(), s1(), s2(), s4()}, {x0(), x1(), x2()});
+    const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(300, schedule(0, 30, 61), 7u));
+    const ExposureProfile p = engine.simulate({set})[0];
+    const PiecewiseHazardCurve counterparty({1.0, 3.0, 5.0, 10.0}, {0.015, 0.020, 0.025, 0.030});
+    const PiecewiseHazardCurve own({2.0, 5.0, 10.0}, {0.005, 0.008, 0.010});
+    const XvaResult x = computeXva(p, counterparty, 0.6, own, 0.5, 0.005);
+    const std::vector<double> atZero = engine.tradeValuesAtZero(set);
+    const std::vector<DeflatedStat> stats = engine.deflatedValueStats(set, {30, 600}, Deflator::TiieAccount);
+    EXPECT_EQ(x.cva, 145005.92850236702);
+    EXPECT_EQ(x.dva, 196624.46090105936);
+    EXPECT_EQ(x.fva, -235047.07041121286);
+    EXPECT_EQ(p.valueAtZero, -5677890.6845265059);
+    EXPECT_EQ(p.epeDisc[1], 67381.730257012416);
+    EXPECT_EQ(p.eneDisc[1], 9826687.7737136222);
+    EXPECT_EQ(p.epeDisc[20], 2504425.1006771205);
+    EXPECT_EQ(p.eneDisc[20], 18039608.728857126);
+    EXPECT_EQ(p.epeDisc[40], 4198788.658587303);
+    EXPECT_EQ(p.eneDisc[40], 24470173.471444052);
+    EXPECT_EQ(p.pfe[20], 17162140.475009084);
+    const std::vector<double> expectedAtZero = {-1073803.6029754612, 207665.51015771384, 483608.42718216323,
+                                                876795.59910860204, 510983.22526270151, -1083139.8432622254,
+                                                -5600000.0};
+    ASSERT_EQ(atZero.size(), expectedAtZero.size());
+    for (std::size_t k = 0; k < atZero.size(); ++k) EXPECT_EQ(atZero[k], expectedAtZero[k]) << "operación " << k;
+    ASSERT_EQ(stats.size(), 2u);
+    EXPECT_EQ(stats[0].mean, -5853281.8703867383);
+    EXPECT_EQ(stats[0].stdErr, 251431.65129316493);
+    EXPECT_EQ(stats[1].mean, -4975112.3086613975);
+    EXPECT_EQ(stats[1].stdErr, 1268798.828563269);
+}
+
 #ifndef QF_WITH_XAD
 TEST(ExposureEngine, XvaSensitivitiesWithoutXadThrowsLogicError) {
     // Sin XAD el método existe (el binding y la API lo llaman) pero avisa en vez de devolver ceros.
