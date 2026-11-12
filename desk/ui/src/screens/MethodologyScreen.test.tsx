@@ -150,6 +150,8 @@ describe('MethodologyScreen', () => {
       const recycling = hedgeRow('Reciclaje');
       expect(recycling).toContain('vencen juntos');
       expect(recycling).toContain('Concluida');
+      expect(recycling).toContain('también queda Concluida'); // H09: concluida aunque no quede reserva
+      expect(recycling).toContain('el saldo de la reserva distingue un caso del otro');
       expect(recycling).toContain('6.5.12(a)');
       const fv = hedgeRow('Valor razonable');
       expect(fv).toContain('devengo del cupón en curso');

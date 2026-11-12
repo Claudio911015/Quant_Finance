@@ -292,7 +292,7 @@ const HEDGE_SECTIONS: Section[] = [
       },
       {
         label: 'Reciclaje',
-        text: `Las liquidaciones del derivado en el periodo se reconocen en resultados como el flujo cubierto ocurrido, pero solo la parte efectiva: el menor entre lo liquidado del instrumento y lo liquidado del hipotético; el exceso va a inefectividad. ${DECL_RECYCLING} En el cierre final la reserva queda en 0 si el instrumento y la partida vencen juntos. Si el instrumento vence antes que el flujo cubierto, la reserva se conserva en ORI (IFRS 9 6.5.12(a)) y la relación pasa a Concluida: no admite más cierres, y la reserva se libera a mano cuando el flujo ocurra.`,
+        text: `Las liquidaciones del derivado en el periodo se reconocen en resultados como el flujo cubierto ocurrido, pero solo la parte efectiva: el menor entre lo liquidado del instrumento y lo liquidado del hipotético; el exceso va a inefectividad. ${DECL_RECYCLING} La relación pasa a Concluida cuando el último cierre fue el final porque el instrumento venció: no admite más cierres, tenga o no reserva. Si el instrumento y la partida vencen juntos, en el cierre final la reserva queda en 0 y no hay nada pendiente de reciclar, pero la relación también queda Concluida. Si el instrumento vence antes que el flujo cubierto, la reserva se conserva en ORI (IFRS 9 6.5.12(a)) y se libera a mano cuando el flujo ocurra; el saldo de la reserva distingue un caso del otro.`,
       },
       {
         label: 'Valor razonable',
