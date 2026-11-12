@@ -1,5 +1,359 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Fuentes de datos y procedencia}\label{cap:datos}
+\begin{sloppypar}
 
-Fuentes de datos de mercado (Banxico, Fed de Nueva York, FRED), su procedencia y los datos sintéticos.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap13-proposito}
+
+Una valuación vale lo que valen sus datos. Este capítulo documenta de dónde sale cada dato que entra al desk,
+en qué unidad llega y en cuál se guarda, qué parte es real y qué parte es inventada para demostración, y
+cómo se hace visible esa procedencia: las fijaciones diarias de TIIE-F, SOFR y USDMXN (tabla
+\texttt{fixings}), los \emph{snapshots} de mercado (tabla \texttt{snapshots}: el sintético \texttt{MX-DEMO} y el
+mixto \texttt{MKT-LIVE}), la historia de factores del riesgo y el respaldo de la base. Los capítulos
+\ref{cap:curvas}, \ref{cap:swaps-ois} y \ref{cap:ciclo-vida} usan esos datos; la pantalla de Metodología los
+declara y aquí se contrasta esa declaración con el código.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap13-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. En este capítulo:
+$y_\theta$ es el rendimiento par del Tesoro de EE.\,UU. al plazo $\theta\in\{\text{1M},\dots,\text{10Y}\}$ (decimal);
+$D_\theta$ son los días del pilar (30, 91, 182, 365, \dots); $q_\theta$ es la cotización de la curva SOFR que
+resulta (decimal, base ACT/360); $u_i$ es la $i$-ésima observación válida de la serie DEXMXUS de FRED (pesos por
+dólar); $n$ es el número de cambios diarios con que se mide una volatilidad; $\hat\sigma$ es una desviación
+estándar muestral; $R$ es la matriz de correlaciones de los tres factores, $L$ su factor de Cholesky
+($LL^{\top}=R$) y $z_{d,k}$ las normales estándar independientes del día $d$.
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap13-modelo}
+
+\subsection{Unidades}\label{sec:cap13-unidades}
+
+Toda tasa se guarda en decimal ($0.0395=3.95\,\%$). Las fuentes publican en por ciento; la conversión se hace
+al leer, en el módulo que parsea cada fuente:
+\begin{align}
+  r_{\text{SOFR}} &= \operatorname{round}\!\bigl(\texttt{percentRate}/100,\;10\bigr)
+    && \text{(Fed de Nueva York)}, \label{eq:cap13-nyfed}\\
+  r_{\text{TIIE-F}} &= \operatorname{round}\!\bigl(\texttt{dato}/100,\;10\bigr)
+    && \text{(Banxico, SF331451)}, \label{eq:cap13-banxico}\\
+  \text{FIX} &= \texttt{dato}
+    && \text{(Banxico, SF43718)}, \label{eq:cap13-fix}\\
+  y_\theta &= \texttt{rate}/100
+    && \text{(MarketDataFeed)}. \label{eq:cap13-mdf}
+\end{align}
+El FIX está en pesos por dólar y no se convierte. Las ecuaciones~\eqref{eq:cap13-nyfed}--\eqref{eq:cap13-fix} son \codigo{desk/api/nyfed.py}{parse_sofr} y
+\codigo{desk/api/banxico.py}{parse_series}; la~\eqref{eq:cap13-mdf} es
+\codigo{desk/api/marketdata.py}{latest_treasury_curve} (y \codigo{desk/api/marketdata.py}{latest_sofr}). El
+redondeo a 10 decimales es el \texttt{round} de Python. La serie DEXMXUS no se convierte:
+\codigo{desk/api/fred.py}{parse_dexmxus} conserva las observaciones con valor finito y positivo y descarta las
+vacías (\texttt{""}, \texttt{"."}).
+
+\subsection{Curva SOFR de \texttt{MKT-LIVE}}\label{sec:cap13-curva}
+
+La curva SOFR de \texttt{MKT-LIVE} no viene de swaps: es una \emph{aproximación} con rendimientos par del
+Tesoro \citep{treasury2026} puestos en la convención de las cotizaciones OIS de la curva. El pilar de un día
+es el SOFR publicado tal cual \citep{nyfed2026}; los demás pilares (1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 7Y y 10Y, con
+$D_\theta=30,\,91,\,182,\,365,\,730,\,1095,\,1825,\,2555,\,3650$) son
+\begin{equation}\label{eq:cap13-tesoro}
+  q_\theta=\begin{cases}
+    y_\theta\cdot\dfrac{360}{365} & D_\theta\le 365,\\[1.2ex]
+    \Bigl[\bigl(1+\tfrac{y_\theta}{2}\bigr)^{2}-1\Bigr]\cdot\dfrac{360}{365} & D_\theta>365,
+  \end{cases}
+\end{equation}
+redondeada a 6 decimales (\codigo{desk/api/live_market.py}{treasury_to_ois},
+\codigo{desk/api/live_market.py}{SOFR_PILLARS}). La primera rama traduce una tasa en base 365 a base 360 sin
+capitalizar; la segunda trata $y_\theta$ como tasa nominal con capitalización semestral, la lleva a tasa
+efectiva anual y luego a base 360. Las cotizaciones resultantes entran al mismo bootstrap OIS que las de
+\texttt{MX-DEMO} (capítulo~\ref{cap:curvas}), con depósito el pilar de un día y OIS par el resto.
+
+\begin{diferencia}
+  Una curva SOFR construida con swaps OIS descuenta con la tasa de swap; esta usa Treasuries y por tanto omite
+  el diferencial entre swaps SOFR y Treasuries, que la Metodología cita como negativo (por ejemplo $-25$~\pb\ a
+  2 años y $-87$~\pb\ a 30 años en 2025, según las fuentes que enlaza) y no se mide aquí. La curva de
+  \texttt{MKT-LIVE} probablemente sobreestima las tasas de swap en esas magnitudes.
+\end{diferencia}
+
+\subsection{Volatilidades diarias de factores}\label{sec:cap13-vols}
+
+El snapshot guarda la volatilidad \emph{diaria} de tres factores (\texttt{TIIE-F}, \texttt{SOFR},
+\texttt{USDMXN}) y su matriz de correlaciones. En \texttt{MKT-LIVE} se miden dos de ellas con muestra de a lo
+más $n_{\max}=250$ cambios diarios y, como mínimo, $n_{\min}=60$:
+\begin{align}
+  \hat\sigma_{\text{SOFR}} &= \operatorname{sd}\Bigl\{\,10^{4}\bigl(y^{5\mathrm{Y}}_{i}-y^{5\mathrm{Y}}_{i-1}\bigr)\Bigr\}_{i=1}^{n}
+    \quad\text{(pb por día)}, \label{eq:cap13-vol-sofr}\\
+  \hat\sigma_{\text{USDMXN}} &= \operatorname{sd}\Bigl\{\,\ln\frac{u_i}{u_{i-1}}\Bigr\}_{i=1}^{n}
+    \quad\text{(rendimiento logarítmico por día)}, \label{eq:cap13-vol-fx}
+\end{align}
+donde $\operatorname{sd}$ es la desviación estándar muestral (divisor $n-1$,
+\codigo{desk/api/live_market.py}{sample_std}), la serie de SOFR es el rendimiento par de 5 años del Tesoro
+(\emph{no} SOFR) y la de USDMXN une observaciones válidas consecutivas aunque entre ellas haya días sin dato
+(\codigo{desk/api/live_market.py}{daily_vol_logret}). La ventana toma las últimas $n_{\max}+1$ observaciones y
+con menos de $n_{\min}$ cambios responde 409 y no construye el snapshot
+(\codigo{desk/api/live_market.py}{window}, constantes \codigo{desk/api/marketdata.py}{MAX_CHANGES} y
+\codigo{desk/api/marketdata.py}{MIN_CHANGES}). Son volatilidades diarias, \emph{no} anualizadas. La
+volatilidad del factor \texttt{TIIE-F}, la matriz de correlaciones, la superficie de volatilidad y los
+parámetros de Hull--White de \texttt{MKT-LIVE} se heredan sin cambio de \texttt{MX-DEMO} (sintéticos).
+
+\subsection{Procedencia de un snapshot}\label{sec:cap13-procedencia}
+
+Cada snapshot guarda en su JSON un bloque \texttt{sources} con siete componentes (\texttt{curve:TIIE-F},
+\texttt{curve:SOFR}, \texttt{spot}, \texttt{surface}, \texttt{hw}, \texttt{factor\_vols},
+\texttt{factor\_corr}), cada uno con \texttt{kind}, \texttt{label} y \texttt{as\_of}. El tipo es
+\texttt{live}, \texttt{proxy}, \texttt{synthetic} o \texttt{mixed}, y la calidad del snapshot es
+\begin{equation}\label{eq:cap13-calidad}
+  Q=\begin{cases}
+    \text{synthetic} & \text{si todos los componentes son synthetic},\\
+    \text{live} & \text{si ninguno es synthetic ni mixed},\\
+    \text{mixed} & \text{en otro caso},
+  \end{cases}
+\end{equation}
+(\codigo{desk/api/market.py}{data_quality}); un snapshot sin bloque \texttt{sources} es todo sintético
+(\codigo{desk/api/market.py}{sources_of}). La interfaz lo muestra como «Datos sintéticos», «Datos mixtos» o «Datos
+de mercado» (\codigo{desk/ui/src/lib/provenance.ts}{qualityText}) y detalla cada componente en un
+\emph{tooltip} (\codigo{desk/ui/src/lib/provenance.ts}{sourcesTooltip}). Un componente \texttt{proxy} cuenta como no
+sintético en~\eqref{eq:cap13-calidad}, así que un snapshot sólo con componentes \texttt{live} y \texttt{proxy}
+se rotularía «Datos de mercado».
+
+\subsection{Datos sintéticos de \texttt{MX-DEMO}}\label{sec:cap13-sinteticos}
+
+Todo \texttt{MX-DEMO} es inventado (\codigo{desk/api/seed_market.py}{demo_data}), con
+\texttt{as\_of} $=2026\text{-}11\text{-}10$ (\codigo{desk/api/seed_market.py}{AS_OF}) y
+$\Spot=18.60$ (\codigo{desk/api/seed_market.py}{SPOT}). La tabla~\ref{tab:cap13-cotizaciones} lista las
+cotizaciones de las dos curvas (la primera de cada una es un depósito a un día y el resto OIS par).
+
+\begin{table}[ht]
+  \centering\small
+  \caption{Cotizaciones sintéticas de \texttt{MX-DEMO}: TIIE-F (\texttt{\_TIIE\_F}) y SOFR (\texttt{\_SOFR}).}\label{tab:cap13-cotizaciones}
+  \begin{tabular}{@{}lrrlrr@{}}
+    \toprule
+    TIIE-F & días & tasa (\%) & SOFR & días & tasa (\%) \\
+    \midrule
+    1D & 1 & 7.00 & 1D & 1 & 3.90 \\
+    1x28 & 28 & 6.98 & 1M & 30 & 3.85 \\
+    3x28 & 84 & 6.92 & 3M & 91 & 3.80 \\
+    6x28 & 168 & 6.85 & 6M & 182 & 3.75 \\
+    13x28 & 364 & 6.75 & 1Y & 365 & 3.70 \\
+    26x28 & 728 & 6.70 & 2Y & 730 & 3.55 \\
+    39x28 & 1092 & 6.72 & 3Y & 1095 & 3.50 \\
+    65x28 & 1820 & 6.80 & 5Y & 1825 & 3.55 \\
+    91x28 & 2548 & 6.90 & 7Y & 2555 & 3.65 \\
+    130x28 & 3640 & 7.05 & 10Y & 3650 & 3.80 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+La superficie de volatilidad USDMXN es una función cerrada de la sonrisa: para el vencimiento $j$
+(30, 91, 182 y 365 días, con volatilidad al dinero $0.115,\,0.120,\,0.125,\,0.130$) y el precio de ejercicio
+$K_i=17.0+0.5\,i$, $i=0,\dots,7$,
+\begin{equation}\label{eq:cap13-sonrisa}
+  \vol_{j,i}=\vol^{\mathrm{atm}}_{j}+\tfrac12\,k_i^{2}+0.03\,k_i,\qquad k_i=\ln\frac{K_i}{\Spot},
+\end{equation}
+(\codigo{desk/api/seed_market.py}{_smile}). Los parámetros de Hull--White son $\hwa=0.05$, $\hwsig=0.01$ para
+TIIE-F y $\hwa=0.03$, $\hwsig=0.008$ para SOFR; las volatilidades diarias de los factores son 4~\pb\ (TIIE-F),
+5~\pb\ (SOFR) y 0.0075 (USDMXN), con correlaciones $\rho_{\text{TIIE,SOFR}}=0.35$,
+$\rho_{\text{TIIE,USDMXN}}=0.30$ y $\rho_{\text{SOFR,USDMXN}}=-0.10$. Las cotizaciones de colateral USD
+(\codigo{desk/api/seed_market.py}{csa_quotes_data}) son puntos forward de 28, 84, 168 y 364 días
+($0.0438$, $0.1317$, $0.2637$ y $0.5745$ pesos por dólar) y una base de cross currency swaps a 2, 3, 5, 7 y
+10 años de $-10$, $-12$, $-15$, $-17$ y $-20$~\pb; no hay fuente libre para ninguna de las dos y \texttt{MKT-LIVE}
+no las trae. El portafolio de demostración son siete operaciones con contrapartes inventadas (sufijo
+«sintético», \codigo{desk/api/seed_trades.py}{TRADES}); el corte de XVA añade otras
+(capítulo~\ref{cap:xva}).
+
+La historia sintética de factores de \texttt{MX-DEMO} (\codigo{desk/api/risk/factor_history.py}{seed_synthetic})
+son 500 días hábiles (lunes a viernes) anteriores al \texttt{as\_of}, con la semilla fija $20261110$
+(\codigo{desk/api/risk/factor_history.py}{SYNTHETIC_SEED}); para cada día $d$ y cada factor $f$
+(en el orden \texttt{TIIE-F}, \texttt{SOFR}, \texttt{USDMXN}),
+\begin{equation}\label{eq:cap13-historia}
+  v_{f,d}=\hat\sigma_f\sum_{k\le f}L_{fk}\,z_{d,k},
+\end{equation}
+con $\hat\sigma_f$ la volatilidad diaria del snapshot (pb para las tasas, rendimiento logarítmico para
+USDMXN) y $z_{d,k}$ de \texttt{random.Random(20261110).gauss(0, 1)}: las mismas cifras en cualquier base.
+
+\subsection{Fijaciones: no se sobrescribe}\label{sec:cap13-fijaciones}
+
+La tabla \texttt{fixings} guarda $(\text{índice},\text{fecha},\text{valor})$ con clave primaria
+$(\text{índice},\text{fecha})$; las tasas van en decimal y \texttt{USDMXN} es el FIX en pesos por dólar
+(\codigo{desk/api/fixings.py}{INDICES}). Una fijación ya guardada no se cambia nunca: al traer una de la
+fuente se compara con la guardada y es
+\begin{equation}\label{eq:cap13-conflicto}
+  \text{sin cambio si }\;\bigl|v_{\text{fuente}}-v_{\text{guardado}}\bigr|\le 10^{-9},\qquad
+  \text{conflicto en otro caso},
+\end{equation}
+y el conflicto se lista (\texttt{date}, \texttt{stored}, \texttt{source}) sin tocar el valor guardado
+(\codigo{desk/api/fixings_fetch.py}{TOLERANCE}). Las fijaciones se usan en el devengo del periodo en curso de
+un swap (capítulos~\ref{cap:swaps-ois} y~\ref{cap:ciclo-vida}), en la conversión a pesos de los flujos
+liquidados con el FIX de su fecha (capítulo~\ref{cap:ciclo-vida}) y en los avisos y mediciones de las coberturas
+(capítulo~\ref{cap:coberturas}). Los índices tienen un calendario de días inhábiles
+(capítulo~\ref{cap:introduccion}) que decide si la falta de una fijación es un dato faltante.
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap13-implementacion}
+
+\subsection{Fuentes y módulos}\label{sec:cap13-fuentes}
+
+\begin{table}[ht]
+  \centering\small
+  \caption{Fuentes externas de datos.}\label{tab:cap13-fuentes}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{1.8cm}>{\raggedright\arraybackslash}p{2.8cm}@{}}
+    \toprule
+    Fuente & Dato & Unidad: fuente $\to$ base & Acceso & Código \\
+    \midrule
+    Fed de Nueva York \citep{nyfed2026} & SOFR diario (API \texttt{search.json} con dos fechas) & \% $\to$ decimal & público & \codigo{desk/api/nyfed.py}{fetch_sofr} \\
+    Banxico, SIE \citep{banxico2026a,banxico2021} & TIIE de Fondeo a un día, serie \texttt{SF331451} & \% $\to$ decimal & token & \codigo{desk/api/banxico.py}{fetch_series} \\
+    Banxico, SIE \citep{banxico2026b} & Tipo de cambio FIX, serie \texttt{SF43718} & MXN por USD, sin conversión & token & \codigo{desk/api/banxico.py}{fetch_series} \\
+    FRED \citep{fred2026} & DEXMXUS: pesos por dólar al mediodía de Nueva York (CSV de la serie completa) & MXN por USD, sin conversión & público & \codigo{desk/api/fred.py}{fetch_dexmxus} \\
+    MarketDataFeed (SOFR de la Fed de NY y rendimientos par de \citealt{treasury2026}) & Tablas \texttt{sofr\_rates} y \texttt{treasury\_yields} de una base SQLite & \% $\to$ decimal & archivo local & \codigo{desk/api/marketdata.py}{latest_treasury_curve} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Banxico.} El cliente es \codigo{desk/api/banxico.py}{fetch_series}: pide
+\texttt{.../series/<id>/datos/<desde>/<hasta>} con la cabecera \texttt{Bmx-Token}; \texttt{parse\_series}
+descarta los datos faltantes (\texttt{"N/E"}) y las filas ilegibles, y si una fecha se repite gana la última. Los
+identificadores de serie (\codigo{desk/api/banxico.py}{TIIE_F_SERIES}, \codigo{desk/api/banxico.py}{FIX_SERIES}) se
+comprobaron el 2026-11-11 contra el catálogo público del SIE, que no pide token
+\citep{banxico2026a,banxico2026b}: SF331451 es «TIIE de Fondeo a Un Día Hábil Bancario, Mediana ponderada por
+volumen» y SF43718 es el tipo de cambio pesos por dólar «para solventar obligaciones denominadas en moneda
+extranjera, fecha de determinación (FIX)». El token se lee solo de la variable de entorno
+\texttt{BANXICO\_TOKEN} (\codigo{desk/api/fixings_fetch.py}{_token}) y nunca entra en una respuesta, un mensaje de
+error ni la base.
+
+\paragraph{Fijaciones.} \codigo{desk/api/fixings_fetch.py}{fetch_fixings} es todo-o-nada: descarga el rango
+(máximo 366 días, \codigo{desk/api/fixings_fetch.py}{MAX_RANGE_DAYS}), valida cada valor con las reglas de
+\codigo{desk/api/fixings.py}{_validate} y solo entonces inserta; un fallo de red o un valor inválido responde
+502 sin escribir nada, un token ausente responde 409 y uno rechazado (400, 401 o 403 de Banxico) responde 502 con
+\texttt{code: banxico\_token\_rejected}. Responde \texttt{fetched}, \texttt{inserted}, \texttt{unchanged} y
+\texttt{conflicts}. \codigo{desk/api/fixings_fetch.py}{list_sources} informa para cada índice su fuente, si está
+disponible y su última fecha. Además de la fuente hay alta manual (\codigo{desk/api/fixings.py}{add_fixing}, 409
+si el valor difiere del guardado) y carga por CSV con encabezado exacto \texttt{index,date,value}
+(\codigo{desk/api/fixings.py}{import_csv}, atómica: un archivo malo no guarda nada).
+
+\paragraph{Mercado vivo.} \codigo{desk/api/refresh.py}{run_refresh} (ruta \texttt{POST /api/market/refresh},
+\codigo{desk/api/routes/market.py}{refresh_market}) actualiza \texttt{MKT-LIVE} bajo un candado de proceso (un
+solo refresco a la vez; el segundo recibe 409): ejecuta sin shell
+\texttt{fetch\_sofr --latest --treasury --db <MDF\_DB>} con tiempo máximo de 120~s
+(\codigo{desk/api/refresh.py}{_run_fetch}), descarga DEXMXUS y reconstruye el snapshot con
+\codigo{desk/api/live_market.py}{rebuild_live}. MarketDataFeed es un proyecto aparte del repositorio; el
+ejecutable obtiene SOFR de \texttt{markets.newyorkfed.org} y los rendimientos de \texttt{home.treasury.gov}.
+\codigo{desk/api/marketdata.py}{latest_treasury_curve} abre su base en solo lectura (\texttt{mode=ro}) y exige la
+curva completa de la fecha más reciente (no recurre a una fecha anterior si falta un plazo); toda anomalía es
+409. \codigo{desk/api/live_market.py}{build_live_data} parte de \texttt{demo\_data()} y reemplaza solo las
+cotizaciones SOFR, el spot y las volatilidades de SOFR y USDMXN; \codigo{desk/api/live_market.py}{save_live}
+guarda la fila con \texttt{INSERT OR REPLACE} después de armar el bootstrap, así que si algo falla antes no se
+escribe nada y cualquier fallo posterior de \texttt{run\_refresh} deja \texttt{MKT-LIVE} como estaba (502).
+\texttt{MKT-LIVE} es de solo lectura (editarlo es 409); sus componentes quedan así
+(\codigo{desk/api/live_market.py}{_sources}): TIIE-F, superficie, Hull--White y correlaciones, sintéticos;
+curva SOFR, \texttt{proxy} con la fecha del Tesoro; spot, \texttt{live} con la fecha de la última observación de
+FRED; volatilidades de factores, \texttt{mixed}. El \texttt{as\_of} del snapshot es la fecha de la curva del
+Tesoro más reciente, que puede diferir de la del SOFR de un día y de la del spot; cada componente trae su propia
+fecha. La base de MarketDataFeed y el ejecutable se configuran con \texttt{MDF\_DB} y \texttt{MDF\_FETCH}
+(\codigo{desk/api/app.py}{create_app}); si no se da \texttt{MDF\_FETCH}, se toma
+\texttt{examples/fetch\_sofr} junto al directorio de la base de \texttt{MDF\_DB}.
+
+\paragraph{Snapshots editables.} Para tener mercado en varias fechas, \codigo{desk/api/market.py}{roll_snapshot}
+copia un snapshot con otro \texttt{id} y \texttt{as\_of} (conserva su procedencia y la copia es editable aunque el
+origen sea \texttt{MKT-LIVE}), y \codigo{desk/api/market.py}{update_snapshot} cambia tasas o spot de un
+snapshot editable validando que el bootstrap sigue funcionando antes de guardar.
+
+\paragraph{Historia de factores.} La tabla \texttt{factor\_history} lleva su fuente por fila:
+\texttt{synthetic}, \texttt{csv}, \texttt{live} (SOFR con el proxy del Tesoro a 5 años y USDMXN de FRED) o
+\texttt{fixings} (derivada de las fijaciones cargadas)
+(\codigo{desk/api/risk/factor_history.py}{SOURCES}, \codigo{desk/api/risk/factor_history.py}{derive}); los cambios
+a más de 5 días naturales de distancia se omiten al derivar y uno fuera de cota detiene la derivación con 409.
+El capítulo~\ref{cap:riesgo} explica cómo la usa el VaR histórico.
+
+\subsection{Respaldo}\label{sec:cap13-respaldo}
+
+\codigo{desk/api/backup.py}{backup} copia la base con la API de respaldo en línea de \texttt{sqlite3}
+(consistente con el servidor encendido) a \texttt{qfdesk-AAAAMMDD-HHMMSS.sqlite} (hora local), la verifica con
+\texttt{PRAGMA integrity\_check} antes de darle su nombre definitivo y con \texttt{--keep N} conserva solo las $N$
+copias más recientes entre los archivos cuyo nombre sigue exactamente ese patrón
+(\codigo{desk/api/backup.py}{_copies}). \codigo{desk/api/backup.py}{restore} exige el servidor apagado (no lo
+detecta) y guarda antes la base actual como \texttt{<base>.antes-de-restaurar-AAAAMMDD-HHMMSS}. Solo respalda
+\texttt{desk/data/desk.db}: no cubre la base de MarketDataFeed.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico}\label{sec:cap13-ejemplo}
+
+Los valores siguientes se obtuvieron ejecutando las funciones citadas (no hay script en \texttt{verificacion/}
+para este capítulo, que está fuera de los capítulos~2--12); el fragmento final los reproduce.
+
+\paragraph{Tesoro $\to$ OIS.} Con $y_{3\mathrm{M}}=4.00\,\%$ ($D=91\le365$),
+$q=0.04\cdot360/365=\num{0.039452}$; con $y_{5\mathrm{Y}}=3.80\,\%$ ($D=1825>365$),
+$q=\bigl[(1+0.019)^2-1\bigr]\cdot360/365=0.038361\cdot0.986301=\num{0.037836}$. El pilar de 1 año (365 días) usa
+todavía la primera rama; uno de 366 días ya usaría la segunda (con $y=4\,\%$: \num{0.039452} frente a
+\num{0.039847}).
+
+\paragraph{Parseo.} Una fila de la Fed de Nueva York con \texttt{percentRate} $=3.95$ se guarda como $0.0395$;
+un dato de Banxico \texttt{"7.25"} de la serie SF331451 se guarda como $0.0725$ y uno \texttt{"N/E"} se omite; una
+observación de FRED con valor «.» se descarta.
+
+\paragraph{Sonrisa de \texttt{MX-DEMO}.} Con vencimiento de 182 días ($\vol^{\mathrm{atm}}=0.125$) y $K=19.0$:
+$k=\ln(19/18.6)=0.021277$ y $\vol=0.125+0.5\cdot0.021277^2+0.03\cdot0.021277=\num{0.125865}$.
+
+\begin{lstlisting}
+from desk.api import live_market, nyfed, banxico, fred, seed_market
+print(live_market.treasury_to_ois(0.04, 91))     # 0.0394520548
+print(live_market.treasury_to_ois(0.038, 1825))  # 0.0378355068
+print(nyfed.parse_sofr('{"refRates":[{"effectiveDate":"2026-11-02","type":"SOFR","percentRate":3.95}]}'))
+print(banxico.parse_series('{"bmx":{"series":[{"idSerie":"SF331451","datos":'
+      '[{"fecha":"02/11/2026","dato":"7.25"},{"fecha":"03/11/2026","dato":"N/E"}]}]}}'))
+print(fred.parse_dexmxus("DATE,DEXMXUS\n2026-11-02,18.4\n2026-11-03,.\n"))
+print(seed_market.demo_data()["vol_surface"]["vols"][2][4])   # 0.1258646858
+\end{lstlisting}
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap13-validacion}
+
+Las pruebas del backend simulan el HTTP o leen archivos locales. Parseo y unidades:
+\codigo{desk/api/tests/test_nyfed.py}{test_parse_real_fixture_is_ascending_decimal_and_rounded},
+\codigo{desk/api/tests/test_banxico.py}{test_parse_tiie_f_to_decimal_ascending_and_skips_missing},
+\codigo{desk/api/tests/test_banxico.py}{test_fetch_sends_token_header_exact_url_and_20s_timeout},
+\codigo{desk/api/tests/test_fred.py}{test_parse_discards_empty_and_dot_observations},
+\codigo{desk/api/tests/test_marketdata.py}{test_latest_treasury_curve_is_complete_and_decimal},
+\codigo{desk/api/tests/test_marketdata.py}{test_latest_date_incomplete_does_not_fall_back_to_older_date}.
+Conversión y volatilidades de \texttt{MKT-LIVE}:
+\codigo{desk/api/tests/test_live_market.py}{test_conversion_reference_values},
+\codigo{desk/api/tests/test_live_market.py}{test_conversion_switches_to_semiannual_compounding_after_one_year},
+\codigo{desk/api/tests/test_live_market.py}{test_daily_vol_logret_skips_missing_and_joins_valid_neighbours}.
+Refresco: \codigo{desk/api/tests/test_refresh.py}{test_failure_is_502_keeps_live_row_and_frees_the_lock}.
+Fijaciones: \codigo{desk/api/tests/test_fixings_fetch.py}{test_different_value_is_a_conflict_and_is_not_overwritten},
+\codigo{desk/api/tests/test_fixings_fetch.py}{test_repeating_the_fetch_inserts_nothing_and_changes_nothing}.
+Procedencia: \codigo{desk/api/tests/test_market_sources.py}{test_data_quality_rule}. Respaldo:
+\codigo{desk/api/tests/test_backup.py}{test_respaldo_y_restauracion_conservan_tablas_y_disparadores}.
+
+\paragraph{Comprobaciones contra las fuentes reales (al documentar).} El 2026-11-11 se consultó el catálogo
+público del SIE para las series SF331451 y SF43718 y sus títulos coinciden con los que cita el código
+\citep{banxico2026a,banxico2026b}; la base local de MarketDataFeed tiene las tablas \texttt{sofr\_rates}
+(columnas \texttt{effective\_date}, \texttt{rate}) y \texttt{treasury\_yields} (\texttt{effective\_date},
+\texttt{tenor}, \texttt{rate}) con los 13 plazos del Tesoro, de los que el desk lee nueve. No se pudo comprobar
+la respuesta de éxito de Banxico con un token real (no hay token): el formato de \texttt{parse\_series} es el
+documentado en el código, sin verificar.
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap13-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \textbf{TIIE-F sintética.} No hay datos libres de TIIE-F: la curva, la volatilidad diaria de TIIE-F, la superficie de volatilidad, los parámetros de Hull--White y las correlaciones son sintéticos en \texttt{MX-DEMO} y también en \texttt{MKT-LIVE}.
+    \item \textbf{Curva SOFR aproximada.} Con Treasuries, sin el diferencial entre swaps SOFR y Treasuries (ecuación~\eqref{eq:cap13-tesoro}); el efecto no se midió.
+    \item \textbf{Spot.} DEXMXUS de FRED es el tipo de cambio de mediodía de Nueva York, no el FIX de Banxico.
+    \item \textbf{Volatilidades.} Hasta 250 cambios diarios, mínimo 60; la de SOFR se mide sobre el rendimiento par de 5 años del Tesoro. Son diarias y por eso la procedencia de las volatilidades de factores sale como mixta.
+    \item \textbf{Banxico.} El cliente está listo pero inactivo sin \texttt{BANXICO\_TOKEN} (lo genera el usuario en el portal del SIE, con captcha) y no se probó contra un token real: el formato de la respuesta de éxito no está verificado, y un rango sin observaciones podría responder 404 de Banxico, que hoy se vería como un 502 genérico.
+    \item \textbf{Fijaciones.} SOFR son fijaciones reales de la Fed de Nueva York; TIIE-F y FIX solo entran por alta manual, CSV o por Banxico con token. No hay carga automática programada: se piden con el botón o con \texttt{POST /api/fixings/fetch}.
+    \item \textbf{Colateral.} \texttt{MKT-LIVE} no trae puntos forward ni base de cross currency swaps, así que con colateral USD se descuenta con TIIE-F y se avisa.
+    \item \textbf{Actualización.} Cada «Actualizar datos» reescribe \texttt{MKT-LIVE} por completo; requiere MarketDataFeed compilado y acceso a la red; \texttt{MX-DEMO} no cambia.
+    \item \textbf{Fuera de alcance.} Importación de archivos de PiP, Valmer o Bloomberg; curvas reales de TIIE-F; usuarios, roles y aprobación.
+    \item \textbf{Respaldo.} Solo de la base del desk; no hay copia fuera de la máquina ni restauración con el servidor encendido.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap13-referencias}
+
+Las fuentes de datos son documentación institucional, no artículos: la definición de la TIIE de Fondeo es la nota
+técnica de Banxico \citep{banxico2021} y el catálogo de series del SIE \citep{banxico2026a,banxico2026b}; SOFR se
+define y se publica en la página de la Fed de Nueva York \citep{nyfed2026}; los rendimientos par son los
+publicados por el Tesoro \citep{treasury2026}; el tipo de cambio de mediodía es la serie H.10 de la Reserva
+Federal difundida por FRED \citep{fred2026}. Para el papel del FIX y de las fijaciones en el ciclo de vida de una
+operación, véase el capítulo~\ref{cap:ciclo-vida}.
+\end{sloppypar}
