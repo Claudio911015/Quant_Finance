@@ -5,9 +5,10 @@ Aquí no hay matemática financiera: se arma el instrumento envejecido y lo val�
 
 * `irs`: constructor envejecido de `OisSwap` (calendario por fechas, periodo en curso con el
   factor acumulado de las fijaciones diarias).
-* `fx_forward`, `fx_option`, `equity_option`, `swaption`: se acorta el plazo a lo que falta.
-* `cap_floor` y `bond` (aproximación declarada, sin C++ nuevo): se acortan los periodos con
-  `ceil`; el caplet o cupón en curso ya fijado se omite. Viven en `aging.py`.
+* `fx_forward`, `fx_option`, `equity_option`, `swaption`: se acorta el plazo a lo que falta
+  (`shortened`).
+* `cap_floor` y `bond`: calendario exacto de i/frecuencia años con el cupón corrido y el caplet ya
+  fijado fuera del valor (`aging.bond_pv_mxn`, `aging.cap_floor_pv_mxn`); no pasan por `shortened`.
 * `xccy_swap`: lo valúa `xccy.pv_mxn` (gancho del corte 3).
 
 Colateral (corte 3): `value_trade` valúa con el colateral que la contraparte tiene en el `as_of`
@@ -15,7 +16,6 @@ Colateral (corte 3): `value_trade` valúa con el colateral que la contraparte ti
 descuenta con `MXN-USD` (`MarketContext.mxn_discount`); sin la curva avisa `no_csa_curve` y descuenta
 con `TIIE-F`. Con colateral MXN nada cambia.
 """
-import math
 from bisect import bisect_left
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -191,7 +191,10 @@ def _irs_pv(
 
 
 def shortened(product: str, terms: Dict[str, Any], days: int) -> Dict[str, Any]:
-    """Términos con el plazo reescrito a los `days` días que faltan hasta el vencimiento."""
+    """Términos con el plazo reescrito a los `days` días que faltan hasta el vencimiento.
+
+    Solo para `fx_forward`, `fx_option`, `equity_option` y `swaption`; el resto de los productos se valúa
+    en `value_trade` por su propia ruta."""
     t = dict(terms)
     if product in ("fx_forward", "fx_option"):
         t["days"] = days
@@ -199,11 +202,6 @@ def shortened(product: str, terms: Dict[str, Any], days: int) -> Dict[str, Any]:
         t["maturity_years"] = days / _DAYS_PER_YEAR
     elif product == "swaption":  # `maturity_date` es la expiración; el tenor del swap no cambia
         t["expiry_years"] = days / _DAYS_PER_YEAR
-    elif product == "cap_floor":
-        t["periods"] = -(-days // CURVES[t["curve"]]["period_days"])
-    else:  # bond
-        # medio día menos: el día del pacto da `periods` exactos aunque `maturity_date` redondeó
-        t["periods"] = int(math.ceil((days - 0.5) * t["frequency"] / _DAYS_PER_YEAR))
     return t
 
 
