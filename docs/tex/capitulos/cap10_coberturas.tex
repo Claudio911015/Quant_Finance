@@ -78,8 +78,10 @@ la hubo (\codigo{desk/api/hedges.py}{oci_balance}).
 La fecha de designación es la del snapshot elegido; la designación exige que la operación esté viva a esa fecha, que
 la fecha no sea anterior al último evento de ninguna relación de la misma operación y que las fracciones vigentes a esa
 fecha más $F$ no excedan 1 (con holgura de $10^{-12}$). No bloquean, pero quedan guardados en el evento y se muestran
-como avisos: ausencia de relación económica en la prueba prospectiva, instrumento fuera de mercado, flujo en fin de
-semana o inhábil, y documentación más de un día posterior a la fecha de designación
+como avisos: ausencia de relación económica en la prueba prospectiva, instrumento fuera de mercado, razón de
+cobertura capturada que difiere de la de los nocionales en más de $1\,\%$ (\texttt{hedge\_ratio\_mismatch}, hallazgo H07),
+flujo en fin de semana o inhábil (\texttt{forecast\_date\_weekend}, \texttt{forecast\_date\_holiday}; la Metodología
+ya lista ambos, hallazgo H08), y documentación más de un día posterior a la fecha de designación
 (\codigo{desk/api/hedges.py}{_designation_warnings}). El instrumento cuenta como fuera de mercado cuando
 \begin{equation}\label{eq:cap10-fuera-mercado}
   \bigl|\PV^{\mathrm{ins}}_{t_d}\bigr| > 10^{-6}\,\Nom_{\MXN},
@@ -124,8 +126,8 @@ los resta en todas las mediciones posteriores.
 La prueba compara la fracción designada del instrumento con el hipotético en dos pasos
 (\codigo{desk/api/hedge_effectiveness.py}{assess}). Primero los \emph{términos críticos}
 (\codigo{desk/api/hedge_effectiveness.py}{critical_terms}): para un crédito, nocional, índice, inicio, vencimiento y
-sentido del swap; para un flujo pronosticado, nocional, moneda, vencimiento y sentido (el término de moneda compara la
-constante «USD» consigo misma: hallazgo H11). El nocional coincide cuando
+sentido del swap; para un flujo pronosticado, nocional, vencimiento y sentido (el término de moneda, que comparaba la
+constante «USD» consigo misma, se eliminó: hallazgo H11). El nocional coincide cuando
 \begin{equation}\label{eq:cap10-nocional}
   \bigl|F\,\Nom^{\mathrm{ins}} - h\,\Nom^{\mathrm{item}}\bigr| \le 10^{-9}\max\bigl(|F\,\Nom^{\mathrm{ins}}|,\ |h\,\Nom^{\mathrm{item}}|,\ 1\bigr),
 \end{equation}
@@ -196,7 +198,7 @@ La reserva y el reciclaje del periodo son
   R_k &= E_k - (E_{k-1} - M_{k-1}) - M_k .\label{eq:cap10-reciclaje}
 \end{align}
 Por construcción $\Delta M_k + R_k = \Delta E_k$ (ecuación~\eqref{eq:cap10-reciclaje}), y de~\eqref{eq:cap10-totales} y~\eqref{eq:cap10-inefectividad} se sigue la
-\emph{identidad de control} que el código calcula y guarda como \texttt{identity\_residual} en cada cierre:
+\emph{identidad de control} que el código calcula y guarda como \texttt{identity\_residual} en cada cierre de flujo de efectivo:
 \begin{equation}\label{eq:cap10-identidad}
   \Delta C^{\mathrm{ins}}_k + L^{\mathrm{ins}}_k \;=\; \Delta M_k + R_k + I_k ,
 \end{equation}
@@ -208,7 +210,7 @@ El \emph{cierre final} ocurre cuando la operación está \texttt{vencida} al $t_
 hipotético venció, $M_k=0$; si la partida sobrevive al instrumento, la reserva se conserva y la relación queda
 \emph{concluida}: no admite más cierres, pero sí liberar la reserva (sección~\ref{sec:cap10-desdesignacion}). El código llama
 \emph{concluida} a la relación siempre que el último cierre fue el final, también cuando instrumento y partida vencen
-juntos y la reserva queda en cero (hallazgo H09).
+juntos y la reserva queda en cero (hallazgo H09; la Metodología lo declara así).
 Una operación \texttt{terminada} o \texttt{ejercida} no admite cierre normal (409): se desdesigna con la causa
 «el instrumento venció, se vendió o se terminó», y la medición final llega hasta esa fecha con el pago de la
 terminación entre lo liquidado (\codigo{desk/api/hedge_measure.py}{_close}).
@@ -222,9 +224,10 @@ del hipotético con signo contrario y todo va a la cuenta de cobertura de valor 
   I_k = \bigl(C^{\mathrm{ins}}_k - C^{\mathrm{ins}}_{k-1}\bigr) + a_k, \qquad
   \mathrm{FV}_k = I_k + L^{\mathrm{ins}}_k ,
 \end{equation}
-donde $\mathrm{FV}_k$ es el resultado neto del periodo en esa cuenta (\texttt{fv\_result}). En esta rama el campo
-\texttt{identity\_residual} vale cero para cualquier entrada, porque se calcula con las mismas cantidades que lo
-definen (hallazgo H10 en \texttt{HALLAZGOS.md}).
+donde $\mathrm{FV}_k$ es el resultado neto del periodo en esa cuenta (\texttt{fv\_result}). En esta rama no se guarda
+\texttt{identity\_residual}: valía cero para cualquier entrada, porque se calculaba con las mismas cantidades que lo
+definen, y no detectaba ningún error (hallazgo H10 en \texttt{HALLAZGOS.md}, resuelto); el control de la rama es el
+cuadre de cargos y abonos.
 
 \subsection{Asientos sugeridos}\label{sec:cap10-asientos}
 
@@ -246,7 +249,7 @@ $\Delta B_{\mathrm{der}}$, $\Delta B_{\mathrm{ORI}}$, $\Delta B_{\mathrm{efe}}$,
 $\kappa(-R_k)$; en valor razonable, cada $\Delta B$ contra su contrapartida exacta en la cuenta de resultados de cobertura.
 El redondeo deja un residuo $\epsilon=\sum$ de las líneas (en centavos) que se absorbe en la última línea de la cuenta
 de resultados principal del tipo (inefectividad en flujo de efectivo, cobertura de valor razonable en valor razonable;
-se crea con la nota «Residuo de redondeo» si no hay), de modo que cargos y abonos cuadran exactamente
+se crea con la nota «Residuo de redondeo» si no hay; la Metodología decía que iba siempre a inefectividad: hallazgo H12, corregido en el texto), de modo que cargos y abonos cuadran exactamente
 (\codigo{desk/api/hedge_measure.py}{journal}). El redondeo es el de \texttt{decimal.ROUND\_HALF\_UP} sobre
 \texttt{repr} del número.
 
@@ -454,7 +457,10 @@ Los ejemplos de la sección~\ref{sec:cap10-ejemplo} se ejecutan con
       contractual del crédito si este difiere.
     \item \textbf{La razón de cobertura $h$} solo entra a la comparación de nocional
       (ecuación~\eqref{eq:cap10-nocional}); la medición del periodo no la usa: un swap de 600 millones contra un crédito de 500
-      con $h=1.2$ mide la misma inefectividad que con $h=1$ (hallazgo H07 en \texttt{HALLAZGOS.md}).
+      con $h=1.2$ mide la misma inefectividad que con $h=1$ (hallazgo H07 en \texttt{HALLAZGOS.md}). La decisión contable
+      queda pendiente de un contador; mientras tanto el alta avisa con \texttt{hedge\_ratio\_mismatch} si $h$ difiere
+      de la razón que implican los nocionales en más de $1\,\%$, y la Metodología y el reporte declaran que $h$ es
+      informativa.
     \item \textbf{Efectividad.} La prueba es de escenarios con razón de cambios, no de regresión ni de mínima varianza
       \citep{hull2018}; el rango $[0.8, 1.25]$ solo se informa. Que $h$ y los términos críticos coincidan no prueba nada
       sobre el riesgo de crédito, que no se mide.
