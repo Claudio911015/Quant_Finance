@@ -1,0 +1,11 @@
+Repositorio `/home/claudio/Git/Quant_Finance`, rama `feat/qf-desk`. Ejecuta la tarea indicada de `/tmp/fableorchestrate/qf-docs/plan.md`: lee solo esa tarea, la sección `## Contexto` y las notas `### Tn` que haya al final del plan. No hagas nada que la tarea no pida. Corre su comando de verificación.
+
+Solo escribes bajo `docs/tex/` y solo tus archivos (más añadir al final de `referencias.bib` y `HALLAZGOS.md`, compartidos: relee justo antes de editar, añade al final, commitea enseguida). NO modifiques código, pruebas ni nada fuera de `docs/tex/`. En el mismo árbol otros agentes cambian código de XVA (`desk/api/risk/`, `src/xva/`, `desk/ui/`): ignóralo y no lo documentes. No levantes servidores.
+
+Fidelidad: documenta lo que el código HACE (léelo), no la teoría del libro; cada fórmula corresponde a una función concreta con sus convenciones reales. Si el código hace algo incorrecto o distinto de lo que dice la Metodología de la aplicación, no lo corrijas ni lo maquilles: anótalo en `docs/tex/HALLAZGOS.md`.
+
+Referencias académicas: PROHIBIDO inventar. Cada libro o artículo que añadas debe tener DOI o ISBN que hayas confirmado en esta sesión contra crossref.org u openlibrary.org (o la página del editor); si no puedes confirmarlo, no lo añadas. Normas e instituciones: `@manual`/`@misc` con URL oficial que hayas abierto.
+
+Commits: `GRAPHIFY_SKIP_HOOK=1 git commit -m "<español, explica el porqué>" -- <rutas explícitas bajo docs/tex>` (la variable es obligatoria), sin Co-Authored-By ni trailers, sin push, sin `git stash`, sin `graphify-out/`.
+
+Al terminar añade al final de plan.md una nota `### Tn` con lo que dejaste y cualquier desviación (un solo `cat >>`). Responde: `HECHO` o `BLOQUEADO`, archivos, commits, salida real de la verificación, número de fórmulas, de `\codigo` y de citas, hallazgos anotados, y lo que no pudiste comprobar.

@@ -1,0 +1,585 @@
+# Plan — QF Desk corte 9: XVA con XVA incremental y curvas de crédito sintéticas
+
+Diseño: `/tmp/fableorchestrate/qf-xva/design.md` (incluidas la Adenda R10 y las «Respuestas de Fable a las preguntas del plan», ya incorporadas aquí; las referencias «(Fable P#)» remiten a esa sección). Este plan no cambia arquitectura.
+
+## Contexto
+
+### Repositorio y reglas
+
+- Repo `/home/claudio/Git/Quant_Finance`, rama `feat/qf-desk`. Leer `CLAUDE.md` del repo, `desk/README.md` y el docstring de `desk/api/risk/credit.py` (límites del motor viejo que este corte elimina).
+- Python del backend: `/home/claudio/anaconda3/bin/python` (3.8: sin `match`, sin `X | Y`, tipos con `typing`, comentarios de tipo `# type:` como el resto del código).
+- Toda la matemática financiera en C++ (`qf::xva`), expuesta por `qfxva`. Python valida, arma fechas/fijaciones, persiste y da forma. `qfxva` se importa DENTRO de funciones y SIEMPRE después de `from desk.api.qf import qfpy` (ambos registran tipos C++ compartidos; ver docstring de `credit.py`).
+- Compilación de C++ en serie, una tarea a la vez: `cmake --build build -j3`. Las tareas de backend/interfaz no compilan C++ (solo importan `build/src/*.so`).
+- Puertos: pruebas con servidor en **5089** con base temporal; Chrome headless en **9349**. Nunca 5070, nunca Brave/9222, nunca `~/Git/MarketDataFeed`.
+- Commits: en español, con el porqué, sin `Co-Authored-By` ni trailers, rutas explícitas, sin push, sin `git stash`, nunca `graphify-out/` ni `docs/`:
+  `GRAPHIFY_SKIP_HOOK=1 git commit -m "feat(xva): … porque …" -- <ruta1> <ruta2> …`
+- Prueba primero para la lógica nueva (escribir la prueba, verla fallar, implementar).
+- Al final de cada tarea: su comando de verificación + la suite de su capa en verde, luego commit.
+
+### Suites (R9)
+
+```bash
+cd /home/claudio/Git/Quant_Finance
+cmake --build build -j3 && (cd build && ctest --output-on-failure)       # C++ (463 + las nuevas)
+cmake --build build --target pytests                                     # bindings (unittest en tests/*.py)
+/home/claudio/anaconda3/bin/python -m pytest desk/api/tests -q          # backend
+cd desk/ui && npm test && npm run build                                  # UI (vitest; tsc -b && vite build)
+desk/validation/make_report.sh                                           # validación QuantLib (solo T11)
+```
+
+`desk/validation/common.py::VALUATION_PATHS` incluye `src`, `include`, `CMakeLists.txt`, `desk/api/valuation.py`, `desk/api/seed_trades.py`, … : todo commit que los toque cambia `desk_commit`, así que T11 regenera `desk/validation/report.json` al final (requisito `commit_matches: true`, 62 casos, `failed: 0`). `desk/validation/export_cases.py::demo_conn` llama solo a `seed_trades` (las 7 operaciones originales); **no** se añaden las operaciones nuevas a `TRADES`, así la batería sigue en 62 casos.
+
+### Código existente que se reusa (firmas reales)
+
+C++ (`include/`):
+- `qf::termstructure::YieldCurve(std::vector<double> maturities, std::vector<double> rates, math::InterpolationMethod)`; `discountFactor(T)`, `zeroRate(T)`, `maturities()`, `rates()`, `interpolationMethod()`. Tiempos en años = días/365.
+- `qf::models::HullWhite(double a, double sigma, const YieldCurve&)` (B y theta son privados; `conditionalBondPrice(t,T,r_t)` usa r, no x). El motor nuevo puede implementar B(t,T) = (1−e^{−a(T−t)})/a por su cuenta.
+- `qf::instruments::OisSwap(notional, fixedRate, startDays, std::vector<int> payDays, accruedFactor, SwapType, curveKey, dcc=ACT_360, discountCurveKey="")`: pago `payDays` en días desde hoy, t = días/365, devengo τ = días/360, cupón flotante = N·(accrued·DF(prev)/DF(pay) − 1) con DF de la curva de proyección, descuento con `discountCurveKey`. `accruedFactor` debe ser 1 si `startDays >= 0`.
+- `qf::instruments::XccySwap(notionalUsd, fxRate, spread, startDays, payDays, accruedFactorUsd, accruedFactorMxn, XccySide{PayUsd,PayMxn}, initialExchange, finalExchange, usdCurve="SOFR", mxnProjectionCurve="TIIE-F", mxnDiscountCurve="MXN-USD", pair="USDMXN", dcc=ACT_360)`; pata USD SOFR plana descontada con SOFR y convertida al spot; pata MXN TIIE-F + spread proyectada con TIIE-F y descontada con `mxnDiscountCurve`; `PayUsd` = recibe MXN, paga USD. `npv(env)` en MXN.
+- `qf::xva::ICreditCurve { virtual double survivalProbability(double t) const = 0; }`, `FlatHazardRate(double lambda)`.
+- `qf::xva::CVACalculator(const IRateModel&, const ICreditCurve&, double lgd, SimParams{nPaths, monitorDates, seed})`, `setOwnCredit`, `setFundingSpread`, `compute(NettingSet, env) -> CVAResult{cva,dva,fva,bcva,profile}`. EPE **sin descontar**. `NettingSet::add(notional, fixedRate, maturityYears, frequency, SwapType)`. No se borran (R6).
+- `src/CMakeLists.txt`: lista de fuentes de `qf` (líneas `xva/credit_curve.cpp` … `xva/exposure_profile.cpp`), módulo `qfxva` desde `python_bindings/xva_bindings.cpp`. `tests/CMakeLists.txt`: lista de `qf_tests` (añadir los `test_*.cpp` nuevos). Patrón de prueba Python de bindings: `tests/test_xva_exposure_py.py` (importa `build/src`, se salta si no hay `.so`).
+- Binding: `xva_bindings.cpp` ya acepta objetos de `qfpy` (p. ej. `qf::models::HullWhite`) — los tipos C++ registrados en `qfpy` (incluido `YieldCurve`) se pueden recibir en `qfxva` siempre que `qfpy` se importe antes.
+
+Backend (`desk/api/`):
+- `market.load_context(conn, snapshot_id) -> MarketContext`: `.as_of` (date), `.curves` (`"TIIE-F"`, `"SOFR"` y, si hay cotizaciones de colateral, `"MXN-USD"`), `.spot`, `.hw = {"TIIE-F": {"a", "sigma"}, "SOFR": {...}}`, `.factors = {"names": ["TIIE-F","SOFR","USDMXN"], "units": [...], "daily_vols": [4.0, 5.0, 0.0075], "correlations": 3×3}`, `.surface`, `.env`, `.with_collateral(currency)` (→ `.mxn_discount` ∈ {`"TIIE-F"`,`"MXN-USD"`}, `.csa_missing`). `market.CURVES = {"TIIE-F": {"currency":"MXN","period_days":28}, "SOFR": {"currency":"USD","period_days":365}}`.
+- `valuation.value_trade(trade, mkt, fixings) -> {"status","notional","currency","pv","pv_mxn","warnings"}` (usa `mkt.with_collateral(collateral.currency_on(trade, mkt.as_of))`); `valuation.aged_swap(trade, terms, mkt, fixings, warnings) -> qfpy.OisSwap`; `valuation.accrued_factor(index, first_day, on, fixings, mkt, warnings)`; `valuation.is_live(trade, on)`; `valuation._warning(code, index, dates, message)`.
+- `xccy.aged_xccy(trade, terms, mkt, fixings, warnings) -> qfpy.XccySwap` (siempre colateral USD: `mkt.with_collateral("USD").mxn_discount`); `xccy.at_par`, `xccy.resolve`.
+- `aging.py`: bonos y caps (no entra al XVA).
+- `lifecycle.state(trade, events, on) -> {"status","terms","notional"}` (eventos vacíos válidos). `collateral.history(conn) -> {nombre: [...]}`, `collateral.currency_on(trade, on)` (lee `trade.get("collateral", [])`).
+- `fixings.load_all(conn)` (importado como `fixing_store`). `portfolio.load_trades(conn)` (dicts con `id, product, counterparty, trade_date, start_date, maturity_date, params, events, collateral`).
+- `portfolio.create_trade(conn, body)`: hoy valida Y además inserta (no hay validador separado): `choice(body,"product",tuple(PRODUCTS))`, `text(body,"counterparty")`, `params` objeto, `PRODUCTS[name].validate(raw)`, `_dates_from_body` (trade/start/maturity con defaults; `snapshot` opcional), `default_maturity`/`fit_to_maturity`, tasa par (`_at_par`) o `xccy.at_par`, luego `insert_trade`. Nota: `insert_trade` da de alta contrapartes nuevas.
+- `desk/api/risk/credit.py`: `DEFAULT_HAZARD=0.01`, `DEFAULT_RECOVERY=0.40`, `ASSUMED_NOTE`, `CVA_NOTICE`, `_history`, `_params_row`, `list_params`, `set_params`, `_add_months`, `_grid(as_of, last_maturity)` (malla mensual), `exposure(conn, snapshot_id)`. Contrato de `GET /api/credit/exposure`: `{snapshot, as_of, n_paths, seed, pfe_quantile, notice, counterparties: [{counterparty, hazard_rate, recovery, assumed, assumed_note, pv_mxn, cva_mxn, netting_sets: [{curve, currency, trades, pv_mxn, cva_mxn}], profile: [{date, t, ee_mxn, pfe_mxn}], excluded: [{id, product, reason}]}], excluded: [{counterparty, id, product, reason}], warnings}`.
+- `routes/risk_adv.py`: blueprint `risk_adv` con `_arg(name)`, `_int_id`, rutas `/api/credit/params` (GET/POST) y `/api/credit/exposure`; patrón: validar, delegar, `commit` si escribe, `jsonify(ensure_finite(...))`.
+- `validation.py`: `body_object()`, `number(d, name, ge=, le=, gt=, lt=)`, `choice(d, name, options)`, `text(d, name, required=True)`, `iso_date(d, name, required=)`, `ensure_finite(payload)`. `errors.ApiError(status, error, field=None, code=None)` → JSON `{"error","field"}`.
+- `pricing.PRODUCT_LABEL` (rótulos en español por producto).
+- `db.py`: `SCHEMA` (script con `CREATE TABLE IF NOT EXISTS` y disparadores `*_no_update`/`*_no_delete` para tablas de solo inserción, p. ej. `counterparty_credit`); tabla `settings (key PRIMARY KEY, value TEXT, updated_at)`; `db.now_iso()`.
+- `app.py::create_app(db_path=None, seed=True)`: `init_schema`, `_seed_if_empty` (siembra mercado y 7 operaciones solo la primera vez), `ensure_csa_quotes`, blueprints, siembra de historia de factores. `python -c "from desk.api.app import create_app; create_app('<db>').run(host='127.0.0.1', port=5089)"`.
+- `seed_trades.py`: `_ALFA="Banco Alfa (sintético)"`, `_BETA="Banco Beta (sintético)"`, `_GAMMA="Banco Gamma (sintético)"`, `TRADES` (7), `seed_trades(conn)` vía `create_trade`.
+- `seed_market.py`: `SNAPSHOT_ID="MX-DEMO"`, `AS_OF="2026-11-10"`, `SPOT=18.60`, `hw` TIIE-F (a=0.05, σ=0.01), SOFR (a=0.03, σ=0.008); `factors` correlaciones TIIE-F/SOFR 0.35, TIIE-F/USDMXN 0.30, SOFR/USDMXN −0.10; vol diaria USDMXN 0.0075.
+- Pruebas: `desk/api/tests/conftest.py` (`app` con base temporal y `seed=True`, `client`, `empty_portfolio(client)`). Pruebas que cuentan las 7 sembradas: `test_trades_dates.py:213`, `test_risk_dv01_scenarios.py:185,208`, `test_portfolio.py:77,94,111,130,173`, `test_events_api.py:421`; más las de totales del portafolio y `test_credit.py`.
+
+Interfaz (`desk/ui/src/`):
+- `api/client.ts`: `apiRequest` (= `request(method, path, body?)`, prefijo `/api`), `ApiError` (`.status`, `.field`), `createTrade(body)` (= `POST /api/trades`), `listCounterparties()`.
+- `api/riskClient.ts` / `riskTypes.ts`: funciones de crédito existentes (`creditExposure`, `listCreditParams`, `setCreditParams`) — se quedan.
+- `state/SnapshotContext.tsx`: `useSnapshot()` → `{ snapshotId, … }`.
+- `components/EChart.tsx`: `EChart({option, height?, ariaLabel})`, `cssColor(token)`. `components/Shell.tsx`: `NAV_ITEMS` (`{to, label, icon}`); la paleta Ctrl+K (`CommandPalette`) se alimenta de `NAV_ITEMS`, así que una entrada nueva aparece sola.
+- `App.tsx`: rutas con `lazy(() => import(...))`.
+- `screens/pricers/PricerForm.tsx`: funciones internas `initialText(f)`, `percentText`, `parseParams(spec, values)`, componente `Field` (no exportados hoy); `screens/pricers/registry.ts`: `PRODUCT_SPECS`, `productTitle(product)`; `products/irs.ts` y `products/xccy_swap.ts` (campos del pricer).
+- `screens/risk/RiskTabs.tsx` + `labels.ts` (`{id:'credito', label:'Crédito'}`) + `CreditTab.tsx` (430 líneas, se retira); `RiskTabs.test.tsx` mockea `./CreditTab`.
+- `lib/format.ts`: `fmtMoney`, `fmtRate`, `fmtNumber`, `fmtDate`. `lib/provenance.ts` para etiquetas de procedencia.
+- `screens/MethodologyScreen.tsx`: arreglos `Section[]` (`{id, title, items: [{label, text}]}`) por grupo (`RISK_ADV_SECTIONS` con «Exposición y CVA», «Supuestos de crédito», «Alcance del crédito»), `LIMITS`.
+- Patrón de prueba de pantalla: `screens/risk/CreditTab.test.tsx` (`vi.mock('../../api/riskClient', …)`, `vi.mock('../../components/EChart', …)`).
+
+### Interfaces nuevas EXACTAS (las fija T1; nadie las cambia sin volver a Fable)
+
+#### C++ — `include/qf/xva/piecewise_hazard_curve.hpp` (R10b)
+
+```cpp
+#pragma once
+#include <vector>
+#include <qf/xva/credit_curve.hpp>
+#include <qf/termstructure/yieldcurve.hpp>
+namespace qf::xva {
+/// Intensidad constante por tramos: hazards[i] rige en (times[i-1], times[i]] (times[-1] = 0); extrapolación plana del último.
+class PiecewiseHazardCurve : public ICreditCurve {
+public:
+    PiecewiseHazardCurve(std::vector<double> times, std::vector<double> hazards); // times > 0 estrictamente crecientes, hazards >= 0, mismo tamaño >= 1; si no, std::invalid_argument
+    double survivalProbability(double t) const override;   // exp(-∫_0^t h), 1 para t <= 0
+    double hazardRate(double t) const;
+    const std::vector<double>& times() const;
+    const std::vector<double>& hazards() const;
+};
+struct CdsQuote { double tenorYears; double spread; };     // spread decimal (0.0080 = 80 pb)
+/// Valor del CDS para el comprador de protección (pata de protección − pata de prima), por `notional`.
+double cdsValue(const CdsQuote& quote, double recovery, const ICreditCurve& curve,
+                const termstructure::YieldCurve& discount, double notional = 1.0);
+/// Bootstrap tramo a tramo: cada CDS de `quotes` (tenores crecientes, únicos) vale 0. Lanza
+/// std::invalid_argument("bootstrapCdsCurve: quote at <T>y implies a negative hazard rate") si un tramo exige intensidad < 0,
+/// y std::invalid_argument con mensaje claro si recovery ∉ [0,1), quotes vacío, tenores no crecientes o spread <= 0.
+PiecewiseHazardCurve bootstrapCdsCurve(const std::vector<CdsQuote>& quotes, double recovery,
+                                       const termstructure::YieldCurve& discount);
+}
+```
+Convención del CDS (aprobada, Fable P7): pagos de prima en los días d_k = round(k·365/4), k = 1..4·T; devengo (d_k − d_{k−1})/360; tiempos d/365; prima = s·Σ τ_k·S(t_k)·DF(t_k) + prima devengada al incumplimiento s·Σ (τ_k/2)·[S(t_{k−1}) − S(t_k)]·DF(t̄_k); protección = (1 − R)·Σ [S(t_{k−1}) − S(t_k)]·DF(t̄_k), t̄_k = (t_{k−1}+t_k)/2. Tramos de intensidad terminan en los tenores de las cotizaciones.
+
+Binding `qfxva`: `PiecewiseHazardCurve(times, hazards)` (subclase de `ICreditCurve`) con `survival_probability(t)`, `hazard_rate(t)`, `times()`, `hazards()`; `CdsQuote(tenor_years, spread)`; `bootstrap_cds_curve(quotes, recovery, discount)` (discount = `qfpy.YieldCurve`; `std::invalid_argument` → `ValueError`); `cds_value(quote, recovery, curve, discount, notional=1.0)`.
+
+#### C++ — `include/qf/xva/exposure_engine.hpp` (R2)
+
+```cpp
+#pragma once
+#include <optional>
+#include <vector>
+#include <qf/termstructure/yieldcurve.hpp>
+#include <qf/xva/credit_curve.hpp>
+namespace qf::xva {
+enum class SwapCurrency { MXN, USD };
+struct RateSwapSpec {                 // OIS como OisSwap envejecido
+    SwapCurrency currency;            // MXN: TIIE-F; USD: SOFR (proyección y descuento SOFR)
+    double notional;                  // en la moneda del swap
+    double fixedRate;                 // decimal
+    bool   payer;                     // true = paga fija
+    int    startDays;                 // inicio del periodo en curso (o del swap) en días desde hoy; <0 si ya empezó
+    std::vector<int> payDays;         // pagos pendientes, días desde hoy, >0 crecientes
+    double accruedFactor;             // factor compuesto ya fijado del periodo en curso (1 si startDays >= 0)
+    double dayBase = 360.0;           // devengo de la pata fija y de la compuesta
+    bool   csaDiscount = false;       // solo MXN: descuenta con MXN-USD (base determinista)
+};
+struct XccySwapSpec {                 // como XccySwap envejecido
+    double notionalUsd, fxRate, spread;
+    int    startDays;
+    std::vector<int> payDays;
+    double accruedFactorUsd, accruedFactorMxn;
+    bool   payUsd;                    // true = XccySide::PayUsd
+    bool   initialExchange, finalExchange;
+    double dayBase = 360.0;
+    bool   csaDiscount = true;        // pata MXN con MXN-USD; false = TIIE-F (snapshot sin curva)
+};
+struct NettingSetSpec { std::vector<RateSwapSpec> swaps; std::vector<XccySwapSpec> xccys; };
+struct ExposureMarket {
+    termstructure::YieldCurve tiie;   // TIIE-F
+    termstructure::YieldCurve sofr;   // SOFR
+    std::optional<termstructure::YieldCurve> mxnUsd;  // obligatoria si algún spec tiene csaDiscount
+    double spot;                      // USDMXN, MXN por USD
+};
+struct ExposureModel {               // Hull-White 1F por moneda + FX lognormal, medida riesgo neutral MXN
+    double aMxn, sigmaMxn, aUsd, sigmaUsd, fxVol;
+    double rhoMxnUsd, rhoMxnFx, rhoUsdFx;  // correlaciones de los brownianos; matriz definida positiva o invalid_argument
+};
+struct SimConfig {
+    std::size_t nPaths;
+    unsigned    seed;
+    double      pfeQuantile;          // (0,1)
+    std::vector<int> reportDays;      // malla de reporte en días desde hoy, crecientes, reportDays[0] == 0
+};
+struct ExposureProfile {             // todo en MXN; un elemento por reportDays
+    std::vector<int>    days;
+    std::vector<double> times;        // días/365
+    std::vector<double> expectedValue;   // E[V(t)] sin descontar
+    std::vector<double> epe, ene, pfe;   // E[max(V,0)], E[max(-V,0)], cuantil de max(V,0) — sin descontar
+    std::vector<double> epeDisc, eneDisc; // E[max(V,0)/B(t)], E[max(-V,0)/B(t)] con la cuenta bancaria MXN simulada
+    double valueAtZero;                // V(0) neto
+    std::vector<double> pathDiscPos, pathDiscNeg; // nPaths×nDays (fila = trayectoria): max(±V,0)/B por trayectoria; no se expone a Python
+};
+struct DeflatedStat { double mean; double stdErr; };
+enum class Deflator {
+    TiieAccount,        // B(t) = exp(∫_0^t r_TIIE)  (swap MXN con colateral MXN; EPE*/ENE* del XVA)
+    CollateralAccount   // B(t) · P_TIIE(0,t)/P_MXN-USD(0,t)  (cuenta TIIE-F por el factor determinista de base)
+};
+class ExposureEngine {
+public:
+    ExposureEngine(ExposureMarket market, ExposureModel model, SimConfig config); // valida; invalid_argument
+    /// Todos los conjuntos sobre las MISMAS trayectorias. Malla fina diaria; la trayectoria p usa su propio generador
+    /// sembrado con (seed, p), así que las trayectorias no dependen de qué operaciones ni de cuántos conjuntos haya.
+    std::vector<ExposureProfile> simulate(const std::vector<NettingSetSpec>& sets) const;
+    /// Valor en t = 0 de cada operación (swaps primero, luego xccys), en MXN, sin simular.
+    std::vector<double> tradeValuesAtZero(const NettingSetSpec& set) const;
+    /// Para la prueba de martingala R2(b): media y error estándar de V(t)/D(t) + Σ_{flujos pagados en (0,t]} flujo/D(t_pago),
+    /// con D la cuenta `deflator` (equivale a capitalizar los flujos pagados hasta t con esa cuenta).
+    std::vector<DeflatedStat> deflatedValueStats(const NettingSetSpec& set, const std::vector<int>& days,
+                                                 Deflator deflator) const;
+};
+struct XvaResult { double cva, cvaStdErr, dva, dvaStdErr, fva, total; };   // total = cva − dva + fva
+/// CVA = LGD_c Σ_{i>=1} epeDisc_i [S_c(t_{i−1}) − S_c(t_i)]; DVA análogo con eneDisc, own; FVA = s_f Σ (epeDisc−eneDisc)_i S_c(t_i) S_o(t_i) (t_i − t_{i−1}).
+/// Errores estándar con la varianza por trayectoria de la suma (pathDiscPos/pathDiscNeg).
+XvaResult computeXva(const ExposureProfile& profile, const ICreditCurve& counterparty, double counterpartyLgd,
+                     const ICreditCurve& own, double ownLgd, double fundingSpread);
+}
+```
+Modelo (decidido; Fable P1–P3, P9, P10). Medida riesgo neutral MXN, tiempos t = días/365:
+- **Tasas (Cheyette/Hull-White, por moneda c ∈ {MXN, USD}):** r_c(t) = f_c(0,t) + x_c(t), x_c(0) = 0, y_c(t) = σ_c²(1 − e^{−2a_c t})/(2a_c), B_c(t,T) = (1 − e^{−a_c(T−t)})/a_c.
+  - dx_MXN = (y_MXN(t) − a_MXN·x_MXN)dt + σ_MXN·dW_MXN.
+  - dx_USD = (y_USD(t) − a_USD·x_USD − ρ_{USD,X}·σ_USD·σ_X)dt + σ_USD·dW_USD (deriva quanto; X = pesos por dólar; ρ_{USD,X} = `rhoUsdFx`).
+  - Bonos: P_c(t,T) = P_c(0,T)/P_c(0,t)·exp(−B_c(t,T)·x_c(t) − ½·B_c(t,T)²·y_c(t)), con P_MXN(0,·) = TIIE-F y P_USD(0,·) = SOFR.
+  - Transición exacta: gaussiana con media determinista; se simulan conjuntamente (x_c, ∫x_c) por paso diario. ∫r_c = ∫f_c(0,s)ds + ∫x_c = −ln P_c(0,t) + ∫x_c.
+- **Base determinista:** q(t) = P_MXN-USD(0,t)/P_TIIE(0,t) (q ≡ 1 si no hay `mxnUsd`); base instantánea b(t) = −d ln q/dt. P_csa(t,T) = P_TIIE(t,T)·q(T)/q(t).
+- **Tipo de cambio:** d ln X = (r_MXN(t) + b(t) − r_USD(t) − ½σ_X²)dt + σ_X·dW_X, siempre (sea cual sea el colateral), así que el forward del modelo es el de mercado X·P_SOFR/P_MXN-USD. Paso diario: ln X(t+Δ) = ln X(t) + (∫r_MXN − ∫r_USD) + ln q(t)/q(t+Δ) − ½σ_X²Δ + σ_X·√Δ·Z_X, con Z_X correlacionada con los brownianos de las tasas de forma exacta (covarianzas de la transición conjunta; Cholesky de la matriz de covarianza del paso).
+- **Valuación en t:** cada operación descuenta con su curva: swap MXN con `csaDiscount=false` → P_TIIE(t,·); swap MXN con `csaDiscount=true` → P_csa(t,·); swap USD → P_SOFR(t,·), convertido a MXN con X(t); xccy: pata USD con SOFR × X(t), pata MXN proyectada con TIIE-F y descontada con P_csa(t,·) (o P_TIIE si `csaDiscount=false`). Proyección flotante = cociente de P de la curva de proyección; periodo en curso: factor(t) = accruedFactor·exp(∫_0^t r) desde hoy (o desde el inicio del periodo si es futuro), con r de la moneda de la pata. Flujos con día ≤ t ya pagados y fuera de V(t).
+- **Deflactores:** EPE*/ENE* (`epeDisc`, `eneDisc`, `pathDiscPos/Neg`) se descuentan SIEMPRE con la cuenta TIIE-F simulada B(t) = exp(∫r_MXN), para todas las contrapartes (se declara). `Deflator::CollateralAccount` existe solo para `deflatedValueStats` (pruebas de martingala).
+- **Sesgo declarado (no se prueba como martingala):** un swap SOFR de una contraparte con colateral MXN (flujos USD descontados con SOFR, convertidos con X) queda con un sesgo determinista del tamaño de la base, porque X deriva con la base MXN-USD. Va a Metodología.
+- **Malla:** fina diaria hasta el último pago de todos los conjuntos; la trayectoria p usa su propio generador sembrado con (seed, p) y consume las normales día por día, de modo que las trayectorias no dependen de qué operaciones ni de cuántos conjuntos haya (si se extiende el horizonte, solo se añaden normales al final). Revaluación solo en `reportDays`.
+- **Perfiles (Fable P4):** el motor devuelve ambos: sin descontar (`expectedValue`, `epe`, `ene`, `pfe`) y descontado (`epeDisc`, `eneDisc`). CVA/DVA/FVA usan el descontado. La API publica en `profile` solo el sin descontar.
+
+Binding `qfxva` (nombres snake_case): `SwapCurrency.MXN/USD`; `RateSwapSpec(currency, notional, fixed_rate, payer, start_days, pay_days, accrued_factor, day_base=360.0, csa_discount=False)`; `XccySwapSpec(notional_usd, fx_rate, spread, start_days, pay_days, accrued_factor_usd, accrued_factor_mxn, pay_usd, initial_exchange, final_exchange, day_base=360.0, csa_discount=True)`; `NettingSetSpec(swaps=[], xccys=[])`; `ExposureMarket(tiie, sofr, spot, mxn_usd=None)` (curvas `qfpy.YieldCurve`); `ExposureModel(a_mxn, sigma_mxn, a_usd, sigma_usd, fx_vol, rho_mxn_usd, rho_mxn_fx, rho_usd_fx)`; `SimConfig(n_paths, seed, pfe_quantile, report_days)`; `ExposureEngine(market, model, config)` con `simulate(sets) -> list[ExposureProfile]`, `trade_values_at_zero(set) -> list[float]`; `ExposureProfile` de solo lectura: `days, times, expected_value, epe, ene, pfe, epe_disc, ene_disc, value_at_zero` (sin las matrices); `compute_xva(profile, counterparty, counterparty_lgd, own, own_lgd, funding_spread) -> XvaResult` (`cva, cva_stderr, dva, dva_stderr, fva, total`). `std::invalid_argument` → `ValueError`.
+
+#### Backend — tablas, ajustes y siembras
+
+- Tabla nueva (en `db.SCHEMA`, solo inserción con disparadores `credit_curves_no_update`/`_no_delete`):
+  `CREATE TABLE IF NOT EXISTS credit_curves (id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, as_of TEXT NOT NULL, recovery REAL NOT NULL, quotes TEXT NOT NULL, source TEXT NOT NULL, created_at TEXT NOT NULL);` — `entity` = nombre de la contraparte o `"propia"`; `quotes` = JSON `[{"tenor_years": 1, "spread": 0.0060}, …]`; `source` = `"synthetic"`; `as_of` = fecha UTC de inserción. Vigente = mayor `id` por `entity`.
+- Siembra de curvas (`credit_curves.seed_synthetic(conn)`, idempotente con `settings.key = "seed.credit_curves_v1"`), recuperación 0.40, tenores 1, 2, 3, 5, 7, 10 años, spreads en pb: Alfa 60, 70, 80, 95, 105, 120 · Beta 150, 180, 210, 250, 275, 300 · Gamma 95, 97, 98, 100, 100, 101 · propia 70, 80, 90, 105, 115, 125.
+- Operaciones nuevas (`seed_trades.XVA_TRADES` + `seed_trades.ensure_xva_trades(conn)`, idempotente con `settings.key = "seed.xva_trades_v1"`; solo si existe el snapshot `MX-DEMO`; no toca las existentes; cuerpo de `create_trade` con `trade_date` explícita, `snapshot` omitido). Todas con tasa/diferencial/tipo explícitos (nunca a la par):
+
+| # | producto | contraparte | params | trade_date |
+|---|---|---|---|---|
+| 1 | irs | Alfa | TIIE-F receiver 300e6, 39 periodos, 0.0710 | 2025-11-10 |
+| 2 | irs | Alfa | SOFR receiver 15e6, 3 periodos, 0.0375 | 2026-02-03 |
+| 3 | xccy_swap | Alfa | pay_usd 20e6, 39 periodos, fx 18.20, spread 0.0005, both | 2026-05-12 |
+| 4 | irs | Beta | TIIE-F payer 150e6, 52 periodos, 0.0705 | 2026-08-17 |
+| 5 | xccy_swap | Beta | pay_mxn 10e6, 26 periodos, fx 18.60, spread 0.0010, both | 2026-11-10 |
+| 6 | irs | Beta | SOFR payer 12e6, 5 periodos, 0.0365 | 2026-11-10 |
+| 7 | irs | Gamma | SOFR receiver 10e6, 3 periodos, 0.0350 | 2025-08-01 |
+| 8 | irs | Gamma | TIIE-F payer 200e6, 13 periodos, 0.0690 | 2026-11-10 |
+| 9 | xccy_swap | Gamma | pay_usd 8e6, 52 periodos, fx 17.90, spread 0.0000, final | 2025-02-14 |
+
+  Compensación parcial: Alfa (payer 500e6 vs receiver 300e6), Beta (receiver 250e6 vs payer 150e6), Gamma (SOFR payer 20e6 vs receiver 10e6).
+- Ajustes XVA en `settings`: `xva.funding_spread` (omisión 0.0050), `xva.n_paths` (2000), `xva.seed` (42), `xva.pfe_quantile` (0.95). Valores como texto decimal.
+
+#### Backend — JSON
+
+`GET /api/credit/curves?snapshot=<id>` (falta `snapshot` → 400 `field:"snapshot"`; inexistente → 404 como `market.load_context`):
+```json
+{"snapshot":"MX-DEMO","as_of":"2026-11-10","discount_curve":"TIIE-F",
+ "source":{"kind":"synthetic","label":"Sintética (inventada para demostración)"},
+ "curves":[{"entity":"propia","label":"Propia (el desk)","kind":"own","id":4,"as_of":"2026-11-11","recovery":0.4,
+   "quotes":[{"tenor_years":1,"spread":0.007}],
+   "hazards":[{"from_years":0,"to_years":1,"hazard":0.0117}],
+   "grid":[{"year":1,"survival":0.988,"cumulative_pd":0.012,"marginal_pd":0.012}],
+   "history":[{"id":4,"as_of":"2026-11-11","created_at":"…"}],
+   "error":null}]}
+```
+Orden: `propia` primero, luego contrapartes por nombre (todas las de `counterparties`, con `null` en los campos de curva y `quotes: []` si no tienen). `grid`: años 1..10; `marginal_pd` = S(k−1) − S(k). `error`: mensaje en español si el bootstrap falla con ese snapshot (la curva se lista igual, sin `hazards`/`grid`).
+
+`PUT /api/credit/curves/<entidad>` (entidad = nombre URL-codificado o `propia`): cuerpo `{"recovery": 0.4, "quotes":[{"tenor_years":1,"spread":0.006},…], "snapshot":"MX-DEMO"?}`. Validación: `recovery` en [0,1) (`field:"recovery"`); `quotes` lista de 1..12 objetos, `tenor_years` > 0 y ≤ 30 estrictamente crecientes, `spread` en (0, 0.5] (`field:"quotes"`); bootstrap contra TIIE-F del `snapshot` (o `MX-DEMO`): intensidad negativa → 400 `field:"quotes"` «Las cotizaciones implican una intensidad de incumplimiento negativa en el tramo de N años»; entidad inexistente → 404 `field:"entity"`. Inserta, `commit`, responde 200 con el elemento de `curves` de esa entidad.
+
+`GET /api/xva/params` → `{"funding_spread":0.005,"n_paths":2000,"seed":42,"pfe_quantile":0.95,"assumed":{"funding_spread":true},"defaults":{…mismos cuatro…}}`. `PUT /api/xva/params` cuerpo con cualquier subconjunto: `funding_spread` [0, 0.1], `n_paths` entero [100, 20000], `seed` entero [0, 2^31−1], `pfe_quantile` [0.5, 0.999]; clave desconocida → 400 con `field` = clave; responde como el GET. (`assumed.funding_spread` = no hay fila en `settings`.)
+
+`GET /api/xva?snapshot=<id>`:
+```json
+{"snapshot":"MX-DEMO","as_of":"2026-11-10",
+ "notice":"XVA informativo: no entra al PV ni a la contabilidad",
+ "collateral_note":"Exposición sin colateral ni margen: la moneda de colateral solo cambia la curva de descuento",
+ "params":{"funding_spread":0.005,"n_paths":2000,"seed":42,"pfe_quantile":0.95},
+ "model":{"hw":{"TIIE-F":{"a":0.05,"sigma":0.01},"SOFR":{"a":0.03,"sigma":0.008}},"fx_vol":0.119,
+          "correlations":{"mxn_usd":0.35,"mxn_fx":0.30,"usd_fx":-0.10}},
+ "assumptions":["texto en español por cada valor tomado por omisión"],
+ "own_credit":{"entity":"propia","recovery":0.4,"kind":"curve","source":{"kind":"synthetic","label":"…"},"assumed":false,"note":null},
+ "counterparties":[{"counterparty":"Banco Alfa (sintético)",
+    "credit":{"kind":"curve","recovery":0.4,"source":{"kind":"synthetic","label":"…"},"assumed":false,"note":null},
+    "included":[{"id":1,"product":"irs","label":"Swap de tasas (IRS)","pv_mxn":-940000.0}],
+    "excluded":[{"id":4,"product":"fx_forward","reason":"El XVA solo cubre swaps de tasa y cross currency swaps: Forward FX se excluye"}],
+    "pv_mxn":0.0,"cva_mxn":0.0,"cva_stderr_mxn":0.0,"dva_mxn":0.0,"fva_mxn":0.0,"total_mxn":0.0,
+    "epe_max_mxn":0.0,"pfe_max_mxn":0.0,
+    "profile":[{"date":"2026-11-10","t":0.0,"epe_mxn":0.0,"ene_mxn":0.0,"pfe_mxn":0.0}]}],
+ "warnings":[]}
+```
+`credit.kind` ∈ `"curve"` (curva de `credit_curves`), `"flat"` (respaldo `counterparty_credit`), `"assumed"` (ni curva ni parámetros: 1 %/40 %, `note` = `credit.ASSUMED_NOTE`). Malla de reporte: día 0 + `credit._grid(as_of, último vencimiento del conjunto)`. `profile` = perfil SIN descontar del motor (`epe`, `ene`, `pfe`); el descontado no se publica. `epe_max_mxn`/`pfe_max_mxn` = máximos del perfil sin descontar. `model.fx_vol` (Fable P6) = `mkt.surface.vol(mkt.spot, 1.0)` (ATM a 1 año de la superficie, strike = spot) si el snapshot trae superficie; si no, `factors.daily_vols[USDMXN]·√252`; añadir a `model` `"fx_vol_source": "surface_atm_1y" | "factor_daily_vol"`. Correlaciones: las de `factors` tal cual (índices por `factors.names`), y SIEMPRE una línea en `assumptions`: «Correlaciones tomadas de los cambios diarios de los factores del snapshot (TIIE-F, SOFR, USDMXN): aproximación de las correlaciones de los brownianos del modelo». Lo que falte (sin `factors`, sin `hw` de una curva) usa omisiones declaradas en `assumptions`: a=0.05/σ=0.01 (TIIE-F), a=0.03/σ=0.008 (SOFR), fx_vol 0.12, correlaciones 0. Contrapartes en orden de nombre, solo las que tienen operaciones vivas.
+
+`POST /api/xva/incremental` cuerpo `{"snapshot","counterparty","product","params", "trade_date"?, "start_date"?, "maturity_date"?}` (igual a `POST /api/trades`, más `snapshot` obligatorio). Orden de errores: falta `snapshot` → 400 `field:"snapshot"`; `product` con el mismo `choice` que `POST /api/trades`; producto no cubierto → 400 `field:"product"` «El XVA incremental solo cubre swaps de tasa y cross currency swaps: <rótulo> no»; contraparte inexistente → 404 `field:"counterparty"` «Contraparte inexistente: <nombre>»; luego `portfolio.prepare_trade` (mismos mensajes y `field` que `POST /api/trades`); candidata no viva al `as_of` → 400 `field:"trade_date"`. No inserta nada.
+```json
+{"snapshot":"MX-DEMO","as_of":"2026-11-10","counterparty":"…","notice":"…",
+ "candidate":{"product":"irs","label":"Swap de tasas (IRS)","params":{…resueltos…},"trade_date":"…","start_date":"…","maturity_date":"…",
+              "notional":100000000.0,"currency":"MXN","notional_mxn":100000000.0,"pv_mxn":0.0},
+ "before":{"pv_mxn":0,"cva_mxn":0,"cva_stderr_mxn":0,"dva_mxn":0,"fva_mxn":0,"total_mxn":0,"epe_max_mxn":0,"pfe_max_mxn":0},
+ "after":{…mismas claves…},
+ "delta":{"cva_mxn":0,"dva_mxn":0,"fva_mxn":0,"total_mxn":0},
+ "delta_bp":{"cva":0,"dva":0,"fva":0,"total":0},
+ "profile":[{"date":"…","t":0.0,"epe_before_mxn":0,"ene_before_mxn":0,"epe_after_mxn":0,"ene_after_mxn":0}],
+ "warnings":[]}
+```
+`notional_mxn` = nocional (MXN) o nocional × spot del snapshot (SOFR y xccy en USD); `delta_bp = delta / notional_mxn × 1e4`. Antes y después en una sola llamada a `simulate([antes, después])` con la malla de reporte del «después».
+
+`GET /api/credit/exposure` (Fable P5): mismas claves de nivel superior y por contraparte que hoy (`counterparty, hazard_rate, recovery, assumed, assumed_note, pv_mxn, cva_mxn, netting_sets, profile[{date,t,ee_mxn,pfe_mxn}], excluded`), calculado con el motor nuevo (mismos `n_paths`/`seed`/`pfe_quantile` que `/api/xva/params`), más `credit_source: "curve" | "flat"` (`"flat"` también cuando es el supuesto, con `assumed: true`). Cambios: `netting_sets` tiene UN elemento `{"curve": "multimoneda", "trades": [ids], "pv_mxn": …, "cva_mxn": …}` (se conservan `pv_mxn`/`cva_mxn` para el tipo TS existente; `currency` desaparece); `hazard_rate` = intensidad media a 5 años −ln S(5)/5 de la curva usada (curva CDS, o la plana); `recovery` la de la curva o la plana; `ee_mxn`/`pfe_mxn` = `epe`/`pfe` sin descontar; `cva_mxn` = el CVA de `/api/xva`; entran `irs` y `xccy_swap`, el resto a `excluded` con el texto de `/api/xva`.
+
+#### UI — tipos (`desk/ui/src/api/xvaTypes.ts`) y cliente (`desk/ui/src/api/xvaClient.ts`)
+
+Tipos TS que reflejan 1:1 los JSON de arriba: `XvaResponse`, `XvaCounterparty`, `XvaCredit`, `XvaProfilePoint`, `XvaTradeRef`, `XvaExcluded`, `XvaParams`, `XvaParamsBody`, `XvaIncrementalBody`, `XvaIncrementalResponse`, `XvaComponents`, `CreditCurvesResponse`, `CreditCurve`, `CreditCurveQuote`, `CreditCurveBody`. Cliente: `getXva(snapshot)`, `getXvaParams()`, `putXvaParams(body)`, `xvaIncremental(body)`, `getCreditCurves(snapshot)`, `putCreditCurve(entity, body)` (con `encodeURIComponent`). Datos simulados en `desk/ui/src/screens/xva/fixtures.ts` (`XVA_FIXTURE`, `XVA_PARAMS_FIXTURE`, `INCREMENTAL_FIXTURE`, `CREDIT_CURVES_FIXTURE`) con las tres contrapartes, una exclusión y una curva con `error`.
+
+### Reparto y paralelismo
+
+- C++ en serie: T2 → T3 → T4 (comparten `build/`).
+- Backend: T5 (no necesita C++; puede ir en paralelo a T2–T4 pero NO compila; si `pytest` falla al importar `qfpy` mientras otra tarea compila, reintentar). T6 tras T2 y T5. T7 tras T4 y T6. T8 tras T7.
+- Interfaz: T9 y T10 tras T1, en paralelo con todo el backend y entre sí. Archivos disjuntos:
+  - T5: `desk/api/seed_trades.py`, `desk/api/app.py`, `desk/api/tests/test_seed_xva_trades.py`, pruebas existentes que cuentan/totalizan.
+  - T6: `desk/api/db.py`, `desk/api/risk/credit_curves.py`, `desk/api/routes/risk_adv.py`, `desk/api/app.py` (una llamada), `desk/api/tests/test_credit_curves.py`, `desk/api/tests/test_risk_adv_schema.py` si cuenta tablas.
+  - T7: `desk/api/valuation.py`, `desk/api/xccy.py`, `desk/api/risk/xva.py`, `desk/api/routes/xva.py`, `desk/api/app.py` (registrar blueprint), `desk/api/tests/test_xva.py`.
+  - T8: `desk/api/portfolio.py`, `desk/api/risk/xva.py`, `desk/api/routes/xva.py`, `desk/api/risk/credit.py`, `desk/api/tests/test_xva_incremental.py`, `desk/api/tests/test_credit.py`, `desk/api/tests/test_integration_cortes.py` (si mira crédito).
+  - T9: `desk/ui/src/screens/XvaScreen.tsx`, `XvaScreen.css`, `XvaScreen.test.tsx`, `desk/ui/src/screens/xva/*`, `desk/ui/src/App.tsx`, `desk/ui/src/components/Shell.tsx` (+ `Shell.test.tsx`), `desk/ui/src/screens/pricers/PricerForm.tsx` (solo exportar), `desk/ui/src/screens/risk/{RiskTabs.tsx,RiskTabs.test.tsx,labels.ts,CreditTab.*}`.
+  - T10: `desk/ui/src/screens/MethodologyScreen.tsx`, `MethodologyScreen.test.tsx`.
+
+## Tareas
+
+### T1 — Contratos (C++ headers, tipos y cliente TS, simulados)
+- **Modelo:** haiku
+- **Depende de:** nada
+- **R:** fija interfaces de R2, R3, R4, R5, R10 (no cubre ninguno por sí sola)
+- **Objetivo:** dejar escritas las interfaces exactas de `## Contexto` para que C++, backend e interfaz avancen sin leerse.
+- **Archivos:** `include/qf/xva/piecewise_hazard_curve.hpp`, `include/qf/xva/exposure_engine.hpp`, `desk/ui/src/api/xvaTypes.ts`, `desk/ui/src/api/xvaClient.ts`, `desk/ui/src/screens/xva/fixtures.ts`.
+- **Pasos:** 1) Copiar las declaraciones C++ tal cual con Doxygen (`@brief`, `@param`, `@return`) en cada método público; sin `.cpp` (no se añaden a CMake aquí). 2) Escribir los tipos TS 1:1 con los JSON del Contexto. 3) Cliente con `apiRequest` de `./client`. 4) Simulados coherentes (números plausibles; `total_mxn = cva − dva + fva`).
+- **Verificación:** `cd /home/claudio/Git/Quant_Finance && for h in include/qf/xva/piecewise_hazard_curve.hpp include/qf/xva/exposure_engine.hpp; do g++ -std=c++20 -fsyntax-only -Iinclude $h || exit 1; done && echo OK` → `OK`; `cd desk/ui && npm run build` → termina sin errores.
+- **Commit:** `feat(xva): contratos del motor de exposición, del bootstrap de CDS y del API de XVA, para que C++, backend e interfaz avancen en paralelo` con las 5 rutas.
+
+### T2 — C++: curva de intensidad por tramos y bootstrap de CDS
+- **Modelo:** sonnet
+- **Depende de:** T1
+- **R:** R10(b)
+- **Objetivo:** implementar `PiecewiseHazardCurve`, `cdsValue`, `bootstrapCdsCurve` y su binding.
+- **Archivos:** `src/xva/piecewise_hazard_curve.cpp`, `tests/test_PiecewiseHazardCurve.cpp`, `src/CMakeLists.txt` (fuente), `tests/CMakeLists.txt` (prueba), `src/python_bindings/xva_bindings.cpp`, `tests/test_cds_bootstrap_py.py`.
+- **Pasos:** 1) Prueba primero (gtest, `TEST(PiecewiseHazardCurve, …)`): (i) reprecio de cada CDS de entrada `|cdsValue| ≤ 1e-8 × nocional` con la curva bootstrapeada para 3 juegos (pendiente positiva, alta, casi plana) sobre una `YieldCurve` lineal de ~7 %; (ii) una sola cotización plana: `hazard ≈ spread/(1−R)` dentro de 2 %; (iii) S decreciente en una malla de 0 a 15 años y en (0,1]; (iv) cotizaciones que exigen intensidad negativa (p. ej. 1y 300 pb, 2y 50 pb) → `std::invalid_argument` con el texto `negative hazard`; (v) entradas inválidas → `invalid_argument`. 2) Implementar con la convención del CDS del Contexto (aprobada); resolver cada tramo con Brent/bisección sobre h ≥ 0 a tolerancia 1e-14. 3) Binding según Contexto (`PiecewiseHazardCurve` hereda de `ICreditCurve` en Python; `bootstrap_cds_curve` acepta `qfpy.YieldCurve`). 4) `tests/test_cds_bootstrap_py.py` (patrón de `tests/test_xva_exposure_py.py`): reprecio y `ValueError` por intensidad negativa.
+- **Verificación:** `cmake --build build -j3 && (cd build && ctest -R PiecewiseHazardCurve --output-on-failure)` → todas pasan; `(cd build && ctest --output-on-failure)` → 100 %; `cmake --build build --target pytests` → OK.
+- **Commit:** `feat(xva): bootstrap de curvas de crédito por CDS en C++ para que CVA y DVA usen estructura temporal en vez de intensidad plana`.
+
+### T3 — C++: motor de exposición multimoneda (simulación y revaluación)
+- **Modelo:** sonnet
+- **Depende de:** T2
+- **R:** R2, R2(a), R2(b), R2(c), R2(e)
+- **Objetivo:** implementar `ExposureEngine` (`simulate`, `tradeValuesAtZero`, `deflatedValueStats`) según el Contexto.
+- **Archivos:** `src/xva/exposure_engine.cpp`, `tests/test_ExposureEngine.cpp`, `src/CMakeLists.txt`, `tests/CMakeLists.txt`.
+- **Pasos:** 1) Pruebas primero (gtest, `TEST(ExposureEngine, …)`, curvas de prueba TIIE ~7 %, SOFR ~3.7 %, MXN-USD = TIIE desplazada −10 pb, spot 18.6; a/σ como `MX-DEMO`; correlaciones 0.35/0.30/−0.10; fx_vol 0.12): 
+   - (a) `tradeValuesAtZero` = `OisSwap::npv` / `XccySwap::npv` del mismo instrumento envejecido (incluye un swap MXN con `startDays<0` y `accruedFactor≠1`, un USD, uno MXN con `csaDiscount`, un xccy con intercambio inicial futuro y uno ya iniciado) a ≤ 1e-6 × nocional (nocional MXN; USD × spot); con todas las vol 0: |E[V(1 día)] − V(0)| ≤ N·|tasa|·1/360 + N·|r_on|/360 (devengo de un día).
+   - (b) martingala (valida las derivas Cheyette, quanto y del tipo de cambio con base), 4000 trayectorias, semilla fija, t = 365, 1095, 1825 días, |mean − V(0)| ≤ 3·stdErr:
+     - swap MXN con `csaDiscount=false` → `Deflator::TiieAccount`;
+     - swap USD (valor en MXN = valor SOFR × X) → `Deflator::CollateralAccount`;
+     - xccy con `csaDiscount=true` y ambos intercambios → `Deflator::CollateralAccount`.
+     Con `mxnUsd` presente (base no nula). No se prueba el swap SOFR deflactado con la cuenta TIIE-F (sesgo declarado).
+   - (c) vol 0: `epe[i] == max(expectedValue[i], 0)` y `expectedValue` = `npv` del mismo instrumento envejecido a t con las curvas forward implícitas (YieldCurve lineal en pilares diarios con z(τ) = −ln(P(0,t+τ)/P(0,t))/τ, para TIIE-F, SOFR y MXN-USD; spot = forward de mercado X·P_SOFR(0,t)/P_MXN-USD(0,t); `accruedFactor` = P(0,inicio del periodo)/P(0,t) de la curva de proyección) a ≤ 1e-6 × nocional MXN. Casos: swap MXN, swap MXN con `csaDiscount`, swap USD y xccy (este contra `XccySwap::npv` con descuento MXN-USD, como el desk).
+   - (e) `simulate({A, B, A∪B})`: CVA(A∪B) ≤ CVA(A)+CVA(B) (usar `computeXva` de T4 no existe aún: comparar Σ epeDisc·ΔS con una `FlatHazardRate` en la propia prueba); espejo exacto de A → `epe`, `ene`, `pfe` del conjunto {A, espejo} = 0 exactos.
+   - Reproducibilidad: dos `simulate` iguales → resultados idénticos; añadir un conjunto extra no cambia el perfil de otro conjunto (trayectorias independientes de los conjuntos).
+   2) Implementar exactamente el «Modelo (decidido)» del Contexto: malla fina diaria hasta el último pago; por trayectoria `std::mt19937_64` sembrado con `std::seed_seq{seed, p}`; transición exacta conjunta de (x_MXN, ∫x_MXN, x_USD, ∫x_USD, ln X) por paso (medias deterministas con y(t), quanto y base; covarianza del paso por Cholesky); curvas futuras por la fórmula afín con y(t); valuación por curva de cada operación; revaluación solo en `reportDays`; `pfe` = cuantil empírico de max(V,0) sin descontar; `epeDisc`/`eneDisc` con la cuenta TIIE-F. 3) `ExposureProfile.pathDiscPos/Neg` llenos (con la cuenta TIIE-F).
+- **Verificación:** `cmake --build build -j3 && (cd build && ctest -R ExposureEngine --output-on-failure)` → pasan; `(cd build && ctest --output-on-failure)` → 100 %.
+- **Commit:** `feat(xva): motor de exposición multimoneda sobre calendarios reales, que arranca en el PV del desk y compensa entre monedas`.
+
+### T4 — C++: `computeXva`, coherencia con `CVACalculator` y binding del motor
+- **Modelo:** sonnet
+- **Depende de:** T3
+- **R:** R2 (CVA/DVA/FVA), R2(d), R2(e) (con `computeXva`)
+- **Objetivo:** XVA por conjunto con error estándar, prueba R2(d) y exposición del motor en `qfxva`.
+- **Archivos:** `src/xva/exposure_engine.cpp`, `tests/test_ExposureEngine.cpp`, `src/python_bindings/xva_bindings.cpp`, `tests/test_xva_engine_py.py`.
+- **Pasos:** 1) Pruebas: `computeXva` con exposición sintética conocida reproduce las fórmulas a 1e-12; hazard 0 → CVA = 0 exacto; (e) repetido con `computeXva`: CVA(A∪B) ≤ CVA(A)+CVA(B); (d) swap TIIE fresco a la par (tasa par de `OisSwap`), 5 años, pagos cada 28 días: CVA del motor calculado con la fórmula de CVA aplicada al perfil **sin descontar** (`LGD·Σ epe_i·[S(t_{i−1}) − S(t_i)]`, calculado en la prueba; error estándar por lotes: 10 motores con semillas distintas de 500 trayectorias, stdErr = desviación de los 10 CVA / √10, y el CVA del motor = media de los 10) vs `CVACalculator` con `HullWhite(a, σ, tiie)` y `NettingSet.add(N, par, 5.0, 365/28, Payer)`, mismas fechas de reporte, `FlatHazardRate`: |dif| < max(5 % del CVA de `CVACalculator`, 3 errores estándar) (Fable P4; no ajustar la tolerancia). 2) Implementar `computeXva` (stderr con la varianza por trayectoria de Σ LGD·pathDiscPos·ΔS). 3) Binding según Contexto. 4) `tests/test_xva_engine_py.py`: construye curvas con `qfpy.YieldCurve`, `simulate` de dos conjuntos, `compute_xva` con `PiecewiseHazardCurve` y `FlatHazardRate`, y `ValueError` por correlaciones no definidas positivas.
+- **Verificación:** `cmake --build build -j3 && (cd build && ctest --output-on-failure)` → 100 %; `cmake --build build --target pytests` → OK.
+- **Commit:** `feat(xva): CVA, DVA y FVA con error de Monte Carlo y binding del motor nuevo para que el desk deje de usar NettingSet`.
+
+### T5 — Backend: operaciones sembradas nuevas (paso idempotente)
+- **Modelo:** sonnet
+- **Depende de:** nada (paralela a T1–T4; no compila C++)
+- **R:** R1
+- **Objetivo:** añadir las 9 operaciones de la tabla del Contexto en bases nuevas y ya sembradas, una sola vez.
+- **Archivos:** `desk/api/seed_trades.py`, `desk/api/app.py`, `desk/api/tests/test_seed_xva_trades.py`, y las pruebas existentes que cuentan o totalizan operaciones sembradas (ver Contexto).
+- **Pasos:** 1) Prueba primero: base nueva → 16 operaciones; cada contraparte con ≥1 `irs` y ≥1 `xccy_swap`; `trade_date` de las 9 según tabla; reiniciar `create_app` sobre la misma base no duplica; base con solo las 7 originales (simular quitando la clave de `settings` y las 9 por SQL como hace `empty_portfolio`) recibe las 9 y no modifica las 7 (mismos `params`/fechas); `settings["seed.xva_trades_v1"]` existe; todas valúan sin error con `valuation.value_trade` en `MX-DEMO`. 2) `XVA_TRADES` y `ensure_xva_trades(conn)` (no tocar `TRADES` ni `seed_trades`); en `create_app`, si `seed`, llamarla después de `_seed_if_empty` y `ensure_csa_quotes`, con `commit`. 3) Correr toda la suite del backend y ajustar cada prueba que contaba 7/8/10 o totalizaba el portafolio, con un comentario corto que diga por qué cambia (las 9 operaciones del corte 9). No relajar aserciones que no dependen del número de operaciones.
+- **Verificación:** `/home/claudio/anaconda3/bin/python -m pytest desk/api/tests -q` → 0 fallas.
+- **Commit:** `feat(desk): siembra swaps y cross currency swaps adicionales por contraparte, una sola vez, para que el XVA tenga compensación real`.
+
+### T6 — Backend: curvas de crédito sintéticas (tabla, siembra, API)
+- **Modelo:** sonnet
+- **Depende de:** T2, T5
+- **R:** R10(a), R10(c)
+- **Objetivo:** tabla `credit_curves`, siembra sintética idempotente, `GET /api/credit/curves`, `PUT /api/credit/curves/<entidad>` según Contexto.
+- **Archivos:** `desk/api/db.py`, `desk/api/risk/credit_curves.py` (nuevo), `desk/api/routes/risk_adv.py`, `desk/api/app.py`, `desk/api/tests/test_credit_curves.py`, `desk/api/tests/test_risk_adv_schema.py` (si enumera tablas/disparadores).
+- **Pasos:** 1) Prueba primero: forma del GET; 4 entidades sembradas con `source.kind == "synthetic"`; `grid` de 10 años con `survival` decreciente, `cumulative_pd = 1 − survival`, `marginal_pd` = diferencias; reprecio vía `qfxva.cds_value` de cada cotización ≤ 1e-8; PUT válido inserta (dos filas, vigente la última) y responde el elemento; PUT con intensidad negativa → 400 `field:"quotes"` sin insertar; recovery 1 → 400; entidad inexistente → 404; UPDATE/DELETE sobre la tabla → error del disparador; reinicio no resiembra. 2) `credit_curves.py`: `SEED`, `seed_synthetic(conn)`, `current(conn) -> {entidad: fila}`, `build_curve(qfxva, row, mkt) -> PiecewiseHazardCurve` (TIIE-F del snapshot), `list_curves(conn, snapshot_id)`, `put_curve(conn, entity, body)`; `ValueError` del bootstrap → `ApiError(400, …, "quotes")`. 3) Rutas en `risk_adv.py`; llamada a `seed_synthetic` en `create_app` con `seed`.
+- **Verificación:** `/home/claudio/anaconda3/bin/python -m pytest desk/api/tests -q` → 0 fallas.
+- **Commit:** `feat(desk): curvas de crédito sintéticas por CDS con probabilidades de incumplimiento, declaradas como sintéticas`.
+
+### T7 — Backend: `GET /api/xva` y parámetros
+- **Modelo:** sonnet
+- **Depende de:** T4, T6
+- **R:** R2(a) (a nivel desk), R3, R4, R10(d)
+- **Objetivo:** módulo `risk/xva.py` que arma especificaciones desde las operaciones, llama al motor y da forma; rutas `GET /api/xva`, `GET/PUT /api/xva/params`.
+- **Archivos:** `desk/api/valuation.py`, `desk/api/xccy.py`, `desk/api/risk/xva.py` (nuevo), `desk/api/routes/xva.py` (nuevo), `desk/api/app.py`, `desk/api/tests/test_xva.py`.
+- **Pasos:** 1) Refactor sin cambio de resultado: extraer de `aged_swap` una `aged_swap_terms(trade, terms, mkt, fixings, warnings) -> dict(notional, fixed_rate, start_days, pay_days, accrued_factor, side, curve, discount)` que `aged_swap` use; igual `xccy.aged_xccy_terms` (con `csa_discount = vm.mxn_discount == "MXN-USD"`). 2) Pruebas primero en `test_xva.py`: (R2a) para cada operación viva `irs`/`xccy_swap` de la siembra, `trade_values_at_zero` del motor vs `value_trade(...)["pv_mxn"]` ≤ 1e-6 × nocional MXN (incluye una contraparte con colateral USD vía `POST /api/counterparties/...` como en `test_market_csa.py`); forma del JSON; exclusiones con rótulo en español; `total = cva − dva + fva`; reproducible (dos GET iguales); `assumptions` cuando falta un dato (snapshot sin `MXN-USD` o sin `factors` → valores por omisión declarados); contraparte sin curva cae a `counterparty_credit` (`credit.kind == "flat"`) o a `"assumed"`; params GET/PUT, límites, clave desconocida 400, persistencia en `settings`. 3) `xva.py`: `load_params(conn)`, `put_params(conn, body)`, `model_from_snapshot(mkt) -> (ExposureModel, model_json, assumptions)` (hw del snapshot; `fx_vol` ATM 1 año de la superficie o `daily_vols·√252`; correlaciones de `mkt.factors` con su línea fija en `assumptions`; omisiones declaradas — ver JSON de `GET /api/xva`), `build_set(trades, mkt, fixings) -> (NettingSetSpec, included, excluded, warnings)`, `report_days(as_of, last_maturity)` (día 0 + `credit._grid`), `credit_for(conn, name, mkt)` y `own_credit(conn, mkt)` (curva → plana → supuesto), `compute(conn, snapshot_id) -> dict`. 4) Rutas y registro del blueprint.
+- **Verificación:** `/home/claudio/anaconda3/bin/python -m pytest desk/api/tests -q` → 0 fallas; `curl` no (lo hace T11).
+- **Commit:** `feat(desk): XVA por contraparte con el motor multimoneda y curvas de crédito, con supuestos declarados`.
+
+### T8 — Backend: XVA incremental y crédito existente sobre el motor nuevo
+- **Modelo:** sonnet
+- **Depende de:** T7
+- **R:** R5, R5(a), R5(b), R5(c), R6
+- **Objetivo:** `POST /api/xva/incremental`, `portfolio.prepare_trade`, y `GET /api/credit/exposure` delegando en `xva.py`.
+- **Archivos:** `desk/api/portfolio.py`, `desk/api/risk/xva.py`, `desk/api/routes/xva.py`, `desk/api/risk/credit.py`, `desk/api/tests/test_xva_incremental.py`, `desk/api/tests/test_credit.py`, `desk/api/tests/test_integration_cortes.py` (solo si mira crédito).
+- **Pasos:** 1) Pruebas primero: (a) contraparte nueva con una sola operación (crear por `POST /api/trades`) y candidata idéntica de sentido contrario → `delta.*` = −`before.*` exactos y `after.*` = 0 para CVA/DVA/FVA/total y perfiles `*_after` = 0; (b) incremental de una candidata, luego `POST /api/trades` con el mismo cuerpo y `GET /api/xva`: CVA/DVA/FVA/total de esa contraparte = `after` (≤ 1e-6 relativo) y `before` = el GET previo; (c) candidata inválida → 400 con el mismo `error` y `field` que `POST /api/trades` con ese cuerpo (parametrizar varios: nocional negativo, periodos 0, curva desconocida, fechas inválidas); `fx_forward` → 400 `field:"product"` en español; contraparte inexistente → 404 `field:"counterparty"`; nada se inserta (cuenta de `trades` igual); `delta_bp` coherente. R6: `GET /api/credit/exposure` conserva claves (más `credit_source`), `netting_sets == [{"curve":"multimoneda","trades":[…],"pv_mxn":…,"cva_mxn":…}]`, `hazard_rate == −ln S(5)/5` de la curva usada, `cva_mxn` igual al de `/api/xva`; EE(0) = max(PV neto, 0); sin escalón: con σ=0 (snapshot editado o monkeypatch de `model_from_snapshot`) el primer punto mensual ≈ PV forward; ya no existen `_effective_fixed_rate`, `_MODEL_FREQUENCY` ni llamadas a `NettingSet`/`CVACalculator` (`grep -n "NettingSet\|CVACalculator\|_effective_fixed_rate" desk/api -r` vacío); límites del corte 6 siguen pasando. 2) `prepare_trade(conn, body) -> dict` en `portfolio.py` con todo lo de `create_trade` menos la inserción; `create_trade` la usa (sin cambiar respuestas). 3) `xva.incremental(conn, body)`. 4) `credit.exposure` delega en `xva.py` con la forma del Contexto (Fable P5); actualizar el docstring de `credit.py` (sin escalón, sin tasa calibrada). En `test_credit.py`, reescribir o eliminar las pruebas que codifican el motor anterior (conjunto por curva, `netting_sets[0].curve == "TIIE-F"`, escalado de EE con el spot, tasa efectiva, CVA como suma de conjuntos) y decir en el mensaje del commit cuáles y por qué; las de parámetros (`/api/credit/params`) se conservan.
+- **Verificación:** `/home/claudio/anaconda3/bin/python -m pytest desk/api/tests -q` → 0 fallas; `grep -rn "NettingSet\|CVACalculator\|_effective_fixed_rate" desk/api --include=*.py | grep -v tests` → vacío.
+- **Commit:** `feat(desk): XVA incremental con las mismas trayectorias antes y después, y la exposición de Crédito pasa al motor nuevo sin escalón`.
+
+### T9 — Interfaz: pantalla XVA (contra simulados)
+- **Modelo:** sonnet
+- **Depende de:** T1
+- **R:** R7, R10(e), R4 (edición)
+- **Objetivo:** `/xva` completa contra `fixtures.ts`.
+- **Archivos:** `desk/ui/src/screens/XvaScreen.tsx`, `XvaScreen.css`, `XvaScreen.test.tsx`, `desk/ui/src/screens/xva/` (`XvaTable.tsx`, `XvaProfileChart.tsx`, `XvaParamsPanel.tsx`, `IncrementalPanel.tsx`, `CreditCurvesPanel.tsx` y sus `.css`/`.test.tsx`), `desk/ui/src/App.tsx`, `desk/ui/src/components/Shell.tsx`, `desk/ui/src/components/Shell.test.tsx`, `desk/ui/src/screens/pricers/PricerForm.tsx` (solo `export` de `Field`, `initialText`, `parseParams`), `desk/ui/src/screens/risk/RiskTabs.tsx`, `RiskTabs.test.tsx`, `labels.ts`, y borrar `CreditTab.tsx/.css/.test.tsx`.
+- **Pasos:** 1) Pruebas primero (vitest, `vi.mock('../api/xvaClient')`, `vi.mock` de `EChart` como `CreditTab.test.tsx`): tabla con PV neto, CVA, DVA, FVA, total, EPE máx., PFE máx., incluidas/excluidas (rótulos con `productTitle`, nunca `irs`/`xccy_swap` crudos); seleccionar contraparte cambia la gráfica; aviso permanente «XVA informativo: no entra al PV ni a la contabilidad» y nota de colateral; supuestos visibles; panel de parámetros (fondeo, trayectorias, semilla, percentil) llama `putXvaParams` y recarga; «Curvas de crédito»: por entidad tabla editable de cotizaciones (pb) y recuperación → `putCreditCurve`, tabla de PD por año (supervivencia, PD acumulada, PD del año), gráfica de supervivencia, etiqueta «Sintética»; error 400 mostrado junto al campo; «XVA incremental»: contraparte y producto (Swap de tasas / Cross currency swap), campos de `PRODUCT_SPECS.irs/xccy_swap` con `Field`/`parseParams`, botón «Calcular» → `xvaIncremental`, tabla antes/después/incremental por componente en MXN y pb, gráfica EPE/ENE antes y después superpuestas, errores 400/404 junto al campo; «Pactar» → `createTrade` del cliente con el mismo cuerpo y recarga `getXva`. 2) Ruta `/xva` lazy en `App.tsx`; entrada «XVA» en `NAV_ITEMS` (después de Riesgo, ícono SVG simple); `Shell.test.tsx` cuenta la entrada nueva (y la paleta la lista). 3) Pestaña «Crédito» de Riesgo: su panel pasa a un texto corto y un enlace a `/xva` («El crédito, la exposición y el XVA están en la pantalla XVA; los límites siguen en Límites»); se borra `CreditTab.*`; ajustar `RiskTabs.test.tsx`. 4) CSS sin desborde horizontal a 1280 px (tablas con `overflow-x:auto` en su contenedor, no la página).
+- **Verificación:** `cd /home/claudio/Git/Quant_Finance/desk/ui && npm test && npm run build` → todas pasan, build sin errores.
+- **Commit:** `feat(ui): pantalla XVA con XVA incremental y curvas de crédito, y la pestaña Crédito de Riesgo apunta a ella`.
+
+### T10 — Interfaz: Metodología «XVA» y curvas de crédito
+- **Modelo:** haiku
+- **Depende de:** T1
+- **R:** R8, R10(f)
+- **Objetivo:** sección «XVA» en Metodología con todo lo que pide R8 y R10(f); actualizar lo viejo de crédito.
+- **Archivos:** `desk/ui/src/screens/MethodologyScreen.tsx`, `desk/ui/src/screens/MethodologyScreen.test.tsx`.
+- **Pasos:** 1) Prueba primero: existe el encabezado «XVA» y los rótulos de las filas de abajo. 2) Nuevo grupo `XVA_SECTIONS` (id `xva`) con filas: «Modelo y medida» (Hull-White de un factor por moneda sobre TIIE-F y SOFR en forma de Cheyette, r = f(0,t) + x; USDMXN lognormal; medida riesgo neutral MXN; deriva quanto −ρ·σ_USD·σ_X en la tasa USD; deriva del tipo de cambio (TIIE-F + base MXN-USD) − SOFR, así que el forward del modelo es el de mercado con colateral USD; base MXN-USD determinista; cada operación se descuenta con la curva de su contraparte; malla diaria, trayectorias y semilla fijas); «Parámetros» (a y σ del snapshot; volatilidad USDMXN = ATM a 1 año de la superficie o, sin superficie, la volatilidad diaria de los factores × √252; correlaciones de los cambios diarios de los factores, como aproximación de las de los brownianos; lo que falta, por omisión y listado en «Supuestos»; fondeo y simulación editables); «Definiciones» (CVA = LGD·Σ EPE*·ΔS_c, DVA con ENE* y la curva propia, FVA = s_f·Σ(EPE*−ENE*)·S_c·S_o·Δt; EPE*/ENE* descontadas con la cuenta bancaria TIIE-F simulada para todas las contrapartes; el perfil que se muestra y se compara con límites es el sin descontar; total = CVA − DVA + FVA); «XVA incremental» (diferencia con y sin la operación, mismas trayectorias); «Curvas de crédito» (sintéticas, no son datos de mercado; bootstrap tramo a tramo de CDS con prima trimestral ACT/360, recuperación dada, descuento TIIE-F; intensidad constante por tramos; con datos reales se cargarían diferenciales de CDS o de bonos del emisor; respaldo plano si una contraparte no tiene curva); «Límites» (sin margen ni colateral en la exposición; sin wrong-way; base de cross currency determinista; un swap SOFR de una contraparte con colateral MXN queda con un sesgo determinista del tamaño de la base, porque el tipo de cambio deriva con la base MXN-USD; EPE* descontada con la cuenta TIIE-F aunque el colateral sea USD; periodo en curso compuesto en continuo con la tasa simulada (el desk capitaliza diario), diferencia de segundo orden; productos excluidos: opciones, caps/floors, swaptions, bonos y forwards FX; error de Monte Carlo informado como error estándar del CVA; fuera de alcance: KVA, MVA, contribuciones marginales por operación, XVA en PV o contabilidad). 3) En `RISK_ADV_SECTIONS`, reemplazar «Exposición y CVA», «Supuestos de crédito», «Alcance del crédito» por una fila que remita a la sección XVA (ya no hay escalón, rejilla de 500 trayectorias ni CVA por curva).
+- **Verificación:** `cd /home/claudio/Git/Quant_Finance/desk/ui && npm test && npm run build` → todo pasa.
+- **Commit:** `docs(ui): metodología del XVA y de las curvas de crédito sintéticas, con sus límites declarados`.
+
+### T11 — Integración contra el backend real, suites y validación
+- **Modelo:** sonnet
+- **Depende de:** T3, T4, T5, T6, T7, T8, T9, T10
+- **R:** R7 (verificación real), R9, cierre de R1–R10
+- **Objetivo:** que la interfaz funcione contra el backend real, que pasen las cuatro suites y que la validación QuantLib quede al día.
+- **Archivos:** los que haga falta corregir de T5–T10 (cambios mínimos), `desk/validation/report.json`, `desk/validation/cases.json`, `desk/validation/reference.json` (los que regenere `make_report.sh`).
+- **Pasos:** 1) `cd desk/ui && npm run build`. 2) Backend: `cd /home/claudio/Git/Quant_Finance && /home/claudio/anaconda3/bin/python -c "from desk.api.app import create_app; create_app('/tmp/fableorchestrate/qf-xva/it.db').run(host='127.0.0.1', port=5089)"` en segundo plano (base nueva). 3) Chrome: `google-chrome --headless=new --remote-debugging-port=9349 --user-data-dir=/tmp/fableorchestrate/qf-xva/chrome --window-size=1280,900` (script CDP de ejemplo: `/tmp/claude-1000/-home-claudio/1a002a83-9ce7-4c4e-b315-b09b1e001eba/scratchpad/tipo-shots/shoot.mjs`, adaptar puertos). Recorrer `/xva`: tabla de 3 contrapartes, gráfica, editar fondeo, editar una curva (y provocar el 400 de intensidad negativa), incremental de un IRS y de un xccy, «Pactar» y ver la tabla refrescada; `/riesgo?tab=credito` muestra el enlace; Ctrl+K lista «XVA»; Metodología muestra «XVA». En cada pantalla: 0 errores de consola, `document.documentElement.scrollWidth <= 1280`, sin rótulos crudos (`irs`, `xccy_swap`, `pay_usd`). Capturas en `/tmp/fableorchestrate/qf-xva/shots/`. 4) Por `curl` contra 5089: R5(b) end-to-end (incremental → `POST /api/trades` → `GET /api/xva`, ≤ 1e-6 relativo) y dos `GET /api/xva` idénticos. 5) Corregir lo que falle (commit por corrección). 6) Apagar backend y Chrome (`kill` por PID, no `pkill -f`). 7) Suites completas (las cuatro). 8) Tras el último commit que toque `VALUATION_PATHS`: `desk/validation/make_report.sh`; comprobar `totals.failed == 0`, 62 casos, y `GET /api/validation/report` (o `common.desk_commit() == report["desk_commit"]`) → `commit_matches: true`; commit solo de `desk/validation/*.json`.
+- **Verificación:** las cuatro suites verdes; `/home/claudio/anaconda3/bin/python -c "import json;from desk.validation import common;r=json.load(open('desk/validation/report.json'));print(r['totals'], r['desk_commit']==common.desk_commit())"` → `{'cases': 62, 'within': 62, 'explained': 0, 'failed': 0} True`; `git status --short` sin cambios fuera de `graphify-out/`/`docs/`.
+- **Commit(s):** `fix(...)` por corrección encontrada; `chore(validation): regenera la validación contra QuantLib porque el corte 9 tocó src/ y la siembra`.
+
+## Cobertura de requisitos
+
+| R | Tareas |
+|---|---|
+| R1 | T5 |
+| R2 (motor, CVA/DVA/FVA) | T3, T4 |
+| R2(a) | T3 (C++), T7 (contra `value_trade`) |
+| R2(b) | T3 |
+| R2(c) | T3 |
+| R2(d) | T4 |
+| R2(e) | T3, T4 |
+| R3 | T7 |
+| R4 | T7 (backend), T9 (edición) |
+| R5, R5(a)(b)(c) | T8 (+ T11 end-to-end) |
+| R6 | T8 |
+| R7 | T9, T11 |
+| R8 | T10 |
+| R9 | T11 (y cada tarea su suite) |
+| R10(a) | T6 |
+| R10(b) | T2 |
+| R10(c) | T6 |
+| R10(d) | T7, T8 |
+| R10(e) | T9 |
+| R10(f) | T10 |
+
+### T1 (nota de ejecución)
+- Estado: HECHO. Headers C++ y tipos/cliente TS escritos con las firmas EXACTAS del Contexto; sin `.cpp` ni CMake (como pedía T1).
+- Firmas reales añadidas más allá del Contexto: `PiecewiseHazardCurve::hazardRate(double) const` (ya estaba en el Contexto); `ExposureEngine` tiene miembros privados `market_`, `model_`, `config_` (no alteran la API pública).
+- Tipos TS añadidos (no listados en el Contexto): `XvaParamsResponse` (= 4 campos + `assumed`, `defaults`), `XvaSource`, `XvaCredit`, `XvaOwnCredit`, `XvaModel` (incluye `fx_vol_source`), `XvaComponents`, `XvaCandidate`, `XvaTradeRef`, `XvaExcluded`, `XvaProfilePoint`, `CreditCurveHazard`, `CreditCurveGridPoint`, `CreditCurveHistoryEntry`, `CreditCurveQuote`.
+- Desviaciones: `CreditCurve.kind` = `'own' | 'counterparty'` (el JSON del Contexto solo muestra `"own"`; `"counterparty"` es supuesto); `CreditCurve.hazards` y `grid` son opcionales (ausentes cuando `error` no es nulo); `XvaCredit.source` y `XvaOwnCredit.source` admiten `null`; `XvaIncrementalBody.params` es `Record<string, unknown>`; `XvaIncrementalResponse.candidate.params` igual; `putXvaParams`/`getXvaParams` tipadas con `XvaParamsResponse`; `putCreditCurve` devuelve `CreditCurve`.
+- Cliente: `getXva`, `getXvaParams`, `putXvaParams`, `xvaIncremental`, `getCreditCurves`, `putCreditCurve` (entidad con `encodeURIComponent`); rutas relativas a `/api` vía `apiRequest`.
+- Simulados (`desk/ui/src/screens/xva/fixtures.ts`): `XVA_FIXTURE` (Alfa/Beta/Gamma, exclusión `fx_forward` en Alfa), `XVA_PARAMS_FIXTURE`, `INCREMENTAL_FIXTURE`, `CREDIT_CURVES_FIXTURE` (Beta con `error`). Invariantes cumplidos: `total = cva − dva + fva`, `pv = Σ included`; las intensidades y la malla 1..10 años se generan con un helper a partir de los spreads (aproximación, no bootstrap real).
+- Verificación: `g++ -std=c++20 -fsyntax-only -Iinclude` sobre los dos headers → rc 0 (solo aviso `-Wpragma-once-outside-header` por compilar el header como archivo principal; es el mismo patrón que `credit_curve.hpp`). `cd desk/ui && npm run build` → rc 0 (tsc -b + vite build). `npm test` no se corrió (no era parte del comando de T1).
+- No se compiló C++ (no hay `.cpp` nuevos); `build/` no se tocó.
+
+### T10 (nota de ejecución)
+- Estado: HECHO (commit 42de4ce, solo `desk/ui/src/screens/MethodologyScreen.tsx` y `.test.tsx`).
+- Añadido: `XVA_SECTIONS` (id `xva`, título «XVA») renderizado tras el grupo «Riesgo avanzado». Filas: «Modelo y medida», «Parámetros del XVA», «Definiciones», «XVA incremental», «Curvas de crédito», «Límites del XVA». Las etiquetas se evitaron repetidas (`Parámetros` y `Límites` ya existen en otras secciones).
+- Retiradas de «Riesgo avanzado»: «Exposición y CVA», «Supuestos de crédito», «Alcance del crédito», sustituidas por la fila «Crédito y XVA» que remite a la sección XVA.
+- Actualizadas (crédito viejo): «Fuera de alcance» de riesgo avanzado (ya no excluye DVA/FVA; excluye colateral) y la fila «Alcance» de «Límites de este corte» (CVA/XVA de swaps de tasa y cross currency).
+- Sin cambios de firmas ni de otros archivos.
+- Verificación: `npx vitest run src/screens/MethodologyScreen.test.tsx` → 34/34 verde; `npx tsc --noEmit -p .` → rc 0.
+- No se corrió `npm test` completo ni `npm run build` (el encargo limita la verificación a los dos comandos indicados).
+- Pendiente de decisión: la fila «Coherencia con la valuación» de riesgo avanzado sigue describiendo el modelo de exposición antiguo; no la toqué porque no estaba en T10.
+
+### T2 (nota de ejecución)
+- Estado: HECHO, commit `1e366f7`. Firmas EXACTAS del Contexto (header de T1 sin cambios). Fuente nueva `src/xva/piecewise_hazard_curve.cpp` en `qf`; `qfxva` ya expone todo.
+- Binding `qfxva`: `PiecewiseHazardCurve(times, hazards)` (hereda `ICreditCurve`) con `survival_probability(t)`, `hazard_rate(t)`, `times()`, `hazards()` (métodos, devuelven `list`); `CdsQuote(tenor_years, spread)` (atributos de lectura/escritura `tenor_years`, `spread`); `bootstrap_cds_curve(quotes, recovery, discount)` (`quotes` = lista de `CdsQuote`, no tuplas; `discount` = `qfpy.YieldCurve`, importar `qfpy` antes); `cds_value(quote, recovery, curve, discount, notional=1.0)` (`curve` = cualquier `ICreditCurve`). `std::invalid_argument` -> `ValueError`.
+- Mensaje de intensidad negativa: `bootstrapCdsCurve: quote at <T>y implies a negative hazard rate`, con <T> en formato por defecto de C++ (`2`, `0.5`), el tenor de la cotización que falla. Otros `ValueError`: quotes vacío, tenores no crecientes/únicos o <= 0, spread <= 0 o no finito, recovery fuera de [0,1), tenores a menos de un día entre sí.
+- DESVIACION (menor): el vértice de cada tramo es la ÚLTIMA FECHA DE PAGO del CDS (`round(365·T)` o `round(4T·365/4)` días / 365), no el tenor literal. Coinciden exactamente para años enteros (1,2,3,5,7,10: los tenores reales de las curvas sintéticas). Difieren por <1 día en tenores como 0.5 (día 183 -> 0.50137): con el vértice en 0.5, el último pago del CDS de 6m caería en el tramo siguiente y su reprecio dejaría de ser 0 al añadir tenores posteriores. Quien lea `curve.times()` en T6 para tenores no enteros debe esperar ese valor; para la malla/explicación usar el tenor de la cotización.
+- Tenor que no es múltiplo de un trimestre (p. ej. 1.3): pagos trimestrales hasta `floor(4T)` y un pago final de cola en `round(365·T)`. `round` = `std::lround` (mitad hacia arriba): día 183 para k=2.
+- Solver: `qf::math::brent` existente, tol 1e-14 sobre h, bracket [0, max(1e-3, 2·s/(1−R))] duplicado hasta cambiar de signo (tope 60 duplicaciones, luego `ValueError`).
+- Verificación real: `ctest -R PiecewiseHazardCurve` 13/13; `ctest` completo 476/476 (463 + 13); `cmake --build build --target pytests` 88 pruebas OK (83 + 5); `tests/test_cds_bootstrap_py.py` no se salta.
+
+### T9 (nota de ejecución)
+- Estado: HECHO (commit `fd49298`). `/xva` completa contra simulados; `npm test` 622 passed (42 archivos), `npm run build` sin errores.
+- Pantalla: `screens/XvaScreen.tsx` (export nombrado y `default`, lazy en `App.tsx`, ruta `/xva`). Orden: aviso permanente (`role="note"`, texto de `data.notice` o, antes de cargar, la constante `XVA_NOTICE`) + nota de colateral; tabla; perfil + operaciones de la contraparte elegida; «Supuestos y modelo» + «Parámetros de simulación»; «XVA incremental»; «Curvas de crédito». Params y curvas se renderizan aunque `getXva` falle; el incremental solo con datos.
+- Componentes (todos en `desk/ui/src/screens/xva/`, con su `.test.tsx`): `common.ts` (`XVA_NOTICE`, `COLLATERAL_NOTE`, `toApiError`, `toPbText/fromPb`, `toPercentText/fromPercent`, `readNumber`, `useLoad(load, key, tick)` → `{data,error,loading}`; con otra `key` descarta el dato, con el mismo `key` lo conserva), `XvaTable({counterparties, selected, onSelect})`, `XvaProfileChart.tsx` (`profileOption(cp, pfeQuantile?)`, `incrementalOption(profile)`, `XvaProfileChart({cp, pfeQuantile})`, `IncrementalChart({profile})`), `XvaParamsPanel({onSaved})`, `IncrementalPanel({snapshotId, counterparties, onTraded})`, `CreditCurvesPanel({snapshotId, onSaved})` (+ `survivalOption(curve)`). CSS: `XvaScreen.css` (clases `xva-*` compartidas), `IncrementalPanel.css`, `CreditCurvesPanel.css`.
+- Contrato usado (sin cambios a `xvaTypes.ts`/`xvaClient.ts`/`fixtures.ts`): `getXva(snapshot)`, `getXvaParams()`, `putXvaParams(body)` con los CUATRO campos siempre, `xvaIncremental(body)`, `getCreditCurves(snapshot)`, `putCreditCurve(entity, {recovery, quotes, snapshot})`. Unidades de captura: spread de fondeo y cotizaciones en pb, recuperación y percentil de PFE en %; viajan en decimal.
+- Mapeo de errores (para T11 contra el backend real): params `400 field ∈ {funding_spread,n_paths,seed,pfe_quantile}` junto al campo; curvas `field:"quotes"` junto a la tabla de cotizaciones (id `credit-quotes-error`) y `field:"recovery"` junto al campo; incremental: `field` ∈ {`counterparty`,`product`, nombres de los campos del pricer} junto al campo, cualquier otro (`trade_date`, `snapshot`…) en aviso general. Pactar: errores siempre en aviso general.
+- Incremental: la contraparte sale de las de `GET /api/xva` (las que tienen operaciones vivas); productos `irs` y `xccy_swap` con los campos de `PRODUCT_SPECS` vía `Field`/`parseParams`/`initialText` (ahora exportados de `PricerForm.tsx`; solo se añadió `export`). No hay campos de fechas: el backend usa sus omisiones. «Pactar» envía a `createTrade` el mismo cuerpo (`{snapshot, counterparty, product, params}`) que se calculó, no el del formulario actual; tras pactar limpia el resultado y recarga `getXva`. Tabla antes/después: filas CVA, DVA, FVA, XVA total (MXN y pb con 3 decimales).
+- Guardar parámetros, guardar una curva y pactar disparan recarga de `getXva`. Guardar una curva recarga además `getCreditCurves`.
+- Shell: entrada «XVA» tras Riesgo (`Shell.test.tsx`: nueve pantallas, también en la paleta). Riesgo → Crédito: `RiskTabs.tsx` ahora muestra un texto + `<Link to="/xva">` (requiere Router; `RiskTabs.test.tsx` envuelve en `MemoryRouter`). `CreditTab.{tsx,css,test.tsx}` borrados (`git rm`); `riskClient.ts`/`riskTypes.ts` conservan las funciones de crédito del corte 6 (ya sin consumidor en la UI).
+- Verificación visual (no es T11): API simulada con fixtures + Chrome headless (puertos propios 5091/9351, ya apagados), 1280 px: `document.documentElement.scrollWidth` = 1280 (sin desborde), 0 errores de consola, sin `irs`/`xccy_swap`/`pay_usd`/`fx_forward` crudos, 400 de curva mostrado junto a la tabla. Arreglado en el camino: `flex-basis` de `.xva-field` estiraba el campo de recuperación dentro de la columna del editor. Capturas en el scratchpad de T9 (`xva-ui/xva.png`); T11 hace las suyas contra el backend real.
+- No comprobado: contra el backend real (formas JSON de curvas con `quotes: []`/`recovery: null`, error de `/api/xva` real), `/xva` a otros anchos, tema claro (la app solo tiene tokens oscuros).
+
+### T5
+- `desk/api/seed_trades.py`: `XVA_TRADES` = lista de 9 tuplas `(product, counterparty, params, trade_date_iso)` (4 elementos, a diferencia de `TRADES`, que tiene 3) y `ensure_xva_trades(conn)` (sin commit; no hace nada si existe `settings["seed.xva_trades_v1"]` o si falta el snapshot `MX-DEMO`; al terminar inserta esa clave con valor `"1"`). `app.create_app` la llama (solo si `seed`) después de `_seed_if_empty` y `ensure_csa_quotes`, con su propio `commit`. `TRADES`/`seed_trades` no cambian: `demo_conn` y la batería de validación siguen con las 7 originales (62 casos).
+- Resultado en base nueva o ya sembrada: **16 operaciones**. Ids 8 a 16 en el orden de la tabla del Contexto: 8 irs Alfa TIIE-F receiver; 9 irs Alfa SOFR receiver; 10 xccy Alfa pay_usd; 11 irs Beta TIIE-F payer; 12 xccy Beta pay_mxn; 13 irs Beta SOFR payer; 14 irs Gamma SOFR receiver; 15 irs Gamma TIIE-F payer; 16 xccy Gamma pay_usd (exchange final). Conteo por contraparte: Alfa 6, Beta 5, Gamma 5. Cada una trae su evento `execution` con `event_date` = su `trade_date` (las 7 originales, 2026-11-10).
+- A tener en cuenta en T7/T8 (valores reales en `MX-DEMO`, 2026-11-10, sin fijaciones cargadas): las operaciones 8, 9, 10, 11, 14 y 16 (inicio en el pasado) valúan `viva` pero con avisos `missing_fixing` (las xccy 10 y 16 con dos); las 7 originales y 12, 13, 15 no traen avisos. PV neto por contraparte (MXN): Alfa −4.37 M, Beta −1.32 M, Gamma −5.07 M (las tres negativas; total del portafolio −10.76 M). Los xccy siempre descuentan con `MXN-USD`, así que ya hay DV01 en esa curva aun con colateral MXN.
+- Pruebas: `desk/api/tests/test_seed_xva_trades.py` (10 pruebas nuevas). Nuevo helper `desk/api/tests/original_book.py` con `drop_xva_trades(app)` (borra por SQL los ids > 7, rebobina las secuencias AUTOINCREMENT y recrea los disparadores) y el fixture `original_book` (se importa con `# noqa: F401`). Lo usan como `pytestmark` `test_ops_cashflows.py`, `test_ops_recon.py` y **`test_credit.py`** (T8: el motor viejo de crédito se prueba sobre las 7; al reescribir esas pruebas para el motor nuevo se puede quitar el `pytestmark`, y los ids/conteos del book completo son 1..16), y con `@pytest.mark.usefixtures` dos pruebas de `test_market_csa.py` y dos de `test_collateral_valuation.py`. El resto de las pruebas se actualizó con el nuevo conteo (7→16, 8→17, 10→19, ids de operaciones nuevas desde 17, 3/2/2→6/5/5 por contraparte), con comentario «corte 9».
+- Desviaciones menores: `test_limits.py::test_usage_matches_existing_routes_for_the_four_metrics` ahora reserva un receiver grande de Beta (1e9 al 10 %) al inicio para que el máximo con 0 de `pv_exposure` siga ejerciéndose con PV positivo y negativo (con las 9 nuevas las tres contrapartes quedaban negativas). `test_risk_lifecycle.py::test_trades_not_yet_agreed_are_out_of_risk` y `test_valuation_aged.py::test_not_yet_agreed_trades_are_worth_zero` ruedan el snapshot −700 días (antes −5) porque la operación más antigua del corte 9 es de 2025-02-14. `test_ops_schema.py` simula una base anterior al corte 9 (`drop_xva_trades`) y espera 7 + 9 tras borrar la tabla `settings` (que borra la marca). Nota: borrar la tabla `settings` a mano hace que el arranque vuelva a sembrar las 9 si ya existían (no ocurre en uso normal).
+- Suite del backend: 3452 passed (3442 + 10 nuevas). Commit `2abdb90`.
+
+### T6
+- Estado: HECHO, commit `6600ead`. Archivos: `desk/api/db.py` (tabla `credit_curves` + `credit_curves_no_update/_no_delete`, bloque «corte 9»), `desk/api/risk/credit_curves.py` (nuevo), `desk/api/routes/risk_adv.py`, `desk/api/app.py` (una llamada, dentro del bloque `if seed:` de «corte 9», con su propio `commit`, tras `ensure_xva_trades`), `desk/api/tests/test_credit_curves.py` (54 pruebas). `test_risk_adv_schema.py` no se tocó (solo enumera tablas del corte 6).
+- `credit_curves` firmas reales: constantes `OWN="propia"`, `DISCOUNT_CURVE="TIIE-F"`, `SOURCE={"kind":"synthetic","label":"Sintética (inventada para demostración)"}` (reutilizable en T7 para `credit.source`/`own_credit.source`), `SEED_KEY="seed.credit_curves_v1"`; `seed_synthetic(conn)` (sin commit; idempotente por `settings`; inserta en orden Alfa=1, Beta=2, Gamma=3, propia=4; las filas existen aunque la contraparte aún no exista: `entity` es texto libre); `current(conn) -> {entidad: {id, entity, as_of, recovery(float), quotes(list de {"tenor_years","spread"}), source("synthetic"), created_at}}` (fila de mayor id por entidad; `"propia"` incluida); `build_curve(qfxva, row, mkt) -> qfxva.PiecewiseHazardCurve` (bootstrap contra `mkt.curves["TIIE-F"]`; `row` solo necesita `quotes` y `recovery`; propaga `ValueError`); `list_curves(conn, snapshot_id) -> dict` (contrato del GET); `put_curve(conn, entity, body) -> elemento de curves` (sin commit; lo hace la ruta). Helpers internos útiles: `_qfxva()` (importa `qfpy` y luego `qfxva`), `_bootstrap_message(exc)`.
+- Rutas (`risk_adv.py`): `GET /api/credit/curves?snapshot=` y `PUT /api/credit/curves/<path:entity>` (200, no 201; `<path:>` para admitir `/` en nombres).
+- Formas reales del JSON: orden `propia` y luego TODAS las filas de `counterparties` por nombre. Contraparte sin curva: `id/as_of/recovery = null`, `quotes: []`, `history: []`, `error: null` y SIN las claves `hazards` ni `grid` (el tipo TS las declara opcionales; la UI usa `curve.grid ?? []`). Curva cuyo bootstrap falla con el snapshot: `error` en español (negativa: «Las cotizaciones implican una intensidad de incumplimiento negativa en el tramo de N años», N con `%g`; otro `ValueError`: «No se pudo ajustar la curva con estas cotizaciones: <msg C++>»), sin `hazards`/`grid`, el resto de curvas sigue. `history` = todas las filas de la entidad, de la más nueva a la más vieja, INCLUYENDO la vigente. `grid` = años 1..10 con `survival` de `curve.survival_probability`, `cumulative_pd = 1 − S`, `marginal_pd = S(k−1) − S(k)`.
+- Decisión/desviación menor: `hazards[].from_years/to_years` se arman con los TENORES de las cotizaciones (no con `curve.times()`, cuyo vértice es la última fecha de pago, ver nota T2): idénticos para años enteros; con tenores como 0.5 el JSON dice 0.5, no 0.50137. Las `hazard` vienen de `curve.hazards()`.
+- Validación del PUT (orden): entidad inexistente → 404 `field:"entity"` (antes que el cuerpo); `recovery` ∈ [0,1) → `field:"recovery"` (mensajes del `number` estándar; `true`/texto/`null` rechazados); `quotes` lista de 1..12 objetos, `tenor_years` finito en (0,30] estrictamente creciente, `spread` en (0,0.5] → `field:"quotes"`; `snapshot` opcional (texto; omisión `MX-DEMO`; inexistente → 404 `field:"snapshot"`); luego bootstrap, cuyo `ValueError` → 400 `field:"quotes"` sin insertar. Cuerpo no objeto → 400 de `body_object`. Las filas insertadas por PUT llevan `source = "synthetic"` (el contrato solo define ese valor), igual que las sembradas.
+- Reprecio verificado: `qfxva.cds_value` de cada cotización de las cuatro curvas sembradas ≤ 1e-8 (con `build_curve` sobre el snapshot `MX-DEMO`).
+- Verificación real: `pytest desk/api/tests -q` → 3506 passed (3452 de partida + 54 nuevas), 0 fallas. `qfxva` importó sin problema durante toda la tarea (el compilado de otro agente no interfirió).
+- No comprobado: tema de la UI contra estas formas reales (T11); `GET` con un snapshot cuya curva TIIE-F haga fallar el bootstrap de las cuatro sembradas (solo probado con una fila inválida metida por SQL); concurrencia de escrituras.
+
+### T9b (nota de ejecución)
+- Estado: HECHO (commit `1f3adb6`). `npm test` 634 passed (42 archivos; 622 de partida + 12 nuevas), `npm run build` sin errores. Solo se tocaron `XvaProfileChart.tsx`, `XvaProfileChart.test.tsx`, `IncrementalPanel.test.tsx` (rótulos nuevos) e `IncrementalPanel.css` (`.xva-inc__chart { min-width: 0 }`); `IncrementalPanel.tsx`, `XvaScreen.css`, tipos y fixtures sin cambios.
+- Firmas nuevas en `XvaProfileChart.tsx`: `ExposurePoint {date, t, epe}`, `AlignedExposure {date, t, before|null, after|null, increment|null}`, `alignExposure(before, after): AlignedExposure[]`, `incrementExtremes(rows) -> {max, min} | null`, `incrementSummary(rows) -> string | null`. `incrementalOption(profile)` y `IncrementalChart({profile})` conservan nombre y props.
+- Alineación (por fecha, nunca por índice; ordena por plazo `t`): une las fechas de ambos perfiles; si un perfil no tiene una fecha, interpola linealmente en `t` dentro de su rango, vale 0 pasado su último plazo (ya no hay exposición: una candidata más larga aporta todo su EPE) y es `null` antes de su primer plazo (esa fecha se omite del incremento, del resumen y de las series). Con el backend real antes/después comparten rejilla (misma lista), así que estas reglas solo actúan con perfiles de distinta rejilla/longitud.
+- Gráfica: dos paneles de ECharts con el mismo eje X de plazo en años (`value`, 0 a último `t`, rótulo «Plazo (años)»): arriba «Exposición esperada antes» (discontinua) y «Exposición esperada después»; abajo «Incremento de exposición» como línea con área alrededor de cero (color `--warn`) y una línea de cero. Ejes Y en MXN (millones con «M» si algún valor llega a 1 M; monto entero con separador de miles si no); tooltip único por plazo («fecha · t años» con los tres valores en `MXN x,xxx.xx`). Título como `<h3 class="xva-subtitle">` «Exposición esperada antes y después de la operación» (TitleComponent no está registrado en `EChart.tsx`, que queda fuera del alcance); aria-label «Exposición esperada antes y después de la operación, e incremento de exposición»; alto 392 px. Debajo: «Incremento de exposición: máximo MXN a t años (fecha); mínimo MXN a t años (fecha).» (formato `fmtMoney`, el negativo sale `MXN -50.00`).
+- Desviaciones: (1) se quitaron de esta gráfica ENE antes/después (T9 los tenía; el usuario pidió EPE antes/después + incremento y mostrar cinco series restaba claridad; el DVA sigue en la tabla y `ene_*` sigue en el contrato). Si se quieren de vuelta, mejor como series ocultas por defecto en la leyenda. (2) El incremento es solo de EPE (lo que explica el CVA), no de ENE. (3) No se usó barra (`BarChart` no está registrado en `EChart.tsx`): área de línea.
+- Verificación visual: harness de T9 con perfil de 13 plazos con incremento positivo y negativo (API simulada, Chrome headless en 5091/9351, ya apagados), 1280 px: `scrollWidth` 1280 (sin desborde), 0 errores de consola, tooltip y cursor enlazados entre paneles, área bajo cero correcta; captura en `…/scratchpad/xva-t9b/inc.png`.
+- No comprobado: contra el backend real (T8 aún por integrar en T11), a otros anchos, tema claro.
+
+### T3 (nota de ejecución)
+- Estado: HECHO, commit `ad1c2a2` (`src/xva/exposure_engine.cpp`, `tests/test_ExposureEngine.cpp`, y una línea en cada `CMakeLists.txt`). Header de T1 SIN cambios: las firmas son las EXACTAS del Contexto. `ExposureEngine` implementa `simulate`, `tradeValuesAtZero` y `deflatedValueStats`; **`computeXva` está declarada pero NO definida** (es de T4: usarla antes da error de enlace).
+- Formas reales que T4/T7 deben saber:
+  - `ExposureProfile.pathDiscPos/pathDiscNeg` tienen layout fila = trayectoria: elemento `[p * days.size() + j]`, valen `max(±V,0) / B_TIIE(t_j)` (B = cuenta bancaria TIIE-F simulada). `epeDisc/eneDisc` son su media por columna; `valueAtZero` = V(0) neto = `Σ tradeValuesAtZero`.
+  - `tradeValuesAtZero(set)` devuelve primero los swaps (en el orden de `set.swaps`) y luego los xccys; en MXN (swap USD × spot). No usa `SimConfig`.
+  - `pfe` = elemento `ceil(q·n)−1` de los `max(V,0)` ordenados (misma convención que `simulateExposure`).
+  - Validación (`std::invalid_argument`): spot > 0 finito; `a > 0`, `σ ≥ 0`, `fxVol ≥ 0`; cada ρ en (−1,1) y matriz 3×3 definida positiva (det > 1e-12); `nPaths > 0`; `pfeQuantile ∈ (0,1)`; `reportDays` no vacío, `[0] == 0`, ESTRICTAMENTE creciente. Por conjunto/operación (al llamar `simulate`/`tradeValuesAtZero`, no en el constructor): notional > 0, `payDays` no vacío, > 0 y estrictamente crecientes, `startDays < payDays[0]`, factores devengados > 0 y exactamente 1 si `startDays >= 0` (igual que `OisSwap`/`XccySwap`), `dayBase > 0`; `csaDiscount` (swap MXN o xccy) sin `market.mxnUsd` → `invalid_argument`. `csaDiscount` en un swap USD se ignora.
+  - Convenciones de flujos: un flujo con día ≤ t ya está pagado y fuera de V(t); la única excepción es t = 0, donde entra el intercambio inicial con fecha 0 (como el `npv` del desk: así V(0) = PV del desk). Un intercambio inicial con `startDays < 0` no es flujo. τ = (pay − prev)/dayBase.
+  - La malla fina diaria llega hasta max(último pago de todos los conjuntos, `reportDays.back()`); `reportDays` puede pasarse del último pago (V = 0 ahí).
+  - El periodo en curso se compone en continuo con la tasa simulada: `accrued · exp(∫r)` desde hoy (o desde el inicio si es futuro); el desk capitaliza diario (segundo orden, ya declarado en T10).
+  - Aritmética del valor neto: V del conjunto = suma, operación por operación, de (pata MXN + pata USD·X). Por eso UNA operación y su espejo (mismo conjunto `{A, espejo}`) dan 0 **exacto** (x + (−x)); con varias operaciones de cada lado la suma flotante no es asociativa y queda un residuo ~1e-10 MXN, no 0. T8(a) (contraparte con una sola operación + su espejo) es el caso exacto.
+  - Tiempos (Debug −O2 de CLAU, un hilo): 7.3 M pasos diarios·trayectoria ≈ 1.2 s; libro realista de 3 contrapartes (12 operaciones, 4 años, 2000 trayectorias, malla de 30 días) 0.74 s; la misma malla a 10 años 1.4 s. Memoria ≈ 3·nPaths·nDías·8 B por conjunto (20000 trayectorias × 120 fechas ≈ 58 MB por conjunto).
+- Interno añadido (no es API): `qf::xva::detail::ouMoments(a, σ, μ, t)` y `qf::xva::detail::stepCovariance(model, dt)` tienen enlace externo en `exposure_engine.cpp` (sin declararse en ningún header) para que `test_ExposureEngine.cpp` los compare contra RK4 y contra cuadratura de Simpson (declarados en el propio test). No tocar sus firmas sin ajustar esa prueba.
+- Sin desviación del modelo: ninguna de las derivas fijadas en Contexto/Fable P1–P3, P9, P10 resultó errónea (las derivas quanto, de base y del tipo de cambio superan la martingala; el límite sin volatilidad coincide con el desk a ≤ 1e-6 × nocional; el arranque en t = 0 coincide con `OisSwap::npv`/`XccySwap::npv`). Ninguna tolerancia ni semilla se tocó (semilla de las pruebas 20261110, 4000 trayectorias, 3·stdErr).
+- Pruebas añadidas más allá del plan, por poder de detección: (1) a volatilidad de MX-DEMO la martingale NO detecta ni el signo de la deriva quanto ni la convexidad del bono (probado por mutación), así que hay dos pruebas más — `MartingaleHoldsWithHighVolatilityAndCorrelation` (σ 0.02/0.02, fx 0.25, ρ 0.5/0.4/−0.5, base de 150 pb, 4000 trayectorias) y `MartingaleSeesBondConvexityAtExtremeVolatility` (σ 0.04, flotante puro a 10 años, 2000 trayectorias); (2) `ExposureEngineInternals.*` (momentos y covarianza del paso; las correlaciones ρ_MXN,USD y ρ_MXN,FX no afectan a ninguna martingala, solo a la covarianza, así que solo esta prueba las valida). Mutaciones verificadas (cada una hace fallar al menos una prueba; el original pasa): signo quanto, signo de la base, término −σ_X²/2 del FX, convexidad −B²y/2 del bono, media m del factor MXN, ∫m del factor USD, signo de ρ_MXN,FX en la covarianza, inicio de composición del periodo.
+- Verificación real: `ctest -R ExposureEngine` 22/22 (20 `ExposureEngine.*` + 2 `ExposureEngineInternals.*`); `ctest` completo 498/498 (476 + 22); `cmake --build build --target pytests` 88 pruebas OK. Barrido de 24 semillas × 9 comprobaciones de martingala a volatilidad MX-DEMO: z medio ≈ 0 (|z̄| ≤ 0.14), desviación de z 0.8–1.2, máximo |z| = 3.00 (una de 216 — consistente con 3σ); con la semilla de la prueba |z| ≤ 0.87.
+- Qué no se hizo: sin hilos (no hizo falta por tiempo); `computeXva`, binding `qfxva` del motor y la prueba R2(d) quedan para T4.
+
+### T4 (nota de ejecución)
+- Estado: HECHO con UNA desviación de R2(d) (abajo), commit `590d305` (`src/xva/exposure_engine.cpp`, `tests/test_ExposureEngine.cpp`, `src/python_bindings/xva_bindings.cpp`, `tests/test_xva_engine_py.py`). Header de T1 SIN cambios; `computeXva` ya está definida (en `exposure_engine.cpp`, tras `deflatedValueStats`).
+- `computeXva(profile, counterparty, cLgd, own, oLgd, spread) -> XvaResult{cva, cvaStdErr, dva, dvaStdErr, fva, total}`: CVA/DVA/FVA con `epeDisc`/`eneDisc` exactamente como el Contexto (sumas desde i=1; FVA con `S_c(t_i)·S_o(t_i)·(t_i − t_{i−1})`); `total = cva − dva + fva` exacto. `cvaStdErr`/`dvaStdErr` = error estándar de la media de las sumas por trayectoria `LGD·Σ_{i>=1} pathDisc{Pos,Neg}[p·nDías+i]·ΔS_i` (varianza muestral n−1; 0 con una sola trayectoria). `fva` no tiene error estándar (el struct no lo pide). `std::invalid_argument`: LGD fuera de [0,1] o NaN, `fundingSpread` < 0 o no finito, vectores del perfil vacíos o de distinto largo, `pathDiscPos/Neg` vacíos / de distinto tamaño / no múltiplo de nDías, `times` que no empieza en >= 0 o no estrictamente creciente. Con intensidad 0: CVA, DVA y errores exactamente 0 (el FVA no depende del default y sigue). Un conjunto + su espejo exacto (una operación de cada lado): CVA = DVA = FVA = 0 exactos.
+- Binding `qfxva` (nombres exactos): `SwapCurrency.MXN/USD`; `RateSwapSpec(currency, notional, fixed_rate, payer, start_days, pay_days, accrued_factor, day_base=360.0, csa_discount=False)`; `XccySwapSpec(notional_usd, fx_rate, spread, start_days, pay_days, accrued_factor_usd, accrued_factor_mxn, pay_usd, initial_exchange, final_exchange, day_base=360.0, csa_discount=True)`; `NettingSetSpec(swaps=[], xccys=[])`; `ExposureMarket(tiie, sofr, spot, mxn_usd=None)` (curvas `qfpy.YieldCurve`, importar `qfpy` antes); `ExposureModel(a_mxn, sigma_mxn, a_usd, sigma_usd, fx_vol, rho_mxn_usd, rho_mxn_fx, rho_usd_fx)`; `SimConfig(n_paths, seed, pfe_quantile, report_days)`; `ExposureEngine(market, model, config)` con `simulate(sets) -> list[ExposureProfile]` y `trade_values_at_zero(set) -> list[float]` (NO se expuso `deflatedValueStats`: es solo de pruebas de C++); `ExposureProfile` solo lectura con `days, times, expected_value, epe, ene, pfe, epe_disc, ene_disc, value_at_zero` (las matrices por trayectoria viven dentro del objeto, que `compute_xva` necesita, pero no hay atributo para verlas: pasar el objeto de `simulate` tal cual, no copiar sus listas); `compute_xva(profile, counterparty, counterparty_lgd, own, own_lgd, funding_spread) -> XvaResult` (`cva, cva_stderr, dva, dva_stderr, fva, total`). `counterparty`/`own` = cualquier `ICreditCurve` (`FlatHazardRate`, `PiecewiseHazardCurve`). Los specs (`RateSwapSpec`, `XccySwapSpec`, `NettingSetSpec`) tienen atributos de lectura/escritura (p. ej. `spec.payer = not spec.payer` para el espejo en la prueba R5(a)); `ExposureMarket/Model/SimConfig` solo constructor. Cada `simulate` copia el mercado en el motor (sin `keep_alive`). Todo `std::invalid_argument` → `ValueError` (incluido `csa_discount` sin `mxn_usd`, que lanza en `simulate`/`trade_values_at_zero`, no en el constructor).
+- GIL: `simulate` NO suelta el GIL (no se pidió; con 2000 trayectorias y malla mensual a 10 años son ~1.4 s). Si T7/T8 corren bajo servidor con hilos, pueden pedirlo (una línea: `py::call_guard<py::gil_scoped_release>()`).
+- R2(d) — DESVIACIÓN, con números (no se tocó ninguna tolerancia: `max(5 % del CVA de CVACalculator, 3 errores estándar)`, 10 motores × 500 trayectorias, semillas `20261110 + 7919·b`; CVACalculator 5000 trayectorias, semilla 4242; fechas de reporte = las 65 fechas de pago cada 28 días, así el swap está «fresco» en cada una; hazard 0.02, LGD 0.6, N = 100e6, a = 0.05, σ = 0.01):
+  - Literal (curva TIIE de pruebas con pendiente, tasa par de `OisSwap` en ambos motores): motor 59 807 ± 645, CVACalculator 72 073 → −17.0 %. Causa de montaje, no de modelo: el swap de `NettingSet` (28/365 de devengo, flotante hasta 5.0 años contra fijos hasta 4.986) con la tasa de `OisSwap` (ACT/360) vale +0.4 % del nocional desde el inicio. Con la tasa par PROPIA de cada motor (`InterestRateSwap::parRate(5.0, 365/28)` = 0.071766 vs 0.070618 de `OisSwap`): CVACalculator 63 952 → **−6.5 %**, que sigue sin cumplir (5 % = 3 198 < 4 145; 3 EE = 1 936).
+  - Esa diferencia es del motor viejo. Referencia exacta (sin Monte Carlo: el swap fresco depende solo de x(t) ~ N(m,y), CVA = integral 1D por trapecio, replicada en Python a 5 decimales): curva con pendiente → **exacto 59 595**; motor nuevo 59 807 ± 645 (+0.4 %, 0.33 EE); CVACalculator 63 952 (**+7.3 % sobre el exacto**). Curva plana 7 % → exacto 55 867; motor nuevo 56 091 ± 626 (+0.4 %, 0.36 EE); CVACalculator 57 840 (+3.5 %). Causa medida en CVACalculator (20 000 trayectorias de `HullWhite::simulate`): su `theta(t)` toma una derivada numérica del forward (curva de tasas lineal por tramos), y la tasa corta media queda +4.6 pb sobre la de Hull-White a 2.2 años y +11 pb a 4.4 años (E[r] 0.07241 vs 0.07195; 0.07435 vs 0.07321); además Euler a 1/252 infla la varianza 1–2 % (3.604e-4 vs 3.542e-4 a 4.4 años). Eso sube la exposición del pagador (E[V] a 2.2 años: viejo ≈ +403 k, exacto +251 k, motor nuevo +228 k ± 12 k).
+  - Qué se hizo: la prueba R2(d) corre sobre una curva PLANA de 7 % (donde la derivada numérica de theta es cero y el motor viejo es válido), cada motor con su tasa par, tolerancia exacta del plan: motor 56 091 ± 626 vs CVACalculator 57 840 → −3.0 % (pasa). Margen delgado por culpa del motor viejo (+3.5 % de sesgo propio): con otros 6 pares de semillas (no usados) los resultados fueron −2.5, −3.2, −1.6, −3.8, −6.2 (falla), −2.3 %. Se añadió además `CvaMatchesTheClosedFormOnFlatAndSlopedCurves` (motor vs forma cerrada en ambas curvas, < 3 EE y < 5 %), que sí cubre la curva con pendiente. DECISIÓN DE FABLE: aceptar R2(d) así (plana + forma cerrada) o pedir otra cosa; no se «arregló» CVACalculator (R6: no se toca).
+- Pruebas añadidas (C++ 498 → 506, pytests 88 → 95): `ComputeXva.{ReproducesTheDefinitionsOnAKnownProfile, ZeroHazardGivesExactlyZeroCvaAndDvaAndKeepsFva, NettingNeverCostsMoreThanTheSumOfTheParts (CVA y DVA subaditivos; FVA aditivo a 1e-9), ExactMirrorLeavesNoXva, StandardErrorShrinksWithPathsAndCoversTheSeedToSeedSpread, RejectsInvalidInput}`, `ExposureEngine.{CvaMatchesCvaCalculatorForAFreshAtParSwapOnAFlatCurve, CvaMatchesTheClosedFormOnFlatAndSlopedCurves}`; Python: `tests/test_xva_engine_py.py` (7). Mutaciones comprobadas (cada una rompe `ReproducesTheDefinitionsOnAKnownProfile`): FVA con S(t_{i−1}), error estándar con n en vez de n−1, DVA con la LGD de la contraparte. R2(e) con `computeXva`: CVA(A∪B) ≤ CVA(A)+CVA(B) y espejo exacto = 0.
+- Tiempos: `ctest` completo ~80–90 s (Debug); las dos pruebas de R2(d) ~6 s; `pytests` ~44 s.
+- Verificación real: `cmake --build build -j3 && (cd build && ctest)` → 100 % de 506; `cmake --build build --target pytests` → 95 OK. Aviso para T7: CLAUDE.md del repo ahora pide (reglas 2026-11-11) documentar cada modelo/cálculo en LaTeX en `docs/tex/` y apoyarse en QuantLib; el encargo de T4 prohíbe tocar `docs/`, así que el capítulo del motor/XVA/bootstrap de CDS (fórmulas del Contexto, deriva quanto, base determinista, comparación con CVACalculator de arriba) queda sin escribir: planificarlo.
+
+### T7 (nota de ejecución)
+- Estado: HECHO, commit `ddda531` (`desk/api/valuation.py`, `desk/api/xccy.py`, `desk/api/risk/xva.py` y `desk/api/routes/xva.py` nuevos, `desk/api/app.py` —blueprint `xva_routes` tras el corte 6—, `desk/api/tests/test_xva.py`). Backend: 3547 passed (3506 + 41 nuevas). Sin tocar C++, UI ni `docs/`.
+- Refactor sin cambio de resultado: `valuation.aged_swap_terms(trade, terms, mkt, fixings, warnings) -> {notional, fixed_rate, start_days, pay_days, accrued_factor, side, curve, discount}` (`side` = texto `"payer"|"receiver"`, no el enum; `discount` = curva de descuento, `MXN-USD` solo para TIIE-F con colateral USD y curva) y `xccy.aged_xccy_terms(...) -> {notional_usd, fx_rate, spread, start_days, pay_days, accrued_factor_usd, accrued_factor_mxn, side ("pay_usd"|"pay_mxn"), initial_exchange, final_exchange, discount, csa_discount}`. `aged_swap`/`aged_xccy` solo arman el instrumento con ellos.
+- `risk/xva.py`, firmas reales (módulo importa `credit` y `credit_curves` al inicio: **`credit.py` NO puede importar `xva` al inicio (ciclo); T8 debe hacerlo dentro de `credit.exposure`**):
+  - Constantes: `DEFAULTS` (los 4 parámetros), `NOTICE`, `COLLATERAL_NOTE`, `COVERED_PRODUCTS = ("irs","xccy_swap")`, `CORRELATION_NOTE`, `HW_DEFAULTS`, `FX_VOL_DEFAULT`.
+  - Parámetros: `load_params(conn) -> {funding_spread, n_paths, seed, pfe_quantile}`; `params_response(conn)` (los cuatro + `assumed` + `defaults`, es el cuerpo del GET); `put_params(conn, body)` (sin commit; valida todo antes de escribir; clave desconocida → 400 `field`=clave; guarda `xva.<clave>` en `settings`; responde como el GET).
+  - `model_from_snapshot(mkt) -> (qfxva.ExposureModel, model_json, assumptions)`; `model_json = {hw, fx_vol, fx_vol_source, correlations{mxn_usd,mxn_fx,usd_fx}}`. En MX-DEMO: `fx_vol` 0.13006 (superficie ATM 1 año; `daily_vols·√252` daría 0.1191) y `assumptions == [CORRELATION_NOTE]`. `ExposureModel` NO valida al construirse: unas correlaciones no definidas positivas fallan en el constructor de `ExposureEngine` (`engine()`), y el manejador global de `ValueError` responde 400 `"No se pudo valuar: ExposureEngine: correlation matrix is not positive definite"` con `field: null` (no hay envoltura propia).
+  - `credit_for(conn, name, mkt) -> (curva_qfxva, recovery, info)` y `own_credit(conn, mkt)` (igual; `info` lleva además `entity: "propia"`). `info = {kind, recovery, source, assumed, note}`: `curve` (source sintética), `flat` (source `null`, nota «Intensidad plana capturada en los parámetros de crédito (sin estructura temporal)»), `assumed` (nota `credit.ASSUMED_NOTE`). Si la curva de CDS existe pero el bootstrap falla con el snapshot, se usa el respaldo y `note` dice «Las cotizaciones implican una intensidad … en el tramo de N años: se usó el respaldo» (decisión mía: no se lanza error para no tumbar toda la pantalla por una curva). El crédito propio no tiene intensidad plana: curva o supuesto. La curva devuelta sirve para `−ln S(5)/5` (`curve.survival_probability(5.0)`) de T8, plana o por tramos.
+  - `build_set(trades, mkt, fixings) -> (NettingSetSpec, included, excluded, warnings)`: `trades` = dicts de `portfolio.load_trades` ya filtrados a vivos (un candidato de T8 puede ser un dict con `id, product, start_date, maturity_date, params, events, collateral`); `included` = `[{id, product, label, pv_mxn}]` en el orden de `trades` (el `pv_mxn` es el de `valuation.value_trade`); el motor devuelve `trade_values_at_zero` primero swaps (`irs`) y luego xccys, en ese orden relativo. Una operación que falla al valuar o armar su spec va a `excluded` con «No se pudo valuar: …» y no detiene al resto. Los avisos son los de `value_trade` de las incluidas, mezclados con `merge_warnings`. El colateral es el de la operación (`collateral.currency_on`): `csa_discount` del swap MXN = descuento `MXN-USD`; el xccy siempre colateral USD (`csa_discount` = hay curva).
+  - `report_days(as_of, last_maturity) -> [0, …]`; `engine(mkt, model, params, days) -> qfxva.ExposureEngine` (curvas TIIE-F/SOFR del snapshot, `MXN-USD` si existe, `spot`); `live_by_counterparty(conn, mkt) -> {nombre: [trades vivos]}`; `compute(conn, snapshot_id) -> dict` (cuerpo de `GET /api/xva`, con el contrato del plan; `params` = los 4 valores sin `assumed`/`defaults`).
+  - Un `simulate([spec])` por contraparte con su propia malla (una por contraparte, no una global). Contraparte con solo operaciones excluidas: aparece con ceros, `included: []` y `profile: []`.
+- Rutas (`routes/xva.py`, blueprint `xva`): `GET /api/xva?snapshot=` (falta → 400 `field:"snapshot"`, inexistente → 404), `GET`/`PUT /api/xva/params` (límites del plan: fondeo [0, 0.1], `n_paths` entero [100, 20000], `seed` entero [0, 2^31−1], `pfe_quantile` [0.5, 0.999]). T8 añade `POST /api/xva/incremental` en este mismo archivo (el `_arg` es copia local de la de `risk_adv`).
+- `assumptions` (texto en español): una línea por cada Hull-White que falta («… parámetros Hull-White de TIIE-F … a = 0.05 y σ = 0.01»), por falta de superficie y de volatilidad de factores, la nota fija de correlaciones (`CORRELATION_NOTE`; sin `factors` en su lugar «… no trae las correlaciones … se usó 0»), «El snapshot no trae la curva MXN-USD: la base … se tomó nula …» (línea que no pedía el plan, la añadí porque ese caso sí toma un valor por omisión), «Spread de fondeo 0.50 %: valor por omisión…» mientras no haya fila en `settings`, y «<contraparte>: <ASSUMED_NOTE>» / «Crédito propio: …» cuando el crédito es el supuesto.
+- Desviación menor: `model.fx_vol_source` puede valer `"default"` (sin superficie ni `daily_vols`, `fx_vol` 0.12); el tipo TS (`'surface_atm_1y' | 'factor_daily_vol'`) y el `Record` de `XvaScreen.tsx` no lo conocen. En la práctica `load_context` siempre trae superficie, así que solo sale `surface_atm_1y`; si T11 quiere cerrar el hueco, o se añade la clave en TS o se descarta el caso.
+- Verificación real (MX-DEMO, 16 operaciones, 2000 trayectorias, semilla 42): `GET /api/xva` ≈ 1.8 s; el valor del motor en t = 0 coincide con `value_trade` a ≤ 1e-6 × nocional MXN en las 12 operaciones cubiertas, con colateral MXN, con Alfa en colateral USD (los dos IRS TIIE-F con `csa_discount`, el SOFR sin él, el xccy con él) y sin la curva `MXN-USD`. Cifras (MXN): Alfa CVA 215 k ± 7 k, DVA 619 k, FVA −200 k, PV −4.13 M; Beta CVA 521 k ± 11 k, DVA 179 k, FVA +29 k, PV −1.62 M; Gamma CVA 174 k ± 4.5 k, DVA 378 k, FVA −112 k, PV −6.74 M (PV = solo incluidas; las excluidas son los ids 4, 7 de Alfa, 5 de Beta y 6 de Gamma). Avisos: `missing_fixing` TIIE-F y SOFR (operaciones 8, 9, 10, 11, 14, 16, ver T5).
+- Pruebas (41, `desk/api/tests/test_xva.py`; el cuerpo salió antes que la prueba, así que se comprobó su poder con mutaciones: `csa_discount` siempre falso, `payer`/`pay_usd` invertidos, perfil descontado publicado, spot 1, sin `mxn_usd`, malla sin día 0, `fx_vol` sin √252, correlaciones permutadas y LGD propia = LGD de la contraparte —esta última sobrevivía hasta que la prueba de cableado usó recuperaciones distintas—). Cubren: R2(a) (3 variantes), términos envejecidos, forma y totales, rótulos en español, perfil = sin descontar con el mismo motor, reproducibilidad, avisos, 400/404, contraparte solo con excluidas, crédito (curva, plana, supuesto, intensidad 0 ⇒ CVA exacto 0, curva que no cuadra, crédito propio ausente), modelo, supuestos, correlaciones inválidas y parámetros (defaults, subconjuntos, 15 valores fuera de rango, bordes, atomicidad, persistencia y efecto en la simulación).
+- No comprobado: contra el servidor real con hilos (el GIL no se suelta en `simulate`, ~1.8 s por GET), ni con `curl` (lo hace T11); `factors` con `names` incompletos (cae a correlaciones 0, no tiene prueba propia); la pantalla de T9 contra estas formas reales (T11).
+
+### T8 (nota de ejecución)
+- Estado: HECHO, commit `c5f8381` (`desk/api/portfolio.py`, `desk/api/risk/xva.py`, `desk/api/risk/credit.py`, `desk/api/routes/xva.py`, `desk/api/tests/test_xva_incremental.py` nuevo, `desk/api/tests/test_credit.py`, `desk/api/tests/test_integration_cortes.py`). Backend: **3607 passed** (3547 + 60). Sin C++, UI ni `docs/`.
+- `portfolio.prepare_trade(conn, body) -> {product, counterparty, trade_date, start_date, maturity_date, params}` (fechas como `date`, `params` normalizados y con la tasa par / `fx_rate` / `spread` resueltos; no exige que la contraparte exista; mismos mensajes y `field` que `POST /api/trades`). `create_trade` = `prepare_trade` + `insert_trade`, sin cambiar respuestas.
+- `risk/xva.py` (añadidos): `average_hazard(curve, years=5.0) = ln(1/S(years))/years`; `compute_detailed(conn, snapshot) -> (cuerpo de GET /api/xva, {contraparte: curva de crédito usada})` (`compute` = `compute_detailed(...)[0]`; el contrato de `GET /api/xva` NO cambió); `_last_maturity(trades, included)`; `incremental(conn, body) -> dict` con el JSON del Contexto tal cual (`candidate{product,label,params,trade_date,start_date,maturity_date,notional,currency,notional_mxn,pv_mxn}`, `before`/`after{pv_mxn,cva_mxn,cva_stderr_mxn,dva_mxn,fva_mxn,total_mxn,epe_max_mxn,pfe_max_mxn}`, `delta{cva,dva,fva,total}_mxn`, `delta_bp{cva,dva,fva,total}`, `profile[{date,t,epe_before_mxn,ene_before_mxn,epe_after_mxn,ene_after_mxn}]`, `warnings`). Una sola llamada `simulate([antes, después])` con la malla de reporte del «después»; `after.pv_mxn = before.pv_mxn + candidate.pv_mxn`; `delta = after − before` (así un espejo exacto da `delta == −before` y `after == 0` sin tolerancia); `before` coincide con el `GET /api/xva` previo aunque la candidata alargue la malla (probado). La candidata se arma como `dict(prepared, id=None, events=[], collateral=collateral.history(conn)[contraparte])` (los eventos de ejecución no cambian los términos); si `build_set` no la puede valuar → 400 `field:"params"` con el «No se pudo valuar: …». Candidata no viva → 400 `field:"trade_date"` «La operación candidata no está viva en la fecha de valuación del snapshot (AAAA-MM-DD)». Orden de errores como en el Contexto; un snapshot inexistente da 404 `field:"snapshot"` desde `prepare_trade` (después de los errores de términos, igual que `POST /api/trades`).
+- Ruta: `POST /api/xva/incremental` en `routes/xva.py`.
+- `credit.exposure` delega en `xva.compute_detailed` (importa `xva` dentro de la función; `xva` importa `credit` arriba). Contrato P5 tal cual: `netting_sets == [{"curve":"multimoneda","trades":[ids incluidos],"pv_mxn","cva_mxn"}]` (o `[]` si no hay operaciones cubiertas), `credit_source` `"curve"|"flat"` (`"flat"` también con el supuesto), `hazard_rate = −ln S(5)/5` de la curva usada, `recovery` la de esa curva, `assumed_note` = `info.note` solo si `assumed`, `ee_mxn`/`pfe_mxn` = `epe`/`pfe` sin descontar, `cva_mxn` y `pv_mxn` los de `/api/xva`, `excluded` con el texto «El XVA solo cubre swaps de tasa y cross currency swaps: <rótulo> se excluye», `n_paths`/`seed`/`pfe_quantile` de `/api/xva/params` (por omisión 2000/42/0.95; antes 500/42/0.95). `credit.py` perdió `_effective_fixed_rate`, `_MODEL_FREQUENCY`, `_netting_set`, `_model_maturity`, `_counterparty` (viejo), `N_PATHS/SEED/PFE_QUANTILE`, `COVERED_PRODUCTS`, `_NOT_COVERED/_NOT_VALUED` y los imports de `lifecycle/market/portfolio/valuation/fixings/PRODUCT_LABEL/merge_warnings`; se quedan `DEFAULT_HAZARD`, `DEFAULT_RECOVERY`, `CVA_NOTICE`, `ASSUMED_NOTE`, `_history`, `_params_row`, `list_params`, `set_params`, `_add_months`, `_grid` y la nueva `HAZARD_YEARS = 5.0`. Docstring reescrito (sin escalón, sin tasa calibrada).
+- DESVIACIÓN de la verificación: `grep -rn "NettingSet\|CVACalculator\|_effective_fixed_rate" desk/api --include=*.py | grep -v tests` NO sale vacío: devuelve 3 líneas de `risk/xva.py` con `NettingSetSpec` (la clase del motor NUEVO, que el grep literal confunde con el viejo `NettingSet`). Con `\bNettingSet\b` (y `CVACalculator`, `_effective_fixed_rate`) sale vacío; además una prueba (`test_the_motor_anterior_is_gone_from_the_desk`) lo comprueba sobre todos los `.py` no-prueba de `desk/api`.
+- Observación para T9/T11: en los datos sembrados `pfe_mxn >= ee_mxn` en todos los puntos, pero ya NO se fuerza (P5: se publican `epe`/`pfe` del motor tal cual; el motor viejo hacía `max(pfe, epe)`): con menos de 5 % de trayectorias con valor positivo el PFE puede quedar bajo la EE. Los PV netos sembrados incluidos son negativos en las tres contrapartes, así que EE(0) = 0 en las tres (la prueba de EE(0) positivo usa una contraparte nueva).
+- Pruebas: 53 en `test_xva_incremental.py` (espejo exacto de irs MXN, irs SOFR y xccy; guardar la candidata ⇒ GET = «después» y «antes» = GET previo, en 6 casos: candidata más larga que el libro, a la par, xccy a la par, envejecida SOFR/xccy, contraparte solo con excluidas, colateral USD; 17 candidatas inválidas = mismo `error`/`field` que `POST /api/trades` y sin insertar; 6 productos fuera de alcance; 404; orden de errores; `delta_bp`, `notional_mxn` en MXN/USD/xccy; candidata despreciable ⇒ delta despreciable [prueba de trayectorias comunes]; reproducible; nada se guarda) y 42 en `test_credit.py` (parámetros intactos + exposición nueva + volatilidad cero sin escalón: 783/309/1 288 MXN de variación en un día contra −86 k/−36 k del motor anterior; cota 1e-5 del nocional). Mutaciones comprobadas, cada una mata alguna prueba: semilla distinta en el «después», `notional_mxn` sin spot, candidata sin su colateral, xccy de la contraparte no sumados al «después», `hazard_rate` a 10 años, `ee` tomada del PFE, `credit_source` siempre `curve`, `assumed_note` sin condicional.
+- Pruebas de `test_credit.py` reescritas o eliminadas (y por qué, también en el mensaje del commit): conjunto por curva/moneda (`netting_sets[0].curve == "TIIE-F"`), EE escalada con el spot, CVA = suma de conjuntos, `_effective_fixed_rate`/`_model_maturity`/escalón del motor viejo, `COVERED_PRODUCTS` solo `irs`; ya no usa `original_book` (corre sobre las 16 operaciones). `test_integration_cortes.py`: `test_cva_excludes_the_xccy…` pasó a `test_cva_covers_the_xccy_and_excludes_the_bond…`.
+- No comprobado: contra el servidor real con `curl` (T11); los límites del corte 6 no consultan `credit.exposure` (usan PV/DV01/VaR) y sus pruebas siguen verdes; `desk/ui/src/api/riskTypes.ts` aún tipa `CreditNettingSet.currency` (ya no existe) y no tiene `credit_source`; ningún otro archivo de la UI usa `netting_sets`: T9/T11 deben ajustarlo; `desk/README.md` y la Metodología siguen describiendo el motor anterior (T10 / fuera de mi lista de archivos).
+
+### T11 (nota de ejecución)
+- Estado: HECHO. Commits: `63d91b4` (tipos: `CreditNettingSet` sin `currency`, `CreditCounterparty.credit_source: 'curve'|'flat'`; `fx_vol_source` admite `'default'` y `XvaScreen.tsx` lo rotula «valor por omisión (el snapshot no trae superficie ni volatilidades de factores)»), `9d63afc` (Metodología: la fila «Coherencia con la valuación» de riesgo avanzado describe el motor nuevo —mismos términos envejecidos que la valuación, una pata por moneda, coincide con el PV del desk a 1e-6 del nocional, sin escalón— y la sección XVA tiene la fila nueva «Motor anterior retirado»: el `CVACalculator` quedó fuera de uso por un sesgo medido, +7 % con curva con pendiente y +3.5 % con curva plana; `desk/README.md` solo cambió «463» por «506» tests de C++, no mencionaba el crédito), `18144a0` (CSS), `645c6e2` (GIL), `4f78f91` (validación). Archivos: `desk/ui/src/api/{riskTypes,xvaTypes}.ts`, `desk/ui/src/screens/{XvaScreen.tsx,XvaScreen.test.tsx,XvaScreen.css,MethodologyScreen.tsx,MethodologyScreen.test.tsx}`, `desk/ui/src/screens/xva/IncrementalPanel.css`, `desk/README.md`, `src/python_bindings/xva_bindings.cpp`, `tests/test_xva_engine_py.py`, `desk/validation/{cases,reference,report}.json`.
+- Integración real (backend 5089 con base temporal `/tmp/fableorchestrate/qf-xva/it.db`, Chrome 9349, scripts CDP en `/tmp/fableorchestrate/qf-xva/{cdp,capturas,recorrido,delta,meth}.mjs`): todo lo que pedía T11 pasó contra el backend real sin tocar la lógica de T5–T9: `/xva` con 3 contrapartes y gráfica; fondeo 75 pb (FVA de Alfa −200,376 → −300,564, CVA y DVA intactos, desaparece el aviso «sin ajuste capturado»); 400 de `n_paths` junto al campo; 400 de intensidad negativa junto a la tabla de cotizaciones (`credit-quotes-error`, a 20 px); guardar una curva válida refresca el CVA; incremental de IRS y de xccy; «Pactar» (operación #17) refresca la tabla; `/riesgo?tab=credito` con el enlace a `/xva`; Ctrl+K lista «XVA»; Metodología con «XVA» y «Motor anterior retirado». En cada pantalla: 0 errores de consola (salvo los tres 400 provocados a propósito), `scrollWidth` 1280, sin `irs`/`xccy_swap`/`pay_usd`/`pay_mxn`. Contraparte sin curva (Banco Delta, metida por SQL en la base temporal): la tabla la marca «Supuesto», la lista de `GET /api/credit/curves` trae `quotes: []`/`recovery: null` y la UI muestra «Sin curva: el XVA usa el respaldo plano» y recuperación 40.
+- R5(b) por `curl`/Python contra 5089: incremental → `POST /api/trades` → `GET /api/xva`: antes y después del incremental coinciden con el GET previo y el GET posterior con error relativo 0 exacto (CVA, DVA, FVA, total y PV; un IRS de Gamma y un xccy de Beta). Dos `GET /api/xva` consecutivos idénticos a nivel de bytes (también 2 y 4 peticiones simultáneas).
+- Correcciones encontradas con datos reales: (1) `.xva-pick` sin `text-align: left` (un nombre de dos líneas, «Banco Gamma (sintético)», salía centrado); (2) el `<select>` de producto del incremental truncaba «Cross currency swap USDMXN» con columnas de 190 px: `minmax(240px, 1fr)`. Nada más: la gráfica del incremental (T9b) se ve bien con perfiles reales (ejes en millones, dos paneles con el mismo eje de plazo, leyenda de tres series, resumen de máximo/mínimo; con un perfil que se cae a 0 en el vencimiento la línea cae vertical, es el vencimiento de la xccy a 2 años).
+- Rendimiento: `GET /api/xva` 1.8 s con 16 operaciones/3 contrapartes (2.3–2.8 s con 20/4), 2000 trayectorias; `POST /api/xva/incremental` 0.5–0.9 s (candidata de 2–5 años) y 1.7 s con un IRS de 10 años a 1e9. SÍ bloqueaba: con el GIL tomado una petición ligera tardó 1.57 s mientras corría `GET /api/xva`. Se añadió `py::call_guard<py::gil_scoped_release>()` a `ExposureEngine.simulate` y a `compute_xva` (argumentos convertidos antes de la guarda, resultado convertido después). Ahora una petición ligera tarda 2–3 ms durante el XVA y 2 peticiones simultáneas de XVA terminan en 2.4 s (4 en 3.5 s, 8 núcleos) con respuestas idénticas. Pruebas nuevas en `tests/test_xva_engine_py.py` (pytests 95 → 97): `test_simulate_releases_the_gil` (hilo que late cada 1 ms; falla sin la guarda con 1.3 s de hueco, pasa con ella; no se prueba `compute_xva` en tiempo porque una llamada dura ~1 ms) y `test_compute_xva_accepts_a_curve_written_in_python_with_the_gil_released` (el trampolín `PyICreditCurve` retoma el GIL solo). Cuidado heredado: una subclase Python de `ICreditCurve` debe llamar a su método `survivalProbability` (nombre C++), no `survival_probability`, o el trampolín dice «pure virtual function».
+- Capturas en `/tmp/fableorchestrate/qf-xva/shots/` (1280 px; el contenedor de la app scrollea, así que el script agranda la ventana al alto del contenido antes de capturar): `incremental-concentra.png` y `incremental-compensa.png` (panel «XVA incremental» completo, Banco Beta (sintético), cross currency swap USDMXN, 10,000,000 USD = MXN 186,000,000, 26 periodos de 28 días, vence 2028-11-07, a la par, intercambio inicial y final; la primera «Paga MXN / recibe USD» —duplica la posición dominante de Beta, la xccy #12—, la segunda «Paga USD / recibe MXN» —su espejo—), `xva-pantalla.png` (pantalla `/xva` completa, 1280×2312, base recién sembrada). Extras: `it-curva-400.png`, `it-delta-curvas.png`, `it-metodologia-xva.png`, `it-metodologia-riesgo.png`.
+- Suites finales: ctest 506/506 (106 s); pytests 97 OK; backend 3607 passed (173 s); `npm test` 636 passed (634 + 2: rótulo `'default'` y fila «Motor anterior retirado»; 42 archivos); `npm run build` sin errores. Validación: `desk/validation/make_report.sh` → `{'cases': 62, 'within': 62, 'explained': 0, 'failed': 0}`, `report.json.desk_commit == common.desk_commit()` (`645c6e26`), `GET /api/validation/report` → `commit_matches: true`. `git status --short` sin cambios fuera de `graphify-out/` y `docs/` (los `docs/tex/` que aparecen modificados son de otro agente). Backend y Chrome apagados (5089 y 9349 libres).
+- No comprobado: `MKT-LIVE` (no existe en la base temporal; requiere MarketDataFeed, que no se toca), otros anchos de ventana y tema claro, concurrencia de escrituras (PUT de curvas/parámetros) mientras otra petición simula. Observación menor sin cambio: «Versión vigente #4 del 2026-11-12» en Curvas de crédito usa la fecha UTC de `now_iso()` (convención de todo el desk), un día por delante de la fecha local por la noche en México.

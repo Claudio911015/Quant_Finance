@@ -1,0 +1,7 @@
+Repositorio `/home/claudio/Git/Quant_Finance`, rama `feat/qf-desk`. Ejecuta la tarea indicada de `/tmp/fableorchestrate/qf-xva/plan.md`: lee solo esa tarea, la sección `## Contexto` y las notas `### Tn` que haya al final del plan (firmas reales que dejaron tareas anteriores). No hagas nada que la tarea no pida. Corre su comando de verificación.
+
+Otros agentes trabajan en paralelo en el mismo árbol: no toques archivos fuera de los de tu tarea; si un archivo tuyo tiene cambios ajenos sin commitear, edita puntualmente y commitea solo tus rutas; si una prueba ajena falla o `qfpy`/`qfxva` no importa por un momento (se está recompilando C++), espera y reintenta, no lo arregles; repórtalo. Solo las tareas de C++ compilan (`cmake --build build -j3`); las demás no recompilan.
+
+Commits: `GRAPHIFY_SKIP_HOOK=1 git commit -m "<español, explica el porqué>" -- <rutas explícitas>` (la variable es obligatoria), sin Co-Authored-By ni trailers, sin push, sin `git stash`, sin `graphify-out/` ni `docs/`. No toques el puerto 5070, Brave/9222 ni `~/Git/MarketDataFeed`. Bases de datos solo temporales.
+
+Al terminar añade al final de plan.md una nota `### Tn` con las firmas y formas reales que dejaste y cualquier desviación (un solo `cat >>`). Responde: `HECHO` o `BLOQUEADO`, archivos tocados, commits, salida real de la verificación, y lo que omitiste o no pudiste comprobar.
