@@ -16,6 +16,10 @@ valor del conjunto en t = 0 es el PV del desk. El resto de productos se lista en
   guarda, simulados en una sola llamada al motor (mismas trayectorias), así que la diferencia no lleva ruido
   de Monte Carlo entre corridas.
 * `GET /api/credit/exposure` (`risk/credit.py`) usa `compute_detailed`: la exposición y el CVA son los de aquí.
+* Mallas (H21): el perfil que se publica es mensual (`report_days`), pero CVA, DVA y FVA se integran sobre una malla
+  más fina (`integration_days`): la mensual, cada `INTEGRATION_STEP` días, las fechas de pago y de intercambio de
+  nocional de las operaciones y el día anterior a cada una. El motor simula siempre por días: cambiar la malla no
+  cambia las trayectorias, solo en cuántas fechas se mide la exposición que entra a la suma.
 
 `qfxva` se importa dentro de las funciones, después de `qfpy` (ambos registran tipos C++ compartidos), para que
 el backend arranque aunque el módulo no esté compilado. Las escrituras no hacen commit: lo hace la ruta.
@@ -41,6 +45,12 @@ COVERED_PRODUCTS = ("irs", "xccy_swap")
 CORRELATION_NOTE = (
     "Correlaciones tomadas de los cambios diarios de los factores del snapshot (TIIE-F, SOFR, USDMXN): "
     "aproximación de las correlaciones de los brownianos del modelo"
+)
+INTEGRATION_STEP = 3  # días entre fechas de la malla de integración (además de pagos e intercambios)
+INTEGRATION_NOTE = (
+    "CVA, DVA y FVA se integran sobre una malla más fina que el perfil mostrado (mensual): cada %d días, más "
+    "cada fecha de pago y de intercambio de nocional y el día anterior a cada una, con la exposición de la "
+    "fecha al final de cada intervalo (regla del extremo derecho) y las mismas trayectorias diarias" % INTEGRATION_STEP
 )
 HW_DEFAULTS = {"TIIE-F": (0.05, 0.01), "SOFR": (0.03, 0.008)}
 FX_VOL_DEFAULT = 0.12
@@ -272,12 +282,26 @@ def build_set(
 
 
 def report_days(as_of: date, last_maturity: date) -> List[int]:
-    """Malla de reporte en días desde `as_of`: el día 0 y las fechas mensuales hasta `last_maturity`."""
+    """Malla del perfil publicado, en días desde `as_of`: el día 0 y las fechas mensuales hasta `last_maturity`."""
     return [0] + [(d - as_of).days for d in credit._grid(as_of, last_maturity)]
 
 
+def integration_days(report: List[int], spec: Any) -> List[int]:
+    """Malla de integración del XVA: `report` (mensual), un día de cada `INTEGRATION_STEP` desde el 0, y de cada
+    operación de `spec` las fechas de pago (la última es el vencimiento), la de inicio si es futura (intercambio
+    inicial) y el día anterior a cada una. El día anterior a un pago es donde la exposición todavía incluye el flujo;
+    con la regla del extremo derecho, una malla sin él da al intervalo del pago la exposición ya sin el flujo.
+    Termina en `report[-1]`, que es el primer mes que alcanza el último vencimiento."""
+    horizon = report[-1]
+    days = set(report) | set(range(0, horizon + 1, INTEGRATION_STEP))
+    for leg in list(spec.swaps) + list(spec.xccys):
+        for d in list(leg.pay_days) + ([leg.start_days] if leg.start_days > 0 else []):
+            days.update((d - 1, d))
+    return sorted(d for d in days if 0 <= d <= horizon)
+
+
 def engine(mkt: Any, model: Any, params: Dict[str, Any], days: List[int]) -> Any:
-    """`qfxva.ExposureEngine` del snapshot con los parámetros de simulación y la malla de reporte `days`."""
+    """`qfxva.ExposureEngine` del snapshot con los parámetros de simulación y la malla `days` (de integración)."""
     qfxva = _qfxva()
     exposure_market = qfxva.ExposureMarket(
         mkt.curves["TIIE-F"], mkt.curves["SOFR"], mkt.spot, mkt.curves.get(market.CSA_CURVE)
@@ -288,10 +312,20 @@ def engine(mkt: Any, model: Any, params: Dict[str, Any], days: List[int]) -> Any
     return qfxva.ExposureEngine(exposure_market, model, config)
 
 
-def _profile_points(profile: Any, as_of: date) -> List[Dict[str, Any]]:
+def _shown(profile: Any, report: List[int]) -> List[int]:
+    """Índices de las fechas de `profile` (malla de integración) que pertenecen al perfil publicado `report`."""
+    shown = set(report)
+    return [i for i, d in enumerate(profile.days) if d in shown]
+
+
+def _profile_points(profile: Any, as_of: date, shown: List[int]) -> List[Dict[str, Any]]:
+    days, times, epe, ene, pfe = profile.days, profile.times, profile.epe, profile.ene, profile.pfe  # cada acceso copia
     return [
-        {"date": (as_of + timedelta(days=d)).isoformat(), "t": t, "epe_mxn": epe, "ene_mxn": ene, "pfe_mxn": pfe}
-        for d, t, epe, ene, pfe in zip(profile.days, profile.times, profile.epe, profile.ene, profile.pfe)
+        {
+            "date": (as_of + timedelta(days=days[i])).isoformat(), "t": times[i],
+            "epe_mxn": epe[i], "ene_mxn": ene[i], "pfe_mxn": pfe[i],
+        }
+        for i in shown
     ]
 
 
@@ -310,11 +344,14 @@ def _counterparty(
         "epe_max_mxn": 0.0, "pfe_max_mxn": 0.0, "profile": [],
     }  # type: Dict[str, Any]
     if included:
-        profile = engine(mkt, model, params, report_days(mkt.as_of, _last_maturity(trades, included))).simulate([spec])[0]
+        report = report_days(mkt.as_of, _last_maturity(trades, included))
+        profile = engine(mkt, model, params, integration_days(report, spec)).simulate([spec])[0]
         x = qfxva.compute_xva(profile, cp_curve, 1.0 - recovery, own[0], 1.0 - own[1], params["funding_spread"])
+        points = _profile_points(profile, mkt.as_of, _shown(profile, report))
         out.update(
             cva_mxn=x.cva, cva_stderr_mxn=x.cva_stderr, dva_mxn=x.dva, fva_mxn=x.fva, total_mxn=x.total,
-            epe_max_mxn=max(profile.epe), pfe_max_mxn=max(profile.pfe), profile=_profile_points(profile, mkt.as_of),
+            epe_max_mxn=max(p["epe_mxn"] for p in points), pfe_max_mxn=max(p["pfe_mxn"] for p in points),
+            profile=points,
         )
     return out, warnings, cp_curve
 
@@ -352,6 +389,7 @@ def compute_detailed(conn: sqlite3.Connection, snapshot_id: str) -> Tuple[Dict[s
     params = params_response(conn)
     simulation = {k: params[k] for k in DEFAULTS}
     model, model_json, assumptions = model_from_snapshot(mkt)
+    assumptions.append(INTEGRATION_NOTE)
     own_curve, own_recovery, own_info = own_credit(conn, mkt)
     if not mkt.csa_available:
         assumptions.append(
@@ -394,11 +432,12 @@ _CANDIDATE_NOT_COVERED = "El XVA incremental solo cubre swaps de tasas y cross c
 _CANDIDATE_NOT_LIVE = "La operación candidata no está viva en la fecha de valuación del snapshot (%s)"
 
 
-def _side(pv: float, x: Any, profile: Any) -> Dict[str, Any]:
-    """Bloque `before`/`after` del incremental: PV del conjunto, XVA y máximos del perfil sin descontar."""
+def _side(pv: float, x: Any, epe: List[float], pfe: List[float]) -> Dict[str, Any]:
+    """Bloque `before`/`after` del incremental: PV del conjunto, XVA y máximos del perfil mostrado (`epe`, `pfe`
+    ya reducidos a la malla mensual), sin descontar."""
     return {
         "pv_mxn": pv, "cva_mxn": x.cva, "cva_stderr_mxn": x.cva_stderr, "dva_mxn": x.dva, "fva_mxn": x.fva,
-        "total_mxn": x.total, "epe_max_mxn": max(profile.epe), "pfe_max_mxn": max(profile.pfe),
+        "total_mxn": x.total, "epe_max_mxn": max(epe), "pfe_max_mxn": max(pfe),
     }
 
 
@@ -406,9 +445,10 @@ def incremental(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any
     """Cuerpo de `POST /api/xva/incremental`: XVA del conjunto de la contraparte antes y después de la candidata.
 
     `body` es el de `POST /api/trades` más `snapshot` (obligatorio). La candidata no se guarda. Antes y después
-    salen de una sola llamada a `simulate([antes, después])`, con la malla de reporte del «después»: las dos
-    comparten trayectorias, así que `delta` no lleva ruido de Monte Carlo entre corridas y una candidata espejo
-    de la única operación del conjunto da exactamente `−antes`.
+    salen de una sola llamada a `simulate([antes, después])`, con la malla de integración del «después» (que
+    incluye las fechas de la candidata): las dos comparten trayectorias y malla, así que `delta` no lleva ruido de
+    Monte Carlo entre corridas y una candidata espejo de la única operación del conjunto da exactamente `−antes`.
+    El perfil y los máximos que se publican son los de la malla mensual.
 
     Orden de errores: `snapshot` ausente, `product` (el `choice` de `POST /api/trades`), producto fuera del XVA,
     contraparte inexistente (404), los términos con `portfolio.prepare_trade` (mismos mensajes y `field` que
@@ -445,8 +485,14 @@ def incremental(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any
     model = model_from_snapshot(mkt)[0]
     cp_curve, recovery, _ = credit_for(conn, name, mkt)
     own_curve, own_recovery, _ = own_credit(conn, mkt)
-    days = report_days(mkt.as_of, _last_maturity(existing + [candidate], included_before + included_candidate))
-    p_before, p_after = engine(mkt, model, params, days).simulate([spec_before, spec_after])
+    report = report_days(mkt.as_of, _last_maturity(existing + [candidate], included_before + included_candidate))
+    p_before, p_after = engine(mkt, model, params, integration_days(report, spec_after)).simulate(
+        [spec_before, spec_after]
+    )
+    shown = _shown(p_after, report)
+    days, times = p_after.days, p_after.times  # cada acceso a un atributo del perfil copia el vector
+    epe_b, ene_b, pfe_b = p_before.epe, p_before.ene, p_before.pfe
+    epe_a, ene_a, pfe_a = p_after.epe, p_after.ene, p_after.pfe
     x_before, x_after = (
         qfxva.compute_xva(p, cp_curve, 1.0 - recovery, own_curve, 1.0 - own_recovery, params["funding_spread"])
         for p in (p_before, p_after)
@@ -454,7 +500,8 @@ def incremental(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any
 
     pv_before = sum(i["pv_mxn"] for i in included_before)
     pv_candidate = included_candidate[0]["pv_mxn"]
-    before, after = _side(pv_before, x_before, p_before), _side(pv_before + pv_candidate, x_after, p_after)
+    before = _side(pv_before, x_before, [epe_b[i] for i in shown], [pfe_b[i] for i in shown])
+    after = _side(pv_before + pv_candidate, x_after, [epe_a[i] for i in shown], [pfe_a[i] for i in shown])
     delta = {k: after[k] - before[k] for k in ("cva_mxn", "dva_mxn", "fva_mxn", "total_mxn")}
     notional_mxn = value["notional"] * (mkt.spot if value["currency"] == "USD" else 1.0)
     return {
@@ -475,10 +522,11 @@ def incremental(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any
         "delta_bp": {k[:-4]: v / notional_mxn * 1e4 for k, v in delta.items()},
         "profile": [
             {
-                "date": (mkt.as_of + timedelta(days=d)).isoformat(), "t": t,
-                "epe_before_mxn": eb, "ene_before_mxn": nb, "epe_after_mxn": ea, "ene_after_mxn": na,
+                "date": (mkt.as_of + timedelta(days=days[i])).isoformat(), "t": times[i],
+                "epe_before_mxn": epe_b[i], "ene_before_mxn": ene_b[i],
+                "epe_after_mxn": epe_a[i], "ene_after_mxn": ene_a[i],
             }
-            for d, t, eb, nb, ea, na in zip(p_after.days, p_after.times, p_before.epe, p_before.ene, p_after.epe, p_after.ene)
+            for i in shown
         ],
         "warnings": merge_warnings(warn_before, warn_candidate),
     }

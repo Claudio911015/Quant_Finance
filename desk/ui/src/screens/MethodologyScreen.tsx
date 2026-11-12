@@ -448,7 +448,7 @@ const XVA_SECTIONS: Section[] = [
     items: [
       {
         label: 'Modelo y medida',
-        text: 'Hull-White de un factor por moneda sobre TIIE-F y SOFR, en forma de Cheyette: r = f(0,t) + x. USDMXN lognormal. Medida riesgo neutral MXN: la tasa USD lleva la deriva quanto −ρ·σ_USD·σ_X, y el tipo de cambio deriva con TIIE-F más la base MXN-USD menos SOFR, así que su forward es el de mercado con colateral USD. La base MXN-USD es determinista. Solo el IRS TIIE-F cambia de curva con el colateral de la contraparte (con colateral USD y la curva MXN-USD en el snapshot se descuenta con ella); el IRS SOFR descuenta siempre con SOFR, y el cross currency swap descuenta su pata MXN con MXN-USD (TIIE-F si el snapshot no la trae) y su pata USD con SOFR, cualquiera que sea el colateral. Malla diaria, trayectorias y semilla fijas.',
+        text: 'Hull-White de un factor por moneda sobre TIIE-F y SOFR, en forma de Cheyette: r = f(0,t) + x. USDMXN lognormal. Medida riesgo neutral MXN: la tasa USD lleva la deriva quanto −ρ·σ_USD·σ_X, y el tipo de cambio deriva con TIIE-F más la base MXN-USD menos SOFR, así que su forward es el de mercado con colateral USD. La base MXN-USD es determinista. Solo el IRS TIIE-F cambia de curva con el colateral de la contraparte (con colateral USD y la curva MXN-USD en el snapshot se descuenta con ella); el IRS SOFR descuenta siempre con SOFR, y el cross currency swap descuenta su pata MXN con MXN-USD (TIIE-F si el snapshot no la trae) y su pata USD con SOFR, cualquiera que sea el colateral. Simulación diaria, trayectorias y semilla fijas; los ajustes se integran en la malla de la fila «Malla de integración», no en el perfil mensual que se muestra.',
       },
       {
         label: 'Parámetros del XVA',
@@ -456,7 +456,11 @@ const XVA_SECTIONS: Section[] = [
       },
       {
         label: 'Definiciones',
-        text: 'CVA = LGD · Σ EPE* · ΔS_c; DVA con ENE* y la curva propia; FVA = s_f · Σ (EPE* − ENE*) · S_c · S_o · Δt. EPE* y ENE* se descuentan con la cuenta bancaria TIIE-F simulada para todas las contrapartes. El perfil que se muestra y se compara con límites es el sin descontar. Total = CVA − DVA + FVA.',
+        text: 'CVA = LGD · Σ EPE* · ΔS_c; DVA con ENE* y la curva propia; FVA = s_f · Σ (EPE* − ENE*) · S_c · S_o · Δt, con las sumas sobre la malla de integración. EPE* y ENE* se descuentan con la cuenta bancaria TIIE-F simulada para todas las contrapartes. El perfil que se muestra y se compara con límites es el sin descontar. Total = CVA − DVA + FVA.',
+      },
+      {
+        label: 'Malla de integración',
+        text: 'El motor simula por días, pero CVA, DVA y FVA se integran sobre una malla más fina que el perfil que se muestra (mensual): la mensual, un día de cada 3, cada fecha de pago y de intercambio de nocional de las operaciones y el día anterior a cada una, con la exposición de cada fecha al final de su intervalo (regla del extremo derecho). Contra una integración diaria con las mismas trayectorias, el CVA difiere menos de 0.5 % y el DVA y el FVA menos de 1 % en el portafolio sembrado y en el ejemplo del hallazgo; no es una cota general. Con la malla mensual sola el CVA salía cerca de 3 % menor y una operación que vence antes de la primera fecha mensual daba CVA cero. El perfil, los máximos de EPE y PFE y el perfil del XVA incremental que se muestran son los de la malla mensual; en el incremental el «antes» y el «después» usan la misma malla (la del conjunto ampliado), así que el «antes» puede diferir del XVA de la pantalla por la discretización (del orden de 1×10⁻⁴ relativo).',
       },
       {
         label: 'XVA incremental',

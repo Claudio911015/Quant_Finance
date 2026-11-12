@@ -225,7 +225,10 @@ def test_published_profile_is_the_undiscounted_one_and_cva_uses_the_chosen_credi
         gamma = xva.live_by_counterparty(conn, mkt)[GAMMA]
         spec, included, _, _ = xva.build_set(gamma, mkt, fixings)
         last = max(t["maturity_date"] for t in gamma if t["id"] in {i["id"] for i in included})
-        profile = xva.engine(mkt, model, {"n_paths": 200, "seed": 42, "pfe_quantile": 0.95}, xva.report_days(AS_OF, last)).simulate([spec])[0]
+        report = xva.report_days(AS_OF, last)
+        profile = xva.engine(
+            mkt, model, {"n_paths": 200, "seed": 42, "pfe_quantile": 0.95}, xva.integration_days(report, spec)
+        ).simulate([spec])[0]
         curve, recovery, _ = xva.credit_for(conn, GAMMA, mkt)
         own, own_recovery, _ = xva.own_credit(conn, mkt)
         import qfxva
@@ -235,9 +238,12 @@ def test_published_profile_is_the_undiscounted_one_and_cva_uses_the_chosen_credi
         conn.close()
     cp = _by_name(body)[GAMMA]
     assert (cp["credit"]["recovery"], body["own_credit"]["recovery"]) == (0.5, 0.25)
-    assert [p["epe_mxn"] for p in cp["profile"]] == list(profile.epe)
-    assert [p["ene_mxn"] for p in cp["profile"]] == list(profile.ene)
-    assert [p["pfe_mxn"] for p in cp["profile"]] == list(profile.pfe)
+    # H21: el XVA se integra sobre la malla de integración (más fina) y el perfil publicado es su subconjunto mensual
+    shown = [i for i, d in enumerate(profile.days) if d in set(report)]
+    assert len(shown) == len(report) < len(profile.days)
+    assert [p["epe_mxn"] for p in cp["profile"]] == [profile.epe[i] for i in shown]
+    assert [p["ene_mxn"] for p in cp["profile"]] == [profile.ene[i] for i in shown]
+    assert [p["pfe_mxn"] for p in cp["profile"]] == [profile.pfe[i] for i in shown]
     assert (cp["cva_mxn"], cp["dva_mxn"], cp["fva_mxn"]) == (expected.cva, expected.dva, expected.fva)
     assert cp["cva_stderr_mxn"] == expected.cva_stderr
 
@@ -344,8 +350,10 @@ def test_model_comes_from_the_snapshot(app, client):
         "fx_vol_source": "surface_atm_1y",
         "correlations": {"mxn_usd": 0.35, "mxn_fx": 0.30, "usd_fx": -0.10},
     }
-    # con todo presente solo se declara la aproximación de las correlaciones y el fondeo por omisión
-    assert body["assumptions"] == [xva.CORRELATION_NOTE, "Spread de fondeo 0.50 %: valor por omisión, sin ajuste capturado"]
+    # con todo presente solo se declara la aproximación de las correlaciones, la malla de integración y el fondeo por omisión
+    assert body["assumptions"] == [
+        xva.CORRELATION_NOTE, xva.INTEGRATION_NOTE, "Spread de fondeo 0.50 %: valor por omisión, sin ajuste capturado"
+    ]
 
 
 def test_fx_vol_falls_back_to_the_daily_factor_vol_without_a_surface(app):

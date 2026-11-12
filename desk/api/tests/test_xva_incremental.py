@@ -1,7 +1,8 @@
 """Corte 9, T8: XVA incremental (`POST /api/xva/incremental`) con las mismas trayectorias antes y después.
 
 R5(a): una candidata espejo de la única operación de una contraparte deja exposición cero. R5(b): guardar la
-candidata y pedir `GET /api/xva` da el «después» (y el «antes» es el `GET` previo). R5(c): una candidata inválida
+candidata y pedir `GET /api/xva` da el «después» (y el «antes» es el `GET` previo, hasta la discretización de la
+malla de integración, que añade las fechas de la candidata: H21). R5(c): una candidata inválida
 da el mismo error que `POST /api/trades`, sin insertar nada.
 """
 import pytest
@@ -114,9 +115,13 @@ def test_saving_the_candidate_gives_the_after_state_and_the_before_is_the_previo
     request = _body(name, product, params, **extra)
     body = _ok(client, request)
 
-    # el «antes» es el XVA que ya daba GET /api/xva, aunque la candidata alargue la malla de reporte
+    # el «antes» es el XVA que ya daba GET /api/xva, aunque la candidata alargue la malla. Los máximos del perfil
+    # mensual y el PV salen idénticos (las trayectorias no dependen de la malla); el CVA, DVA y FVA se integran en la
+    # malla de integración del «después», que añade las fechas de la candidata a las del conjunto previo, así que
+    # difieren por la discretización (medido: <= 1.4e-4 relativo; la cota de la malla frente a la diaria es 5e-3)
     for key in SIDE_KEYS:
-        assert body["before"][key] == pytest.approx(previous[key], rel=1e-9, abs=1e-6), key
+        tol = 1e-3 if key in ("cva_mxn", "cva_stderr_mxn", "dva_mxn", "fva_mxn", "total_mxn") else 1e-9
+        assert body["before"][key] == pytest.approx(previous[key], rel=tol, abs=1e-6), key
     assert body["before"]["pv_mxn"] == pytest.approx(previous["pv_mxn"], rel=1e-9, abs=1e-6)
 
     saved = client.post("/api/trades", json=request)

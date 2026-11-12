@@ -308,6 +308,7 @@ describe('MethodologyScreen', () => {
         'Modelo y medida',
         'Parámetros del XVA',
         'Definiciones',
+        'Malla de integración',
         'XVA incremental',
         'Curvas de crédito',
         'Convenciones del CDS',
@@ -341,6 +342,21 @@ describe('MethodologyScreen', () => {
       expect(xvaRow('Definiciones')).toContain('DVA');
       expect(xvaRow('Definiciones')).toContain('FVA');
       expect(xvaRow('Definiciones')).toContain('sin descontar');
+    });
+
+    it('H21: declara la malla de integración y que el perfil mostrado es mensual', () => {
+      renderScreen();
+      const row = xvaRow('Malla de integración');
+      expect(row).toContain('integran sobre una malla más fina que el perfil que se muestra (mensual)');
+      expect(row).toContain('cada fecha de pago');
+      expect(row).toContain('el día anterior a cada una');
+      expect(row).toContain('extremo derecho');
+      expect(row).toContain('CVA difiere menos de 0.5 %');
+      expect(row).toContain('una operación que vence antes de la primera fecha mensual daba CVA cero');
+      // el texto del modelo ya no dice «malla diaria» a secas: simula por días, integra en otra malla
+      expect(xvaRow('Modelo y medida')).toContain('Simulación diaria');
+      expect(xvaRow('Modelo y medida')).not.toContain('Malla diaria');
+      expect(xvaRow('Definiciones')).toContain('sumas sobre la malla de integración');
     });
 
     it('explica el incremental como diferencia con y sin la operación', () => {
