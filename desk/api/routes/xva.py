@@ -23,6 +23,11 @@ def xva_get():
     return jsonify(ensure_finite(xva.compute(get_conn(), _arg("snapshot"))))
 
 
+@bp.post("/api/xva/incremental")
+def xva_incremental():
+    return jsonify(ensure_finite(xva.incremental(get_conn(), body_object())))
+
+
 @bp.get("/api/xva/params")
 def xva_params_get():
     return jsonify(ensure_finite(xva.params_response(get_conn())))

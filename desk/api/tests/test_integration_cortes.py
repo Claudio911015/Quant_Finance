@@ -333,15 +333,16 @@ def test_historical_var_and_limits_work_on_a_book_with_a_xccy_and_usd_collateral
     assert refused.status_code == 400 and refused.get_json()["field"] == "key"
 
 
-def test_cva_excludes_the_xccy_naming_the_product_not_its_code(client, desk):
+def test_cva_covers_the_xccy_and_excludes_the_bond_naming_the_product_not_its_code(client, desk):
+    """Corte 9: el cross currency swap entra al conjunto de compensación multimoneda; el bono sigue fuera."""
     body = _get(client, "/api/credit/exposure?snapshot=MX-DEMO")
     alfa = [c for c in body["counterparties"] if c["counterparty"] == ALFA][0]
     excluded = {e["id"]: e for e in alfa["excluded"]}
-    assert excluded[desk["xccy"]]["product"] == "xccy_swap"
-    assert excluded[desk["xccy"]]["reason"] == (
-        "La exposición simulada solo cubre swaps de tasas (IRS): Cross currency swap USDMXN se excluye")
-    assert excluded[desk["bond"]]["reason"].endswith("Bono se excluye")
-    assert desk["xccy"] not in [t for ns in alfa["netting_sets"] for t in ns["trades"]]
+    assert desk["xccy"] in alfa["netting_sets"][0]["trades"] and alfa["netting_sets"][0]["curve"] == "multimoneda"
+    assert desk["xccy"] not in excluded
+    assert excluded[desk["bond"]]["product"] == "bond"
+    assert excluded[desk["bond"]]["reason"] == "El XVA solo cubre swaps de tasa y cross currency swaps: Bono se excluye"
+    assert desk["bond"] not in [t for ns in alfa["netting_sets"] for t in ns["trades"]]
 
 
 # --------------------------------------------------------------- validación (corte 7 × 3)

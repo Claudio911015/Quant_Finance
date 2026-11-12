@@ -266,11 +266,14 @@ def _at_par(
     return PRODUCTS["irs"].validate({**params, "fixed_rate": float(swap.par_rate(mkt.env))})
 
 
-def create_trade(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Valida el cuerpo del contrato, guarda la operación con su `execution` y la devuelve.
+def prepare_trade(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Valida el cuerpo del contrato y lo resuelve sin guardar nada: `{product, counterparty, trade_date,
+    start_date, maturity_date, params}` con las fechas como `date` y `params` normalizados.
 
-    Un `irs` sin `fixed_rate` nace a la par: se guarda con la tasa par del snapshot de la petición;
-    un `xccy_swap` sin `fx_rate` o sin `spread` se completa con el spot y el diferencial par."""
+    Es todo lo que hace `create_trade` salvo insertar, así que el XVA incremental valida a su candidata con los
+    mismos mensajes y `field`. Un `irs` sin `fixed_rate` sale con la tasa par del snapshot de la petición; un
+    `xccy_swap` sin `fx_rate` o sin `spread`, con el spot y el diferencial par. No exige que la contraparte exista.
+    """
     name = choice(body, "product", tuple(PRODUCTS))
     counterparty = text(body, "counterparty")
     raw = body.get("params")
@@ -286,22 +289,31 @@ def create_trade(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, An
         params = _at_par(conn, body, params, start_date, maturity)
     elif name == "xccy_swap" and (params.get("fx_rate") is None or params.get("spread") is None):
         params = xccy.at_par(conn, body, params, start_date, maturity)
+    return {
+        "product": name,
+        "counterparty": counterparty,
+        "trade_date": trade_date,
+        "start_date": start_date,
+        "maturity_date": maturity,
+        "params": params,
+    }
+
+
+def create_trade(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Valida el cuerpo del contrato (`prepare_trade`), guarda la operación con su `execution` y la devuelve."""
+    prepared = prepare_trade(conn, body)
     created_at = db.now_iso()
     trade_id = insert_trade(
-        conn, name, counterparty, trade_date, start_date, maturity, params, created_at
+        conn,
+        prepared["product"],
+        prepared["counterparty"],
+        prepared["trade_date"],
+        prepared["start_date"],
+        prepared["maturity_date"],
+        prepared["params"],
+        created_at,
     )
-    return public_trade(
-        {
-            "id": trade_id,
-            "product": name,
-            "counterparty": counterparty,
-            "trade_date": trade_date,
-            "start_date": start_date,
-            "maturity_date": maturity,
-            "params": params,
-            "created_at": created_at,
-        }
-    )
+    return public_trade(dict(prepared, id=trade_id, created_at=created_at))
 
 
 def valuation(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:

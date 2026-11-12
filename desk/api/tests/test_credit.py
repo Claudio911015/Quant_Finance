@@ -1,26 +1,45 @@
-"""Corte 6, T7: exposición (EE/PFE), CVA informativo y parámetros de crédito por contraparte."""
+"""Corte 6, T7 (parámetros) y corte 9, T8 (exposición): EE/PFE, CVA informativo y parámetros de crédito.
+
+La exposición de `GET /api/credit/exposure` sale del motor multimoneda de `risk/xva.py` (el de `GET /api/xva`);
+las pruebas del motor anterior (conjunto por curva y por moneda, EE escalada con el spot, tasa fija efectiva,
+CVA como suma de conjuntos, escalón en el primer mes) se reescribieron para el contrato de P5: un solo conjunto
+`multimoneda`, `credit_source`, `hazard_rate` = −ln S(5)/5 de la curva usada y ningún escalón. Las de parámetros
+(`/api/credit/params`) no cambian.
+"""
 import calendar
+import math
+import os
 import re
 import sqlite3
+import subprocess
+import sys
 from datetime import date, datetime, timezone
+from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
-from desk.api import db, lifecycle, market, portfolio, valuation
+from desk.api import db, market, valuation
 from desk.api import fixings as fixing_store
-from desk.api.qf import qfpy
-from desk.api.risk import credit
+from desk.api.risk import credit, xva
 from desk.api.tests.conftest import empty_portfolio, insert_raw_trade
-from desk.api.tests.original_book import original_book  # noqa: F401  (fixture)
-
-# corte 9: el motor anterior de crédito se prueba sobre el portafolio original de siete operaciones;
-# T8 lo reemplaza por el motor nuevo y reescribe estas pruebas
-pytestmark = pytest.mark.usefixtures("original_book")
+from desk.api.tests.csa_fixture import set_collateral, trade_with
 
 ALFA, BETA, GAMMA = "Banco Alfa (sintético)", "Banco Beta (sintético)", "Banco Gamma (sintético)"
+DELTA = "Banco Delta (prueba)"
 AS_OF = date(2026, 11, 10)  # as_of de MX-DEMO
 FWD = {"side": "buy", "notional_usd": 1e6, "days": 91, "strike": 19.0}
+IRS = {"curve": "TIIE-F", "side": "payer", "notional": 1e8, "periods": 13, "fixed_rate": 0.07}
 ASSUMED = "Supuesto: probabilidad de incumplimiento 1 % anual y recuperación 40 % (sin parámetros capturados)"
+NOT_COVERED = "El XVA solo cubre swaps de tasa y cross currency swaps: %s se excluye"
+# ids sembrados (7 originales + 9 del corte 9): operaciones cubiertas y excluidas por contraparte
+COVERED = {ALFA: [1, 8, 9, 10], BETA: [2, 11, 12, 13], GAMMA: [3, 14, 15, 16]}
+EXCLUDED = {ALFA: {4: "fx_forward", 7: "cap_floor"}, BETA: {5: "fx_forward"}, GAMMA: {6: "fx_option"}}
+CP_KEYS = {
+    "counterparty", "hazard_rate", "recovery", "assumed", "assumed_note", "credit_source", "pv_mxn", "cva_mxn",
+    "netting_sets", "profile", "excluded",
+}
+TOP_KEYS = {"snapshot", "as_of", "n_paths", "seed", "pfe_quantile", "notice", "counterparties", "excluded", "warnings"}
 
 
 # ------------------------------------------------------------------------ ayudas
@@ -52,10 +71,35 @@ def _credit_rows(app):
         conn.close()
 
 
-def _live_irs_pv(client, name):
-    """Σ PV (MXN) de los `irs` vivos de la contraparte según `GET /api/portfolio/valuation`."""
+def _fast(client, n_paths=200):
+    """Pocas trayectorias: las pruebas de relaciones exactas entre corridas no necesitan precisión de Monte Carlo."""
+    assert client.put("/api/xva/params", json={"n_paths": n_paths}).status_code == 200
+
+
+def _covered_pv(client, name):
+    """Σ PV (MXN) de las operaciones cubiertas vivas de la contraparte según `GET /api/portfolio/valuation`."""
     rows = client.get("/api/portfolio/valuation?snapshot=MX-DEMO").get_json()["rows"]
-    return sum(r["pv_mxn"] for r in rows if r["counterparty"] == name and r["product"] == "irs" and r["status"] == "viva")
+    return sum(
+        r["pv_mxn"] for r in rows
+        if r["counterparty"] == name and r["product"] in xva.COVERED_PRODUCTS and r["status"] == "viva"
+    )
+
+
+def _curve(client, entity):
+    body = client.get("/api/credit/curves?snapshot=MX-DEMO").get_json()
+    return {c["entity"]: c for c in body["curves"]}[entity]
+
+
+def _put_curve(client, entity, recovery, quotes):
+    r = client.put("/api/credit/curves/%s" % quote(entity, safe=""), json={"recovery": recovery, "quotes": quotes})
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()
+
+
+def _survival(curve, years):
+    """S(años) = exp(−∫ h) con las intensidades por tramos de `GET /api/credit/curves` (independiente del motor)."""
+    total = sum(h["hazard"] * max(0.0, min(years, h["to_years"]) - h["from_years"]) for h in curve["hazards"])
+    return math.exp(-total)
 
 
 def _plus_months(start, k):
@@ -131,50 +175,89 @@ def test_params_body_must_be_an_object(client):
     assert client.post("/api/credit/params", json=[1]).status_code == 400
 
 
-# ------------------------------------------------------------------------ exposición
+# ------------------------------------------------------------------------ exposición (motor multimoneda)
 
 def test_contract_shape_and_constants(client):
     body = _exposure(client)
+    assert set(body) == TOP_KEYS
     assert body["snapshot"] == "MX-DEMO" and body["as_of"] == "2026-11-10"
-    assert (body["n_paths"], body["seed"], body["pfe_quantile"]) == (500, 42, 0.95)
+    assert (body["n_paths"], body["seed"], body["pfe_quantile"]) == (2000, 42, 0.95)  # los de /api/xva/params
     assert body["notice"] == "CVA informativo: no entra al PV ni a la contabilidad de coberturas"
     assert [c["counterparty"] for c in body["counterparties"]] == [ALFA, BETA, GAMMA]
-    assert body["warnings"] == []
-    alfa = _by_name(body)[ALFA]
-    assert alfa["assumed"] is True and alfa["assumed_note"] == ASSUMED
-    assert (alfa["hazard_rate"], alfa["recovery"]) == (0.01, 0.4)
-    assert alfa["netting_sets"][0]["curve"] == "TIIE-F" and alfa["netting_sets"][0]["currency"] == "MXN"
-    assert alfa["netting_sets"][0]["trades"] == [1]
-    assert _by_name(body)[GAMMA]["netting_sets"][0]["currency"] == "USD"
+    assert body["warnings"] == client.get("/api/xva?snapshot=MX-DEMO").get_json()["warnings"]
+    for cp in body["counterparties"]:
+        assert set(cp) == CP_KEYS, cp["counterparty"]
+        assert (cp["credit_source"], cp["assumed"], cp["assumed_note"]) == ("curve", False, None)
+        assert cp["recovery"] == 0.4 and 0.0 < cp["hazard_rate"] < 0.05
+        # un solo conjunto de compensación, multimoneda, con las operaciones cubiertas de la contraparte
+        assert cp["netting_sets"] == [
+            {"curve": "multimoneda", "trades": COVERED[cp["counterparty"]], "pv_mxn": cp["pv_mxn"], "cva_mxn": cp["cva_mxn"]}
+        ]
+        assert cp["profile"] and set(cp["profile"][0]) == {"date", "t", "ee_mxn", "pfe_mxn"}
+        assert "currency" not in cp["netting_sets"][0]
 
 
-def test_ee_and_pfe_are_non_negative_and_pfe_is_at_least_ee(client):
+def test_simulation_parameters_are_the_xva_params(client):
+    assert client.put("/api/xva/params", json={"n_paths": 150, "seed": 7, "pfe_quantile": 0.9}).status_code == 200
+    body = _exposure(client)
+    assert (body["n_paths"], body["seed"], body["pfe_quantile"]) == (150, 7, 0.9)
+    xva_body = client.get("/api/xva?snapshot=MX-DEMO").get_json()
+    for cp in body["counterparties"]:  # mismo motor, mismas trayectorias: la exposición es la de /api/xva
+        other = {c["counterparty"]: c for c in xva_body["counterparties"]}[cp["counterparty"]]
+        assert cp["cva_mxn"] == other["cva_mxn"] and cp["pv_mxn"] == other["pv_mxn"]
+        assert [(p["date"], p["ee_mxn"], p["pfe_mxn"]) for p in cp["profile"]] == [
+            (p["date"], p["epe_mxn"], p["pfe_mxn"]) for p in other["profile"]
+        ]
+
+
+def test_ee_and_pfe_are_non_negative_and_pfe_starts_at_ee(client):
+    _fast(client)
     for cp in _exposure(client)["counterparties"]:
         assert cp["profile"], cp["counterparty"]
+        assert cp["profile"][0]["pfe_mxn"] == pytest.approx(cp["profile"][0]["ee_mxn"], rel=1e-9)  # hoy no hay incertidumbre
         for p in cp["profile"]:
-            assert p["ee_mxn"] >= 0.0
-            assert p["pfe_mxn"] >= p["ee_mxn"]
+            assert p["ee_mxn"] >= 0.0 and p["pfe_mxn"] >= 0.0
 
 
-def test_ee_at_zero_is_max_pv_of_the_live_swaps_valued_by_the_desk(client):
+def test_ee_at_zero_is_max_pv_of_the_covered_trades_valued_by_the_desk(client):
+    _fast(client)
     body = _exposure(client)
     for name in (ALFA, BETA, GAMMA):
         cp = _by_name(body)[name]
-        pv = _live_irs_pv(client, name)
-        assert cp["pv_mxn"] == pytest.approx(pv, rel=1e-6)
+        pv = _covered_pv(client, name)
+        assert cp["pv_mxn"] == pytest.approx(pv, rel=1e-9)
         first = cp["profile"][0]
         assert first["date"] == "2026-11-10" and first["t"] == 0.0
-        assert first["ee_mxn"] == pytest.approx(max(pv, 0.0), rel=1e-6)
-        assert first["pfe_mxn"] == first["ee_mxn"]
-    # el portafolio sembrado cubre los dos signos: Beta con PV positivo, Alfa y Gamma con PV negativo
-    assert _by_name(body)[BETA]["profile"][0]["ee_mxn"] > 0.0
-    assert _by_name(body)[ALFA]["profile"][0]["ee_mxn"] == 0.0
+        assert first["ee_mxn"] == pytest.approx(max(pv, 0.0), rel=1e-9)
+        assert pv < 0.0 and first["ee_mxn"] == 0.0  # las tres sembradas están en contra: sin exposición hoy
+
+
+def test_ee_at_zero_is_the_pv_when_the_counterparty_owes_us(client):
+    _fast(client)
+    trade_with(client, "irs", DELTA, dict(IRS, side="receiver", fixed_rate=0.10))  # recibe 10 % con TIIE-F ~7 %: PV > 0
+    cp = _by_name(_exposure(client))[DELTA]
+    pv = _covered_pv(client, DELTA)
+    assert pv > 1e6
+    first = cp["profile"][0]
+    assert first["ee_mxn"] == pytest.approx(pv, rel=1e-9) and first["pfe_mxn"] == pytest.approx(pv, rel=1e-9)
+    assert cp["profile"][1]["ee_mxn"] > 0.0  # y el siguiente punto mensual parte de ahí, no de cero
+
+
+def test_cva_and_pv_are_the_ones_of_the_xva_endpoint(client):
+    _fast(client)
+    xva_body = {c["counterparty"]: c for c in client.get("/api/xva?snapshot=MX-DEMO").get_json()["counterparties"]}
+    for cp in _exposure(client)["counterparties"]:
+        other = xva_body[cp["counterparty"]]
+        assert cp["cva_mxn"] == other["cva_mxn"] > 0.0
+        assert cp["pv_mxn"] == other["pv_mxn"]
+        assert cp["excluded"] == other["excluded"]
 
 
 def test_grid_is_monthly_and_reaches_the_last_maturity(client):
+    _fast(client)
     body = _exposure(client)
     trades = {t["id"]: t for t in client.get("/api/trades").get_json()["trades"]}
-    for name, trade_ids in ((ALFA, [1]), (BETA, [2]), (GAMMA, [3])):
+    for name, trade_ids in COVERED.items():
         cp = _by_name(body)[name]
         dates = [p["date"] for p in cp["profile"][1:]]
         last_maturity = max(date.fromisoformat(trades[i]["maturity_date"]) for i in trade_ids)
@@ -186,59 +269,95 @@ def test_grid_is_monthly_and_reaches_the_last_maturity(client):
         assert date.fromisoformat(dates[-2]) < last_maturity  # la primera fecha que alcanza el vencimiento
 
 
-def test_usd_swap_is_converted_with_the_snapshot_spot(client):
-    before = _exposure(client)
-    spot = client.get("/api/market/snapshots/MX-DEMO").get_json()["fx"]["spot"]
-    r = client.put("/api/market/snapshots/MX-DEMO", json={"spot": spot * 1.1})
-    assert r.status_code == 200, r.get_json()
-    after = _exposure(client)
-    g0, g1 = _by_name(before)[GAMMA], _by_name(after)[GAMMA]
-    for a, b in zip(g0["profile"][1:], g1["profile"][1:]):  # t > 0: la simulación en USD no depende del spot
-        assert b["ee_mxn"] == pytest.approx(a["ee_mxn"] * 1.1, rel=1e-9)
-        assert b["pfe_mxn"] == pytest.approx(a["pfe_mxn"] * 1.1, rel=1e-9)
-    assert g1["cva_mxn"] == pytest.approx(g0["cva_mxn"] * 1.1, rel=1e-9)
-    assert g1["pv_mxn"] == pytest.approx(g0["pv_mxn"] * 1.1, rel=1e-9)
-    a0, a1 = _by_name(before)[ALFA], _by_name(after)[ALFA]  # un swap en MXN no cambia
-    assert a1["profile"] == a0["profile"] and a1["cva_mxn"] == a0["cva_mxn"]
+def test_hazard_rate_is_the_five_year_average_of_the_curve_used(client):
+    _fast(client)
+    body = _exposure(client)
+    for name in (ALFA, BETA, GAMMA):
+        curve = _curve(client, name)
+        cp = _by_name(body)[name]
+        assert cp["hazard_rate"] == pytest.approx(-math.log(_survival(curve, 5.0)) / 5.0, rel=1e-9)
+        assert cp["recovery"] == curve["recovery"]
+    # el más débil (Beta, 150-300 pb) tiene más intensidad media que el de grado de inversión (Alfa)
+    assert _by_name(body)[BETA]["hazard_rate"] > _by_name(body)[ALFA]["hazard_rate"]
+
+
+def test_editing_the_curve_moves_the_cva_and_the_hazard_but_not_the_exposure(client):
+    _fast(client)
+    before = _by_name(_exposure(client))[ALFA]
+    quotes = [{"tenor_years": q["tenor_years"], "spread": q["spread"] * 2.0} for q in _curve(client, ALFA)["quotes"]]
+    _put_curve(client, ALFA, 0.25, quotes)
+    after = _by_name(_exposure(client))[ALFA]
+    assert after["recovery"] == 0.25 and after["credit_source"] == "curve"
+    assert after["hazard_rate"] > before["hazard_rate"] * 1.5
+    assert after["hazard_rate"] == pytest.approx(-math.log(_survival(_curve(client, ALFA), 5.0)) / 5.0, rel=1e-9)
+    assert after["cva_mxn"] > before["cva_mxn"]
+    assert after["profile"] == before["profile"] and after["pv_mxn"] == before["pv_mxn"]  # el crédito no mueve EE ni PFE
+
+
+def test_a_curve_wins_over_the_flat_parameters(client):
+    _fast(client)
+    before = _by_name(_exposure(client))[ALFA]
+    _set_params(client, ALFA, 0.5, 0.1)
+    after = _by_name(_exposure(client))[ALFA]
+    assert after == before and after["credit_source"] == "curve"
+
+
+# ----------------------------------------------- sin curva: respaldo plano y supuesto
+
+def test_counterparty_without_a_curve_uses_the_assumed_values(client):
+    _fast(client)
+    trade_with(client, "irs", DELTA, IRS)
+    cp = _by_name(_exposure(client))[DELTA]
+    assert (cp["credit_source"], cp["assumed"], cp["assumed_note"]) == ("flat", True, ASSUMED)
+    assert cp["hazard_rate"] == pytest.approx(0.01, rel=1e-12) and cp["recovery"] == 0.4
+    assert cp["cva_mxn"] > 0.0
+
+
+def test_counterparty_without_a_curve_uses_its_flat_parameters(client):
+    _fast(client)
+    trade_with(client, "irs", DELTA, IRS)
+    _set_params(client, DELTA, 0.02, 0.35)
+    cp = _by_name(_exposure(client))[DELTA]
+    assert (cp["credit_source"], cp["assumed"], cp["assumed_note"]) == ("flat", False, None)
+    assert cp["hazard_rate"] == pytest.approx(0.02, rel=1e-12) and cp["recovery"] == 0.35
 
 
 def test_zero_hazard_gives_exactly_zero_cva(client):
-    _set_params(client, ALFA, 0.0, 0.4)
-    alfa = _by_name(_exposure(client))[ALFA]
-    assert alfa["cva_mxn"] == 0.0
-    assert [ns["cva_mxn"] for ns in alfa["netting_sets"]] == [0.0]
-    assert alfa["assumed"] is False and alfa["assumed_note"] is None
+    _fast(client)
+    trade_with(client, "irs", DELTA, IRS)
+    _set_params(client, DELTA, 0.0, 0.4)
+    delta = _by_name(_exposure(client))[DELTA]
+    assert delta["cva_mxn"] == 0.0 and delta["hazard_rate"] == 0.0
+    assert [ns["cva_mxn"] for ns in delta["netting_sets"]] == [0.0]
+    assert delta["assumed"] is False and delta["assumed_note"] is None
 
 
 def test_cva_grows_with_hazard_and_leaves_the_exposure_profile_alone(client):
-    _set_params(client, BETA, 0.01, 0.4)
-    low = _by_name(_exposure(client))[BETA]
-    _set_params(client, BETA, 0.05, 0.4)
-    high = _by_name(_exposure(client))[BETA]
+    _fast(client)
+    trade_with(client, "irs", DELTA, IRS)
+    _set_params(client, DELTA, 0.01, 0.4)
+    low = _by_name(_exposure(client))[DELTA]
+    _set_params(client, DELTA, 0.05, 0.4)
+    high = _by_name(_exposure(client))[DELTA]
     assert 0.0 < low["cva_mxn"] < high["cva_mxn"]
     assert high["profile"] == low["profile"]  # el riesgo de crédito no mueve EE ni PFE
-    assert (high["hazard_rate"], high["assumed"]) == (0.05, False)
-    _set_params(client, BETA, 0.05, 0.1)  # menos recuperación = más pérdida
-    assert _by_name(_exposure(client))[BETA]["cva_mxn"] > high["cva_mxn"]
+    assert (high["hazard_rate"], high["assumed"]) == (pytest.approx(0.05, rel=1e-12), False)
+    _set_params(client, DELTA, 0.05, 0.1)  # menos recuperación = más pérdida
+    assert _by_name(_exposure(client))[DELTA]["cva_mxn"] > high["cva_mxn"]
 
 
-def test_cva_of_the_counterparty_is_the_sum_of_its_netting_sets(client):
-    for cp in _exposure(client)["counterparties"]:
-        assert cp["cva_mxn"] == pytest.approx(sum(ns["cva_mxn"] for ns in cp["netting_sets"]), rel=1e-12)
-        assert cp["cva_mxn"] > 0.0
+# ----------------------------------------------- exclusiones y casos vacíos
 
-
-def test_products_without_simulated_exposure_are_listed_as_excluded(client):
+def test_products_without_simulated_exposure_are_listed_as_excluded_with_the_xva_text(client):
+    _fast(client)
     body = _exposure(client)
-    expected = {4: "fx_forward", 5: "fx_forward", 6: "fx_option", 7: "cap_floor"}
+    expected = {i: p for per_cp in EXCLUDED.values() for i, p in per_cp.items()}
     top = {x["id"]: x for x in body["excluded"]}
     assert set(top) == set(expected)
     label = {"fx_forward": "Forward FX", "fx_option": "Opción FX", "cap_floor": "Cap / Floor"}
     for trade_id, product in expected.items():
-        reason = "La exposición simulada solo cubre swaps de tasas (IRS): %s se excluye" % label[product]
-        assert top[trade_id]["product"] == product and top[trade_id]["reason"] == reason
-        # el aviso se lee en la interfaz: sin códigos internos de producto
-        assert not re.search(r"\b(irs|fx_forward|fx_option|cap_floor)\b", top[trade_id]["reason"])
+        assert top[trade_id]["product"] == product and top[trade_id]["reason"] == NOT_COVERED % label[product]
+        assert not re.search(r"\b(irs|fx_forward|fx_option|cap_floor)\b", top[trade_id]["reason"])  # sin códigos internos
     assert top[4]["counterparty"] == ALFA and top[7]["counterparty"] == ALFA and top[6]["counterparty"] == GAMMA
     by = _by_name(body)
     assert [x["id"] for x in by[ALFA]["excluded"]] == [4, 7]
@@ -247,23 +366,35 @@ def test_products_without_simulated_exposure_are_listed_as_excluded(client):
     assert [x["id"] for x in by[GAMMA]["excluded"]] == [6]
 
 
-def test_counterparty_without_covered_swaps_has_an_empty_profile(client):
-    r = client.post("/api/trades", json={"product": "fx_forward", "counterparty": "Banco Delta", "params": FWD})
-    assert r.status_code == 201, r.get_json()
-    delta = _by_name(_exposure(client))["Banco Delta"]
+def test_cross_currency_swaps_are_covered_now(client):
+    _fast(client)
+    body = _exposure(client)
+    for name, xccy_id in ((ALFA, 10), (BETA, 12), (GAMMA, 16)):
+        cp = _by_name(body)[name]
+        assert xccy_id in cp["netting_sets"][0]["trades"]
+        assert xccy_id not in [x["id"] for x in cp["excluded"]]
+
+
+def test_counterparty_without_covered_trades_has_an_empty_profile(client):
+    _fast(client)
+    trade_with(client, "fx_forward", DELTA, FWD)
+    delta = _by_name(_exposure(client))[DELTA]
     assert (delta["netting_sets"], delta["profile"], delta["pv_mxn"], delta["cva_mxn"]) == ([], [], 0.0, 0.0)
     assert [x["product"] for x in delta["excluded"]] == ["fx_forward"]
     assert delta["assumed"] is True  # aunque no se simule nada, se le muestran los supuestos
 
 
 def test_terminated_swap_leaves_the_counterparty_with_only_its_excluded_trades(client):
+    _fast(client)
+    swap = trade_with(client, "irs", DELTA, IRS)["id"]
+    trade_with(client, "fx_forward", DELTA, FWD)
     r = client.post(
-        "/api/trades/2/events", json={"type": "termination", "event_date": "2026-11-10", "data": {"amount": 1000.0}}
+        "/api/trades/%d/events" % swap, json={"type": "termination", "event_date": "2026-11-10", "data": {"amount": 1000.0}}
     )
     assert r.status_code == 201, r.get_json()
-    beta = _by_name(_exposure(client))[BETA]
-    assert beta["netting_sets"] == [] and beta["profile"] == [] and beta["pv_mxn"] == 0.0
-    assert [x["id"] for x in beta["excluded"]] == [5]  # el swap terminado no es ni cubierto ni excluido
+    delta = _by_name(_exposure(client))[DELTA]
+    assert delta["netting_sets"] == [] and delta["profile"] == [] and delta["pv_mxn"] == 0.0
+    assert [x["product"] for x in delta["excluded"]] == ["fx_forward"]  # el swap terminado no es ni cubierto ni excluido
 
 
 def test_counterparties_without_live_trades_do_not_appear(client):
@@ -273,6 +404,7 @@ def test_counterparties_without_live_trades_do_not_appear(client):
 
 
 def test_unreadable_swap_is_excluded_with_its_reason_and_does_not_stop_the_rest(app, client):
+    _fast(client)
     insert_raw_trade(app, "irs", "no es json")
     body = _exposure(client)
     raw = _by_name(body)["Raw"]
@@ -282,110 +414,62 @@ def test_unreadable_swap_is_excluded_with_its_reason_and_does_not_stop_the_rest(
     assert _by_name(body)[BETA]["profile"]  # las demás se calculan igual
 
 
-def _alfa_with_sofr_swap(client, notional_usd):
-    """Alfa recibe 4 % en SOFR pagando solo 1 % (PV positivo en USD) además de su swap TIIE-F (PV negativo)."""
-    r = client.post(
-        "/api/trades",
-        json={
-            "product": "irs",
-            "counterparty": ALFA,
-            "params": {"curve": "SOFR", "side": "payer", "notional": notional_usd, "periods": 3, "fixed_rate": 0.01},
-        },
-    )
-    assert r.status_code == 201, r.get_json()
-    return _by_name(_exposure(client))[ALFA]
+# ----------------------------------------------- compensación entre monedas y sin escalón
+
+def test_cross_currency_netting_costs_less_than_the_parts(client):
+    """Un mismo conjunto con un swap MXN y uno USD (pagador de TIIE-F y receptor de SOFR, correlacionadas) tiene
+    menos CVA que los dos swaps en contrapartes separadas con el mismo crédito: las mismas trayectorias, así que
+    es subaditividad exacta de max(·, 0), no una cuestión de ruido."""
+    _fast(client)
+    mxn = dict(IRS)
+    usd = {"curve": "SOFR", "side": "receiver", "notional": 5.4e6, "periods": 13, "fixed_rate": 0.04}
+    trade_with(client, "irs", "Banco Eco (prueba)", mxn)
+    trade_with(client, "irs", "Banco Foxtrot (prueba)", usd)
+    trade_with(client, "irs", DELTA, mxn)
+    trade_with(client, "irs", DELTA, usd)
+    by = _by_name(_exposure(client))
+    joint, parts = by[DELTA]["cva_mxn"], by["Banco Eco (prueba)"]["cva_mxn"] + by["Banco Foxtrot (prueba)"]["cva_mxn"]
+    assert 0.0 < joint < parts
+    assert by[DELTA]["netting_sets"][0]["curve"] == "multimoneda" and len(by[DELTA]["netting_sets"][0]["trades"]) == 2
 
 
-@pytest.mark.parametrize("notional_usd, total_is_positive", [(5e6, True), (5e5, False)])
-def test_ee_at_zero_nets_across_currencies_and_later_points_do_not(client, notional_usd, total_is_positive):
-    alfa = _alfa_with_sofr_swap(client, notional_usd)
-    assert [(ns["curve"], ns["currency"]) for ns in alfa["netting_sets"]] == [("TIIE-F", "MXN"), ("SOFR", "USD")]
-    assert alfa["pv_mxn"] == pytest.approx(sum(ns["pv_mxn"] for ns in alfa["netting_sets"]), rel=1e-12)
-    pv_tiie, pv_sofr = (ns["pv_mxn"] for ns in alfa["netting_sets"])
-    assert pv_tiie < 0.0 < pv_sofr
-    assert (alfa["pv_mxn"] > 0.0) is total_is_positive
-    # R4: EE(0) = max(PV de la contraparte, 0): el valor de hoy compensa entre monedas...
-    first = alfa["profile"][0]
-    assert first["ee_mxn"] == pytest.approx(max(alfa["pv_mxn"], 0.0), rel=1e-12)
-    assert first["pfe_mxn"] == first["ee_mxn"]
-    # ...y es menor que la suma de los conjuntos (que es lo que sí suman los puntos mensuales: cota superior)
-    assert first["ee_mxn"] < max(pv_tiie, 0.0) + max(pv_sofr, 0.0)
-    assert all(p["pfe_mxn"] >= p["ee_mxn"] >= 0.0 for p in alfa["profile"])
+def test_no_step_after_the_first_day_when_there_is_no_volatility(app):
+    """Auditoría del corte 6: el motor anterior valía el PV del desk en t = 0 y caía de golpe hasta un cupón diario
+    un instante después (−86 mil MXN en Alfa, 0.017 % de su nocional de 500 M). Con volatilidad cero el motor nuevo
+    es determinista y el valor del primer día difiere del de t = 0 solo por el acarreo de un día: aquí queda en
+    ≈ 0.00005 % del nocional (783 MXN en Alfa), y la cota de 0.001 % deja fuera al escalón anterior."""
+    from desk.api.qf import qfpy  # noqa: F401  (debe cargarse antes que qfxva)
+    import qfxva
 
-
-def _model_swap_inputs(app):
-    """Por cada `irs` vivo de MX-DEMO: (operación, PV del desk en la moneda de la curva, mercado, términos)."""
     conn = db.connect(app.config["DESK_DB"])
     try:
         mkt = market.load_context(conn, "MX-DEMO")
         fixings = fixing_store.load_all(conn)
-        out = []
-        for trade in portfolio.load_trades(conn):
-            if trade["product"] != "irs" or not valuation.is_live(trade, mkt.as_of):
-                continue
-            terms = lifecycle.state(trade, trade["events"], mkt.as_of)["terms"]
-            v = valuation.value_trade(trade, mkt, fixings)
-            out.append((trade, v, mkt, terms))
-        return out
+        model = qfxva.ExposureModel(
+            a_mxn=0.05, sigma_mxn=0.0, a_usd=0.03, sigma_usd=0.0, fx_vol=0.0, rho_mxn_usd=0.0, rho_mxn_fx=0.0, rho_usd_fx=0.0
+        )
+        by_name = xva.live_by_counterparty(conn, mkt)
+        assert sorted(by_name) == [ALFA, BETA, GAMMA]
+        for name, trades in by_name.items():
+            spec, included, _, _ = xva.build_set(trades, mkt, fixings)
+            ids = {i["id"] for i in included}
+            notional_mxn = 0.0
+            for trade in trades:
+                if trade["id"] in ids:
+                    v = valuation.value_trade(trade, mkt, fixings)
+                    notional_mxn += v["notional"] * (mkt.spot if v["currency"] == "USD" else 1.0)
+            profile = xva.engine(mkt, model, dict(xva.DEFAULTS, n_paths=100), [0, 1]).simulate([spec])[0]
+            assert profile.value_at_zero == pytest.approx(sum(i["pv_mxn"] for i in included), rel=1e-9)  # arranca en el PV del desk
+            step = abs(profile.expected_value[1] - profile.expected_value[0])
+            assert step < 1e-5 * notional_mxn, (name, step, notional_mxn)
     finally:
         conn.close()
 
 
-def _side(terms):
-    return qfpy.SwapType.Payer if terms["side"] == "payer" else qfpy.SwapType.Receiver
-
-
-def test_model_swap_is_calibrated_to_the_desk_pv_at_zero(app):
-    inputs = _model_swap_inputs(app)
-    assert len(inputs) == 3
-    for trade, v, mkt, terms in inputs:
-        curve = mkt.curves[terms["curve"]]
-        mat = credit._model_maturity(trade, mkt.as_of)
-        rate = credit._effective_fixed_rate(qfpy, curve, _side(terms), v["notional"], mat, v["pv"])
-        swap = qfpy.InterestRateSwap(v["notional"], rate, mat, credit._MODEL_FREQUENCY, _side(terms))
-        assert swap.npv(qfpy.MarketEnvironment(curve)) == pytest.approx(v["pv"], rel=1e-9), trade["id"]
-        # la tasa efectiva es la del contrato más la base de días y el calendario: del mismo orden
-        assert rate == pytest.approx(terms["fixed_rate"], rel=0.05), trade["id"]
-
-
-def test_calibration_without_coupons_is_an_error(app):
-    trade, v, mkt, terms = _model_swap_inputs(app)[0]
-    with pytest.raises(ValueError):
-        credit._effective_fixed_rate(qfpy, mkt.curves[terms["curve"]], _side(terms), 1e6, 1e-6, 0.0)
-
-
-def test_simulated_swap_starts_at_the_desk_pv_without_a_step_in_the_first_month(app):
-    """Auditoría del corte 6: con los términos crudos el modelo valía +2.2 M (Alfa) y −0.36 M (Beta) en t ≈ 0
-    frente a un PV del desk de −0.94 M y +1.60 M. Con volatilidad despreciable la simulación es el valor
-    determinista del swap del modelo: debe arrancar en el PV del desk y no saltar al mes siguiente."""
-    import qfxva
-
-    for trade, v, mkt, terms in _model_swap_inputs(app):
-        name = terms["curve"]
-        hw = qfpy.HullWhite(a=mkt.hw[name]["a"], sigma=1e-7, curve=mkt.curves[name])
-        rate = credit._effective_fixed_rate(
-            qfpy, mkt.curves[name], _side(terms), v["notional"], credit._model_maturity(trade, mkt.as_of), v["pv"]
-        )
-        ns = credit._netting_set(
-            qfxva, [{"notional": v["notional"], "model_rate": rate, "terms": terms, "maturity_date": trade["maturity_date"]}], mkt.as_of
-        )
-        sim = qfxva.SimParams(n_paths=2, monitor_dates=[1e-4, 1.0 / 12.0], seed=1)
-        near, month = (p.epe - p.ene for p in qfxva.simulate_exposure(hw, ns, sim, pfe_quantile=0.95))
-        tol = 5e-4 * v["notional"]  # 0.05 % del nocional: a lo más un cupón diario del modelo
-        assert abs(near - v["pv"]) < tol, (trade["id"], near, v["pv"])
-        assert near * v["pv"] > 0.0  # mismo signo (Alfa y Gamma negativos, Beta positivo)
-        # un mes después solo cambia el acarreo (<= 0.12 % del nocional aquí); el escalón de antes era de 0.5 a 3 %
-        assert abs(month - v["pv"]) < 2e-3 * v["notional"], (trade["id"], month, v["pv"])
-        # Lo que el sigma despreciable no oculta: un instante después de t = 0 el modelo ya perdió el cupón diario
-        # en curso, así que queda por debajo del PV (documentado en el módulo y en Metodología), pero a lo más un
-        # cupón diario del swap del modelo.
-        just_after = qfxva.SimParams(n_paths=2, monitor_dates=[1e-8], seed=1)
-        p0 = qfxva.simulate_exposure(hw, ns, just_after, pfe_quantile=0.95)[0]
-        step = (p0.epe - p0.ene) - v["pv"]
-        assert 0.0 < abs(step) <= v["notional"] * rate / 365.0, (trade["id"], step)
-
+# ----------------------------------------------- estructura
 
 def test_same_response_on_two_calls(client):
+    _fast(client)
     assert _exposure(client) == _exposure(client)  # semilla fija
 
 
@@ -394,6 +478,28 @@ def test_snapshot_is_required_and_must_exist(client):
     assert r.status_code == 400 and r.get_json()["field"] == "snapshot"
     r = client.get("/api/credit/exposure?snapshot=NOPE")
     assert r.status_code == 404 and r.get_json()["field"] == "snapshot"
+
+
+def test_the_motor_anterior_is_gone_from_the_desk():
+    root = Path(credit.__file__).resolve().parents[1]
+    for name in ("_effective_fixed_rate", "_MODEL_FREQUENCY", "_netting_set", "_model_maturity", "N_PATHS", "COVERED_PRODUCTS"):
+        assert not hasattr(credit, name), name
+    for path in root.rglob("*.py"):
+        if "tests" in path.parts:
+            continue
+        source = path.read_text(encoding="utf-8")
+        assert "CVACalculator" not in source and "_effective_fixed_rate" not in source, path
+        assert not re.search(r"\bNettingSet\b", source), path  # NettingSetSpec (el motor nuevo) sí
+
+
+@pytest.mark.parametrize("module", ["desk.api.risk.credit", "desk.api.risk.xva"])
+def test_each_module_imports_alone_without_a_cycle(module):
+    root = Path(__file__).resolve().parents[3]
+    r = subprocess.run(
+        [sys.executable, "-c", "import %s" % module], cwd=str(root), env=dict(os.environ, PYTHONPATH=str(root)),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+    )
+    assert r.returncode == 0, r.stderr
 
 
 def test_grid_helper_clips_to_the_last_day_of_the_month():

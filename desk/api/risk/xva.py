@@ -12,6 +12,10 @@ valor del conjunto en t = 0 es el PV del desk. El resto de productos se lista en
 * Crédito: la curva de CDS de la contraparte (`credit_curves`) o, sin ella, la intensidad plana de
   `counterparty_credit` o, sin nada, el supuesto 1 % / 40 %; el crédito propio (`"propia"`) igual, sin la
   intensidad plana.
+* XVA incremental (`incremental`): el conjunto de la contraparte con y sin una operación candidata que no se
+  guarda, simulados en una sola llamada al motor (mismas trayectorias), así que la diferencia no lleva ruido
+  de Monte Carlo entre corridas.
+* `GET /api/credit/exposure` (`risk/credit.py`) usa `compute_detailed`: la exposición y el CVA son los de aquí.
 
 `qfxva` se importa dentro de las funciones, después de `qfpy` (ambos registran tipos C++ compartidos), para que
 el backend arranque aunque el módulo no esté compilado. Las escrituras no hacen commit: lo hace la ruta.
@@ -25,10 +29,10 @@ from desk.api import collateral, lifecycle, market, portfolio, valuation, xccy
 from desk.api import fixings as fixing_store
 from desk.api.db import now_iso
 from desk.api.errors import ApiError
-from desk.api.pricing import PRODUCT_LABEL
+from desk.api.pricing import PRODUCT_LABEL, PRODUCTS
 from desk.api.risk import credit, credit_curves
 from desk.api.settlement import merge_warnings
-from desk.api.validation import integer, number
+from desk.api.validation import choice, integer, number, text
 
 DEFAULTS = {"funding_spread": 0.005, "n_paths": 2000, "seed": 42, "pfe_quantile": 0.95}
 NOTICE = "XVA informativo: no entra al PV ni a la contabilidad"
@@ -294,8 +298,8 @@ def _profile_points(profile: Any, as_of: date) -> List[Dict[str, Any]]:
 def _counterparty(
     conn: sqlite3.Connection, mkt: Any, model: Any, params: Dict[str, Any], fixings: Any,
     own: Tuple[Any, float], name: str, trades: List[Dict[str, Any]],
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Elemento de `counterparties` y los avisos de valuación de sus operaciones."""
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Any]:
+    """Elemento de `counterparties`, los avisos de valuación de sus operaciones y su curva de crédito."""
     qfxva = _qfxva()
     spec, included, excluded, warnings = build_set(trades, mkt, fixings)
     cp_curve, recovery, info = credit_for(conn, name, mkt)
@@ -306,15 +310,19 @@ def _counterparty(
         "epe_max_mxn": 0.0, "pfe_max_mxn": 0.0, "profile": [],
     }  # type: Dict[str, Any]
     if included:
-        ids = {i["id"] for i in included}
-        last = max(t["maturity_date"] for t in trades if t["id"] in ids)
-        profile = engine(mkt, model, params, report_days(mkt.as_of, last)).simulate([spec])[0]
+        profile = engine(mkt, model, params, report_days(mkt.as_of, _last_maturity(trades, included))).simulate([spec])[0]
         x = qfxva.compute_xva(profile, cp_curve, 1.0 - recovery, own[0], 1.0 - own[1], params["funding_spread"])
         out.update(
             cva_mxn=x.cva, cva_stderr_mxn=x.cva_stderr, dva_mxn=x.dva, fva_mxn=x.fva, total_mxn=x.total,
             epe_max_mxn=max(profile.epe), pfe_max_mxn=max(profile.pfe), profile=_profile_points(profile, mkt.as_of),
         )
-    return out, warnings
+    return out, warnings, cp_curve
+
+
+def _last_maturity(trades: List[Dict[str, Any]], included: List[Dict[str, Any]]) -> date:
+    """Mayor vencimiento entre las operaciones de `trades` que quedaron en `included`."""
+    ids = {i["id"] for i in included}
+    return max(t["maturity_date"] for t in trades if t["id"] in ids)
 
 
 def live_by_counterparty(conn: sqlite3.Connection, mkt: Any) -> Dict[str, List[Dict[str, Any]]]:
@@ -326,8 +334,19 @@ def live_by_counterparty(conn: sqlite3.Connection, mkt: Any) -> Dict[str, List[D
     return out
 
 
+def average_hazard(curve: Any, years: float = 5.0) -> float:
+    """Intensidad media a `years` años de una curva de crédito: −ln S(years) / years."""
+    return math.log(1.0 / curve.survival_probability(years)) / years
+
+
 def compute(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
     """Cuerpo de `GET /api/xva`: CVA, DVA, FVA y perfil de exposición de cada contraparte con operaciones vivas."""
+    return compute_detailed(conn, snapshot_id)[0]
+
+
+def compute_detailed(conn: sqlite3.Connection, snapshot_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """`(cuerpo de GET /api/xva, {contraparte: curva de crédito usada})`; lo segundo lo necesita `credit.exposure`
+    para informar la intensidad media sin volver a construir la curva."""
     mkt = market.load_context(conn, snapshot_id)
     fixings = fixing_store.load_all(conn)
     params = params_response(conn)
@@ -344,14 +363,17 @@ def compute(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
     if own_info["assumed"]:
         assumptions.append("Crédito propio: %s" % own_info["note"])
     counterparties = []  # type: List[Dict[str, Any]]
+    curves = {}  # type: Dict[str, Any]
     warnings = []  # type: List[List[Dict[str, Any]]]
     for name, trades in sorted(live_by_counterparty(conn, mkt).items()):
-        cp, warns = _counterparty(conn, mkt, model, simulation, fixings, (own_curve, own_recovery), name, trades)
+        cp, warns, curves[name] = _counterparty(
+            conn, mkt, model, simulation, fixings, (own_curve, own_recovery), name, trades
+        )
         if cp["credit"]["assumed"]:
             assumptions.append("%s: %s" % (name, cp["credit"]["note"]))
         counterparties.append(cp)
         warnings.append(warns)
-    return {
+    body = {
         "snapshot": snapshot_id,
         "as_of": mkt.as_of.isoformat(),
         "notice": NOTICE,
@@ -362,4 +384,101 @@ def compute(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
         "own_credit": own_info,
         "counterparties": counterparties,
         "warnings": merge_warnings(*warnings),
+    }
+    return body, curves
+
+
+# ------------------------------------------------------------------ XVA incremental
+
+_CANDIDATE_NOT_COVERED = "El XVA incremental solo cubre swaps de tasa y cross currency swaps: %s no"
+_CANDIDATE_NOT_LIVE = "La operación candidata no está viva en la fecha de valuación del snapshot (%s)"
+
+
+def _side(pv: float, x: Any, profile: Any) -> Dict[str, Any]:
+    """Bloque `before`/`after` del incremental: PV del conjunto, XVA y máximos del perfil sin descontar."""
+    return {
+        "pv_mxn": pv, "cva_mxn": x.cva, "cva_stderr_mxn": x.cva_stderr, "dva_mxn": x.dva, "fva_mxn": x.fva,
+        "total_mxn": x.total, "epe_max_mxn": max(profile.epe), "pfe_max_mxn": max(profile.pfe),
+    }
+
+
+def incremental(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Cuerpo de `POST /api/xva/incremental`: XVA del conjunto de la contraparte antes y después de la candidata.
+
+    `body` es el de `POST /api/trades` más `snapshot` (obligatorio). La candidata no se guarda. Antes y después
+    salen de una sola llamada a `simulate([antes, después])`, con la malla de reporte del «después»: las dos
+    comparten trayectorias, así que `delta` no lleva ruido de Monte Carlo entre corridas y una candidata espejo
+    de la única operación del conjunto da exactamente `−antes`.
+
+    Orden de errores: `snapshot` ausente, `product` (el `choice` de `POST /api/trades`), producto fuera del XVA,
+    contraparte inexistente (404), los términos con `portfolio.prepare_trade` (mismos mensajes y `field` que
+    `POST /api/trades`) y candidata no viva en el `as_of` del snapshot.
+    """
+    snapshot_id = text(body, "snapshot")
+    product = choice(body, "product", tuple(PRODUCTS))
+    label = PRODUCT_LABEL.get(product, product)
+    if product not in COVERED_PRODUCTS:
+        raise ApiError(400, _CANDIDATE_NOT_COVERED % label, "product")
+    name = text(body, "counterparty")
+    if conn.execute("SELECT 1 FROM counterparties WHERE name = ?", (name,)).fetchone() is None:
+        raise ApiError(404, "Contraparte inexistente: %s" % name, "counterparty")
+    prepared = portfolio.prepare_trade(conn, body)
+
+    mkt = market.load_context(conn, snapshot_id)
+    candidate = dict(prepared, id=None, events=[], collateral=collateral.history(conn).get(name, []))
+    if not valuation.is_live(candidate, mkt.as_of):
+        raise ApiError(400, _CANDIDATE_NOT_LIVE % mkt.as_of.isoformat(), "trade_date")
+    fixings = fixing_store.load_all(conn)
+    value = valuation.value_trade(candidate, mkt, fixings)
+
+    existing = live_by_counterparty(conn, mkt).get(name, [])
+    spec_before, included_before, _, warn_before = build_set(existing, mkt, fixings)
+    spec_candidate, included_candidate, excluded_candidate, warn_candidate = build_set([candidate], mkt, fixings)
+    if not included_candidate:
+        raise ApiError(400, excluded_candidate[0]["reason"], "params")
+    qfxva = _qfxva()
+    spec_after = qfxva.NettingSetSpec(
+        swaps=spec_before.swaps + spec_candidate.swaps, xccys=spec_before.xccys + spec_candidate.xccys
+    )
+
+    params = load_params(conn)
+    model = model_from_snapshot(mkt)[0]
+    cp_curve, recovery, _ = credit_for(conn, name, mkt)
+    own_curve, own_recovery, _ = own_credit(conn, mkt)
+    days = report_days(mkt.as_of, _last_maturity(existing + [candidate], included_before + included_candidate))
+    p_before, p_after = engine(mkt, model, params, days).simulate([spec_before, spec_after])
+    x_before, x_after = (
+        qfxva.compute_xva(p, cp_curve, 1.0 - recovery, own_curve, 1.0 - own_recovery, params["funding_spread"])
+        for p in (p_before, p_after)
+    )
+
+    pv_before = sum(i["pv_mxn"] for i in included_before)
+    pv_candidate = included_candidate[0]["pv_mxn"]
+    before, after = _side(pv_before, x_before, p_before), _side(pv_before + pv_candidate, x_after, p_after)
+    delta = {k: after[k] - before[k] for k in ("cva_mxn", "dva_mxn", "fva_mxn", "total_mxn")}
+    notional_mxn = value["notional"] * (mkt.spot if value["currency"] == "USD" else 1.0)
+    return {
+        "snapshot": snapshot_id,
+        "as_of": mkt.as_of.isoformat(),
+        "counterparty": name,
+        "notice": NOTICE,
+        "candidate": {
+            "product": product, "label": label, "params": prepared["params"],
+            "trade_date": prepared["trade_date"].isoformat(), "start_date": prepared["start_date"].isoformat(),
+            "maturity_date": prepared["maturity_date"].isoformat(),
+            "notional": value["notional"], "currency": value["currency"], "notional_mxn": notional_mxn,
+            "pv_mxn": pv_candidate,
+        },
+        "before": before,
+        "after": after,
+        "delta": delta,
+        "delta_bp": {k[:-4]: v / notional_mxn * 1e4 for k, v in delta.items()},
+        "profile": [
+            {
+                "date": (mkt.as_of + timedelta(days=d)).isoformat(), "t": t,
+                "epe_before_mxn": eb, "ene_before_mxn": nb, "epe_after_mxn": ea, "ene_after_mxn": na,
+            }
+            for d, t, eb, nb, ea, na in zip(p_after.days, p_after.times, p_before.epe, p_before.ene, p_after.epe, p_after.ene)
+        ],
+        "warnings": merge_warnings(warn_before, warn_candidate),
     }
