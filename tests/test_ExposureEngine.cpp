@@ -1,6 +1,11 @@
 #include <gtest/gtest.h>
 #include <qf/xva/exposure_engine.hpp>
 #include <qf/xva/credit_curve.hpp>
+#include <qf/xva/piecewise_hazard_curve.hpp>
+#include <qf/xva/cva_calculator.hpp>
+#include <qf/xva/netting_set.hpp>
+#include <qf/models/hullwhite.hpp>
+#include <qf/instruments/swap.hpp>
 #include <qf/instruments/ois_swap.hpp>
 #include <qf/instruments/xccy_swap.hpp>
 #include <qf/core/market_environment.hpp>
@@ -672,5 +677,378 @@ TEST(ExposureEngineInternals, StepCovarianceMatchesNumericalQuadrature) {
                 EXPECT_NEAR(cov[i][j], cov[j][i], 1e-12 * scale) << "dt " << dt << " (" << i << "," << j << ")";
             }
         }
+    }
+}
+
+// ---- computeXva -------------------------------------------------------------------------------
+
+namespace {
+
+constexpr std::size_t kSynthPaths = 4;
+constexpr std::size_t kSynthDays = 4;
+
+// A profile built by hand: 4 paths x 4 dates (days 0, 365, 730, 1095), row = path. The means are the
+// profile's discounted exposures, so the expected XVA is computable without the engine.
+ExposureProfile syntheticProfile() {
+    const double pos[kSynthPaths][kSynthDays] = {{3, 10, 20, 30}, {3, 0, 5, 40}, {3, 30, 0, 10}, {3, 20, 15, 0}};
+    const double neg[kSynthPaths][kSynthDays] = {{0, 0, 0, 5}, {0, 7, 0, 0}, {0, 0, 12, 0}, {0, 0, 0, 8}};
+    ExposureProfile p;
+    p.days = {0, 365, 730, 1095};
+    for (int d : p.days) p.times.push_back(d / 365.0);
+    p.expectedValue.assign(kSynthDays, 0.0);
+    p.epe.assign(kSynthDays, 0.0);
+    p.ene.assign(kSynthDays, 0.0);
+    p.pfe.assign(kSynthDays, 0.0);
+    p.epeDisc.assign(kSynthDays, 0.0);
+    p.eneDisc.assign(kSynthDays, 0.0);
+    for (std::size_t k = 0; k < kSynthPaths; ++k) {
+        for (std::size_t j = 0; j < kSynthDays; ++j) {
+            p.pathDiscPos.push_back(pos[k][j]);
+            p.pathDiscNeg.push_back(neg[k][j]);
+            p.epeDisc[j] += pos[k][j] / kSynthPaths;
+            p.eneDisc[j] += neg[k][j] / kSynthPaths;
+        }
+    }
+    p.valueAtZero = 3.0;
+    return p;
+}
+
+// Standard error of the mean of per-path values, with the sample variance.
+double stdErrOf(const std::vector<double>& v) {
+    const double n = static_cast<double>(v.size());
+    double mean = 0.0;
+    for (double x : v) mean += x;
+    mean /= n;
+    double ss = 0.0;
+    for (double x : v) ss += (x - mean) * (x - mean);
+    return std::sqrt(ss / (n - 1.0) / n);
+}
+
+} // namespace
+
+TEST(ComputeXva, ReproducesTheDefinitionsOnAKnownProfile) {
+    const ExposureProfile p = syntheticProfile();
+    const PiecewiseHazardCurve counterparty({1.0, 2.0, 3.0}, {0.010, 0.020, 0.040});
+    const FlatHazardRate own(0.015);
+    const double lgdC = 0.6, lgdO = 0.55, spread = 0.005;
+
+    // The definitions, written out step by step against the survival values of each date.
+    std::vector<double> sc, so;
+    for (double t : p.times) {
+        sc.push_back(counterparty.survivalProbability(t));
+        so.push_back(own.survivalProbability(t));
+    }
+    double cva = 0.0, dva = 0.0, fva = 0.0;
+    std::vector<double> cvaPath(kSynthPaths, 0.0), dvaPath(kSynthPaths, 0.0);
+    for (std::size_t i = 1; i < kSynthDays; ++i) {
+        cva += lgdC * p.epeDisc[i] * (sc[i - 1] - sc[i]);
+        dva += lgdO * p.eneDisc[i] * (so[i - 1] - so[i]);
+        fva += spread * (p.epeDisc[i] - p.eneDisc[i]) * sc[i] * so[i] * (p.times[i] - p.times[i - 1]);
+        for (std::size_t k = 0; k < kSynthPaths; ++k) {
+            cvaPath[k] += lgdC * p.pathDiscPos[k * kSynthDays + i] * (sc[i - 1] - sc[i]);
+            dvaPath[k] += lgdO * p.pathDiscNeg[k * kSynthDays + i] * (so[i - 1] - so[i]);
+        }
+    }
+    const XvaResult r = computeXva(p, counterparty, lgdC, own, lgdO, spread);
+    EXPECT_NEAR(r.cva, cva, 1e-12 * cva);
+    EXPECT_NEAR(r.dva, dva, 1e-12 * dva);
+    EXPECT_NEAR(r.fva, fva, 1e-12 * std::abs(fva));
+    EXPECT_NEAR(r.cvaStdErr, stdErrOf(cvaPath), 1e-12 * stdErrOf(cvaPath));
+    EXPECT_NEAR(r.dvaStdErr, stdErrOf(dvaPath), 1e-12 * stdErrOf(dvaPath));
+    EXPECT_DOUBLE_EQ(r.total, r.cva - r.dva + r.fva);
+    // Not vacuous: the three adjustments and both errors are really there.
+    EXPECT_GT(r.cva, 0.0);
+    EXPECT_GT(r.dva, 0.0);
+    EXPECT_NE(r.fva, 0.0);
+    EXPECT_GT(r.cvaStdErr, 0.0);
+    EXPECT_GT(r.dvaStdErr, 0.0);
+    // The mean of the per-path sums is the CVA computed from the mean exposure.
+    double mean = 0.0;
+    for (double x : cvaPath) mean += x / kSynthPaths;
+    EXPECT_NEAR(mean, r.cva, 1e-12 * r.cva);
+}
+
+TEST(ComputeXva, ZeroHazardGivesExactlyZeroCvaAndDvaAndKeepsFva) {
+    const NettingSetSpec a = setOf({s0(), s3()}, {x0()});
+    const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(300, schedule(0, 30, 40)));
+    const ExposureProfile p = engine.simulate({a})[0];
+    const FlatHazardRate none(0.0);
+    const XvaResult r = computeXva(p, none, 0.6, none, 0.6, 0.005);
+    EXPECT_EQ(r.cva, 0.0);
+    EXPECT_EQ(r.dva, 0.0);
+    EXPECT_EQ(r.cvaStdErr, 0.0);
+    EXPECT_EQ(r.dvaStdErr, 0.0);
+    // FVA does not depend on default: it is the funding cost of the expected exposure.
+    double fva = 0.0;
+    for (std::size_t i = 1; i < p.times.size(); ++i)
+        fva += 0.005 * (p.epeDisc[i] - p.eneDisc[i]) * (p.times[i] - p.times[i - 1]);
+    EXPECT_NEAR(r.fva, fva, 1e-12 * std::abs(fva));
+    EXPECT_NE(r.fva, 0.0);
+    EXPECT_DOUBLE_EQ(r.total, r.fva);
+    // A zero LGD also kills the adjustment, whatever the curve.
+    const FlatHazardRate some(0.05);
+    const XvaResult noLoss = computeXva(p, some, 0.0, some, 0.0, 0.0);
+    EXPECT_EQ(noLoss.cva, 0.0);
+    EXPECT_EQ(noLoss.dva, 0.0);
+    EXPECT_EQ(noLoss.fva, 0.0);
+    EXPECT_EQ(noLoss.total, 0.0);
+}
+
+TEST(ComputeXva, NettingNeverCostsMoreThanTheSumOfTheParts) {
+    const std::vector<int> report = schedule(0, 30, 70);
+    const NettingSetSpec a = setOf({s0(), s3()}, {x0()});
+    const NettingSetSpec b = setOf({s1(), s2()}, {x1()});
+    const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(500, report));
+    const auto p = engine.simulate({a, b, unite(a, b)});
+    ASSERT_EQ(p.size(), 3u);
+    const PiecewiseHazardCurve cp({1.0, 3.0, 6.0}, {0.008, 0.02, 0.03});
+    const PiecewiseHazardCurve own({2.0, 6.0}, {0.01, 0.015});
+    const XvaResult ra = computeXva(p[0], cp, 0.6, own, 0.6, 0.005);
+    const XvaResult rb = computeXva(p[1], cp, 0.6, own, 0.6, 0.005);
+    const XvaResult rab = computeXva(p[2], cp, 0.6, own, 0.6, 0.005);
+    EXPECT_GT(ra.cva, 0.0);
+    EXPECT_GT(rb.cva, 0.0);
+    EXPECT_GT(ra.dva, 0.0);
+    EXPECT_GT(rb.dva, 0.0);
+    EXPECT_LE(rab.cva, ra.cva + rb.cva + 1e-9);
+    EXPECT_LE(rab.dva, ra.dva + rb.dva + 1e-9);
+    // FVA is linear in the value, so the funding cost of the union is the sum of the parts (to rounding).
+    EXPECT_NEAR(rab.fva, ra.fva + rb.fva, 1e-9 * (std::abs(ra.fva) + std::abs(rb.fva)));
+    // Netting really bites here (the sets partly offset), so the inequality is not an equality.
+    EXPECT_LT(rab.cva, ra.cva + rb.cva);
+}
+
+TEST(ComputeXva, ExactMirrorLeavesNoXva) {
+    const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(300, schedule(0, 30, 40)));
+    const PiecewiseHazardCurve cp({1.0, 5.0}, {0.01, 0.02});
+    for (const NettingSetSpec& single : {setOf({s0()}), setOf({s1()}), setOf({}, {x0()})}) {
+        const ExposureProfile p = engine.simulate({unite(single, mirror(single))})[0];
+        const XvaResult r = computeXva(p, cp, 0.6, cp, 0.6, 0.005);
+        EXPECT_EQ(r.cva, 0.0);
+        EXPECT_EQ(r.dva, 0.0);
+        EXPECT_EQ(r.fva, 0.0);
+        EXPECT_EQ(r.total, 0.0);
+        EXPECT_EQ(r.cvaStdErr, 0.0);
+        EXPECT_EQ(r.dvaStdErr, 0.0);
+    }
+}
+
+TEST(ComputeXva, StandardErrorShrinksWithPathsAndCoversTheSeedToSeedSpread) {
+    // The reported error is the sampling error of the CVA: the spread of CVAs over independent seeds
+    // is of the same size as the error reported by one run.
+    const NettingSetSpec a = setOf({s0()}, {x0()});
+    const FlatHazardRate cp(0.02);
+    const std::vector<int> report = schedule(0, 60, 25);
+    std::vector<double> cvas;
+    double meanStdErr = 0.0;
+    for (unsigned seed = 1; seed <= 12; ++seed) {
+        const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(400, report, seed));
+        const XvaResult r = computeXva(engine.simulate({a})[0], cp, 0.6, cp, 0.6, 0.0);
+        cvas.push_back(r.cva);
+        meanStdErr += r.cvaStdErr / 12.0;
+    }
+    double mean = 0.0;
+    for (double c : cvas) mean += c / cvas.size();
+    double ss = 0.0;
+    for (double c : cvas) ss += (c - mean) * (c - mean);
+    const double spread = std::sqrt(ss / (cvas.size() - 1.0));
+    EXPECT_GT(meanStdErr, 0.0);
+    EXPECT_GT(spread, 0.5 * meanStdErr);
+    EXPECT_LT(spread, 2.0 * meanStdErr);
+
+    const ExposureEngine big(makeMarket(), demoModel(), makeConfig(1600, report, 1u));
+    const ExposureEngine small(makeMarket(), demoModel(), makeConfig(400, report, 1u));
+    const double seBig = computeXva(big.simulate({a})[0], cp, 0.6, cp, 0.6, 0.0).cvaStdErr;
+    const double seSmall = computeXva(small.simulate({a})[0], cp, 0.6, cp, 0.6, 0.0).cvaStdErr;
+    EXPECT_LT(seBig, 0.7 * seSmall);   // four times the paths: about half the error
+}
+
+TEST(ComputeXva, RejectsInvalidInput) {
+    const ExposureProfile ok = syntheticProfile();
+    const FlatHazardRate c(0.02);
+    EXPECT_NO_THROW(computeXva(ok, c, 0.6, c, 0.6, 0.005));
+    // LGD in [0,1], funding spread >= 0 and finite.
+    EXPECT_THROW(computeXva(ok, c, -0.1, c, 0.6, 0.005), std::invalid_argument);
+    EXPECT_THROW(computeXva(ok, c, 1.1, c, 0.6, 0.005), std::invalid_argument);
+    EXPECT_THROW(computeXva(ok, c, 0.6, c, -0.1, 0.005), std::invalid_argument);
+    EXPECT_THROW(computeXva(ok, c, 0.6, c, 1.1, 0.005), std::invalid_argument);
+    EXPECT_THROW(computeXva(ok, c, std::nan(""), c, 0.6, 0.005), std::invalid_argument);
+    EXPECT_THROW(computeXva(ok, c, 0.6, c, 0.6, -0.001), std::invalid_argument);
+    EXPECT_THROW(computeXva(ok, c, 0.6, c, 0.6, std::nan("")), std::invalid_argument);
+    // A profile that does not agree with itself.
+    ExposureProfile bad = ok;
+    bad.epeDisc.pop_back();
+    EXPECT_THROW(computeXva(bad, c, 0.6, c, 0.6, 0.005), std::invalid_argument);
+    bad = ok;
+    bad.eneDisc.pop_back();
+    EXPECT_THROW(computeXva(bad, c, 0.6, c, 0.6, 0.005), std::invalid_argument);
+    bad = ok;
+    bad.times.pop_back();
+    EXPECT_THROW(computeXva(bad, c, 0.6, c, 0.6, 0.005), std::invalid_argument);
+    bad = ok;
+    bad.pathDiscPos.pop_back();
+    EXPECT_THROW(computeXva(bad, c, 0.6, c, 0.6, 0.005), std::invalid_argument);
+    bad = ok;
+    bad.pathDiscNeg.clear();
+    EXPECT_THROW(computeXva(bad, c, 0.6, c, 0.6, 0.005), std::invalid_argument);
+    bad = ok;
+    std::swap(bad.times[1], bad.times[2]);
+    EXPECT_THROW(computeXva(bad, c, 0.6, c, 0.6, 0.005), std::invalid_argument);
+    EXPECT_THROW(computeXva(ExposureProfile{}, c, 0.6, c, 0.6, 0.005), std::invalid_argument);
+}
+
+// ---- (d) coherence with the previous engine ----------------------------------------------------
+
+namespace {
+
+constexpr double kFreshNotional = 100e6;
+constexpr double kFreshHazard = 0.02;
+constexpr double kFreshLgd = 0.6;
+
+YieldCurve flatTiieCurve(double rate) {
+    return YieldCurve({0.25, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 12.0}, std::vector<double>(8, rate),
+                      InterpolationMethod::Linear);
+}
+
+// Payments every 28 days for five years (1820 days); the report grid is the payment grid, so at every
+// report day the swap is fresh: a new period starts exactly then.
+std::vector<int> freshPayDays() { return schedule(28, 28, 65); }
+std::vector<int> freshReportDays() { return schedule(0, 28, 66); }
+
+// Par rate of an OIS swap on `pay` days from today, from OisSwap itself: the npv is linear in the fixed
+// rate, so two evaluations (rate 0 and rate 1) give the rate that zeroes it.
+double oisParRate(const YieldCurve& curve, const std::vector<int>& pay) {
+    MarketEnvironment env;
+    env.addCurve("TIIE-F", curve);
+    const double floating = OisSwap(1.0, 0.0, 0, pay, 1.0, SwapType::Payer, "TIIE-F").npv(env);
+    const double floatMinusFixedAtOne = OisSwap(1.0, 1.0, 0, pay, 1.0, SwapType::Payer, "TIIE-F").npv(env);
+    return floating / (floating - floatMinusFixedAtOne);
+}
+
+// CVA = LGD * sum_{i>=1} epe_i [S(t_{i-1}) - S(t_i)] on the UNDISCOUNTED expected positive exposure,
+// the same formula CVACalculator applies to its own (undiscounted) profile.
+double cvaOnUndiscountedEpe(const std::vector<double>& times, const std::vector<double>& epe) {
+    const FlatHazardRate credit(kFreshHazard);
+    double cva = 0.0;
+    for (std::size_t i = 1; i < times.size(); ++i)
+        cva += kFreshLgd * epe[i] * (credit.survivalProbability(times[i - 1]) - credit.survivalProbability(times[i]));
+    return cva;
+}
+
+struct BatchedCva {
+    double mean;      // mean of the batch CVAs
+    double stdErr;    // sd of the batch CVAs / sqrt(batches)
+};
+
+// Engine CVA of the fresh payer TIIE swap struck at `rate`: 10 engines with different seeds of
+// 500 paths each; the CVA is their mean and its standard error the spread of the 10.
+BatchedCva engineCvaInBatches(const YieldCurve& tiie, double rate) {
+    constexpr int kBatches = 10;
+    const NettingSetSpec swap = setOf({mxnSwap(true, rate, 0, freshPayDays(), 1.0, false, kFreshNotional)});
+    std::vector<double> cvas;
+    for (int b = 0; b < kBatches; ++b) {
+        const ExposureEngine engine(ExposureMarket{tiie, sofrCurve(), std::nullopt, kSpot}, demoModel(),
+                                    makeConfig(500, freshReportDays(), 20261110u + 7919u * static_cast<unsigned>(b)));
+        const ExposureProfile p = engine.simulate({swap})[0];
+        cvas.push_back(cvaOnUndiscountedEpe(p.times, p.epe));
+    }
+    double mean = 0.0;
+    for (double c : cvas) mean += c / kBatches;
+    double ss = 0.0;
+    for (double c : cvas) ss += (c - mean) * (c - mean);
+    return {mean, std::sqrt(ss / (kBatches - 1.0) / kBatches)};
+}
+
+// CVA of CVACalculator for the same swap (its own InterestRateSwap, struck at `rate`), the same report
+// dates, hazard, LGD and Hull-White parameters (a = 0.05, sigma = 0.01 as MX-DEMO).
+double legacyCva(const YieldCurve& tiie, double rate) {
+    qf::models::HullWhite hw(0.05, 0.01, tiie);
+    qf::xva::NettingSet set;
+    set.add(kFreshNotional, rate, 5.0, 365.0 / 28.0, SwapType::Payer);
+    SimParams params;
+    params.nPaths = 5000;
+    params.seed = 4242u;
+    for (int d : freshReportDays())
+        if (d > 0) params.monitorDates.push_back(d / 365.0);
+    const FlatHazardRate credit(kFreshHazard);
+    return CVACalculator(hw, credit, kFreshLgd, params).compute(set, MarketEnvironment(tiie)).cva;
+}
+
+// The same CVA without Monte Carlo. A fresh MXN swap depends on one factor, x(t) ~ N(m(t), y(t)), through
+// P(t,T) = P(0,T)/P(0,t) exp(-B x - B^2 y / 2), so E[max(V,0)] at each report day is a one-dimensional
+// integral (trapezoid rule over +-8 standard deviations).
+double closedFormCva(const YieldCurve& tiie, double rate) {
+    const double a = 0.05, sigma = 0.01, tau = 28.0 / 360.0;
+    const std::vector<int> pay = freshPayDays();
+    std::vector<double> times(1, 0.0), epe(1, 0.0);
+    for (std::size_t k = 1; k < freshReportDays().size(); ++k) {
+        const double t = pay[k - 1] / 365.0;
+        const double em = 1.0 - std::exp(-a * t);
+        const double m = sigma * sigma / (2.0 * a * a) * em * em;
+        const double y = sigma * sigma * (1.0 - std::exp(-2.0 * a * t)) / (2.0 * a);
+        const double sd = std::sqrt(y);
+        constexpr int kSteps = 4000;
+        double integral = 0.0;
+        for (int n = 0; n <= kSteps; ++n) {
+            const double z = -8.0 + 16.0 * n / kSteps;
+            const double x = m + sd * z;
+            const auto bond = [&](int day) {
+                const double b = (1.0 - std::exp(-a * (day - pay[k - 1]) / 365.0)) / a;
+                return tiie.discountFactor(day / 365.0) / tiie.discountFactor(t) * std::exp(-b * x - 0.5 * b * b * y);
+            };
+            double fixedLeg = 0.0;
+            for (std::size_t j = k; j < pay.size(); ++j) fixedLeg += tau * bond(pay[j]);
+            const double v = k < pay.size() ? kFreshNotional * ((1.0 - bond(pay.back())) - rate * fixedLeg) : 0.0;
+            const double w = (n == 0 || n == kSteps) ? 0.5 : 1.0;
+            integral += w * std::max(v, 0.0) * std::exp(-0.5 * z * z);
+        }
+        times.push_back(t);
+        epe.push_back(integral * (16.0 / kSteps) / std::sqrt(2.0 * std::acos(-1.0)));
+    }
+    return cvaOnUndiscountedEpe(times, epe);
+}
+
+} // namespace
+
+TEST(ExposureEngine, CvaMatchesCvaCalculatorForAFreshAtParSwapOnAFlatCurve) {
+    // R2(d), tolerance max(5 % of the CVACalculator CVA, 3 standard errors) as specified.
+    //
+    // Two choices that the plan text did not fix, both needed for the comparison to be about the model:
+    //  * Each engine prices the swap at ITS par rate. OisSwap accrues ACT/360; InterestRateSwap accrues 28/365
+    //    and runs its floating leg to 5.0 years against fixed payments up to 4.986. With the OisSwap rate in
+    //    CVACalculator the payer is worth +0.4 % of the notional from the start and the CVAs differ by 14 %
+    //    (flat curve) and 17 % (sloped curve): a different swap, not a different model.
+    //  * Flat 7 % curve. On a sloped curve CVACalculator drifts: its theta(t) takes a finite-difference
+    //    derivative of the forward curve (piecewise linear zero rates), and its mean short rate ends up
+    //    4.6 bp above the Hull-White mean at 2.2 years and 11 bp at 4.4 years (20000 paths), which
+    //    inflates payer exposure. The new engine is exact there (next test), so on the sloped test
+    //    curve the two differ by 6.5 % (engine 59 807 +- 645, CVACalculator 63 952, exact 59 595): R2(d)
+    //    as worded is not met on it, and the cause is the old engine.
+    // On the flat curve CVACalculator is still 3.5 % above the exact CVA (Euler steps overstate its
+    // variance by ~1-2 %), so the margin against the 5 % criterion is thin by nature of the old engine.
+    const YieldCurve flat = flatTiieCurve(0.07);
+    const double engineRate = oisParRate(flat, freshPayDays());
+    const double legacyRate = qf::instruments::InterestRateSwap::parRate(5.0, 365.0 / 28.0, flat);
+    EXPECT_NE(engineRate, legacyRate);   // the conventions really differ, so the distinction matters
+
+    const BatchedCva engine = engineCvaInBatches(flat, engineRate);
+    const double legacy = legacyCva(flat, legacyRate);
+    ASSERT_GT(legacy, 0.0);
+    ASSERT_GT(engine.stdErr, 0.0);
+    EXPECT_LT(std::abs(engine.mean - legacy), std::max(0.05 * legacy, 3.0 * engine.stdErr))
+        << "engine " << engine.mean << " +- " << engine.stdErr << ", CVACalculator " << legacy;
+}
+
+TEST(ExposureEngine, CvaMatchesTheClosedFormOnFlatAndSlopedCurves) {
+    // The exact CVA of the same swap, no Monte Carlo: the oracle that says which engine is right when the
+    // two disagree. It also covers the sloped test curve that the CVACalculator comparison cannot use.
+    for (const YieldCurve& curve : {flatTiieCurve(0.07), tiieCurve()}) {
+        const double rate = oisParRate(curve, freshPayDays());
+        const BatchedCva engine = engineCvaInBatches(curve, rate);
+        const double exact = closedFormCva(curve, rate);
+        ASSERT_GT(exact, 0.0);
+        EXPECT_LT(std::abs(engine.mean - exact), 3.0 * engine.stdErr)
+            << "engine " << engine.mean << " +- " << engine.stdErr << ", closed form " << exact;
+        EXPECT_LT(std::abs(engine.mean - exact), 0.05 * exact);
     }
 }

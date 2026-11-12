@@ -847,4 +847,87 @@ std::vector<DeflatedStat> ExposureEngine::deflatedValueStats(const NettingSetSpe
     return out;
 }
 
+// ---------------------------------------------------------------------------------------------
+// XVA
+// ---------------------------------------------------------------------------------------------
+
+namespace {
+
+void validateLgd(double lgd, const char* who)
+{
+    if (!(lgd >= 0.0 && lgd <= 1.0))   // also rejects NaN
+        throw std::invalid_argument(std::string("computeXva: ") + who + " LGD must be in [0,1]");
+}
+
+// Standard error of the mean of `values` (sample variance; 0 for a single path).
+double standardError(const std::vector<double>& values)
+{
+    const std::size_t n = values.size();
+    if (n < 2) return 0.0;
+    double mean = 0.0;
+    for (double v : values) mean += v;
+    mean /= static_cast<double>(n);
+    double ss = 0.0;
+    for (double v : values) ss += (v - mean) * (v - mean);
+    return std::sqrt(ss / (static_cast<double>(n) - 1.0) / static_cast<double>(n));
+}
+
+} // namespace
+
+XvaResult computeXva(const ExposureProfile& profile, const ICreditCurve& counterparty, double counterpartyLgd,
+                     const ICreditCurve& own, double ownLgd, double fundingSpread)
+{
+    validateLgd(counterpartyLgd, "counterparty");
+    validateLgd(ownLgd, "own");
+    if (!std::isfinite(fundingSpread) || fundingSpread < 0.0)
+        throw std::invalid_argument("computeXva: funding spread must be finite and >= 0");
+
+    const std::size_t nDays = profile.days.size();
+    if (nDays == 0 || profile.times.size() != nDays || profile.epeDisc.size() != nDays ||
+        profile.eneDisc.size() != nDays)
+        throw std::invalid_argument("computeXva: profile vectors must be non-empty and of equal length");
+    if (profile.pathDiscPos.empty() || profile.pathDiscPos.size() != profile.pathDiscNeg.size() ||
+        profile.pathDiscPos.size() % nDays != 0)
+        throw std::invalid_argument("computeXva: pathDiscPos/pathDiscNeg must be nPaths x nDays");
+    if (!(profile.times[0] >= 0.0))
+        throw std::invalid_argument("computeXva: profile times must start at >= 0");
+    for (std::size_t j = 1; j < nDays; ++j)
+        if (!(profile.times[j] > profile.times[j - 1]))
+            throw std::invalid_argument("computeXva: profile times must be strictly increasing");
+
+    const std::size_t nPaths = profile.pathDiscPos.size() / nDays;
+
+    // Survival at every date and the default probability of each interval (t_{i-1}, t_i].
+    std::vector<double> survC(nDays), survO(nDays);
+    for (std::size_t j = 0; j < nDays; ++j) {
+        survC[j] = counterparty.survivalProbability(profile.times[j]);
+        survO[j] = own.survivalProbability(profile.times[j]);
+    }
+
+    XvaResult out{};
+    for (std::size_t i = 1; i < nDays; ++i) {
+        out.cva += counterpartyLgd * profile.epeDisc[i] * (survC[i - 1] - survC[i]);
+        out.dva += ownLgd * profile.eneDisc[i] * (survO[i - 1] - survO[i]);
+        out.fva += fundingSpread * (profile.epeDisc[i] - profile.eneDisc[i]) * survC[i] * survO[i] *
+                   (profile.times[i] - profile.times[i - 1]);
+    }
+    out.total = out.cva - out.dva + out.fva;
+
+    // Sampling error: the CVA (DVA) is the mean over paths of the per-path sum of discounted exposure
+    // times the default probabilities, so its standard error is that of the per-path sums.
+    std::vector<double> cvaPath(nPaths), dvaPath(nPaths);
+    for (std::size_t p = 0; p < nPaths; ++p) {
+        double c = 0.0, d = 0.0;
+        for (std::size_t i = 1; i < nDays; ++i) {
+            c += profile.pathDiscPos[p * nDays + i] * (survC[i - 1] - survC[i]);
+            d += profile.pathDiscNeg[p * nDays + i] * (survO[i - 1] - survO[i]);
+        }
+        cvaPath[p] = counterpartyLgd * c;
+        dvaPath[p] = ownLgd * d;
+    }
+    out.cvaStdErr = standardError(cvaPath);
+    out.dvaStdErr = standardError(dvaPath);
+    return out;
+}
+
 } // namespace qf::xva

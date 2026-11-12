@@ -1,5 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <optional>
 #include <qf/xva/credit_curve.hpp>
 #include <qf/xva/piecewise_hazard_curve.hpp>
 #include <qf/termstructure/yieldcurve.hpp>
@@ -7,6 +8,7 @@
 #include <qf/xva/cva_result.hpp>
 #include <qf/xva/cva_calculator.hpp>
 #include <qf/xva/exposure_profile.hpp>
+#include <qf/xva/exposure_engine.hpp>
 #include <qf/models/hullwhite.hpp>
 #include <qf/core/market_environment.hpp>
 #include <qf/instruments/swap.hpp>
@@ -75,6 +77,129 @@ PYBIND11_MODULE(qfxva, m) {
           py::arg("quote"), py::arg("recovery"), py::arg("curve"), py::arg("discount"),
           py::arg("notional") = 1.0,
           "Value of the CDS for the protection buyer (protection leg - premium leg), times notional.");
+
+    // ── Multi-currency exposure engine ────────────────────────────
+    // The curves are qfpy.YieldCurve objects: import qfpy BEFORE qfxva so both share the C++ type.
+    // std::invalid_argument becomes ValueError.
+    py::enum_<SwapCurrency>(m, "SwapCurrency")
+        .value("MXN", SwapCurrency::MXN)
+        .value("USD", SwapCurrency::USD);
+
+    py::class_<RateSwapSpec>(m, "RateSwapSpec")
+        .def(py::init([](SwapCurrency currency, double notional, double fixedRate, bool payer, int startDays,
+                         std::vector<int> payDays, double accruedFactor, double dayBase, bool csaDiscount) {
+                 return RateSwapSpec{currency, notional, fixedRate, payer, startDays, std::move(payDays),
+                                     accruedFactor, dayBase, csaDiscount};
+             }),
+             py::arg("currency"), py::arg("notional"), py::arg("fixed_rate"), py::arg("payer"),
+             py::arg("start_days"), py::arg("pay_days"), py::arg("accrued_factor"),
+             py::arg("day_base") = 360.0, py::arg("csa_discount") = false,
+             "OIS swap aged to today. Days are counted from today; MXN projects on TIIE-F, USD on SOFR; "
+             "csa_discount (MXN only) discounts with MXN-USD.")
+        .def_readwrite("currency",      &RateSwapSpec::currency)
+        .def_readwrite("notional",      &RateSwapSpec::notional)
+        .def_readwrite("fixed_rate",    &RateSwapSpec::fixedRate)
+        .def_readwrite("payer",         &RateSwapSpec::payer)
+        .def_readwrite("start_days",    &RateSwapSpec::startDays)
+        .def_readwrite("pay_days",      &RateSwapSpec::payDays)
+        .def_readwrite("accrued_factor", &RateSwapSpec::accruedFactor)
+        .def_readwrite("day_base",      &RateSwapSpec::dayBase)
+        .def_readwrite("csa_discount",  &RateSwapSpec::csaDiscount);
+
+    py::class_<XccySwapSpec>(m, "XccySwapSpec")
+        .def(py::init([](double notionalUsd, double fxRate, double spread, int startDays, std::vector<int> payDays,
+                         double accruedFactorUsd, double accruedFactorMxn, bool payUsd, bool initialExchange,
+                         bool finalExchange, double dayBase, bool csaDiscount) {
+                 return XccySwapSpec{notionalUsd, fxRate, spread, startDays, std::move(payDays), accruedFactorUsd,
+                                     accruedFactorMxn, payUsd, initialExchange, finalExchange, dayBase, csaDiscount};
+             }),
+             py::arg("notional_usd"), py::arg("fx_rate"), py::arg("spread"), py::arg("start_days"),
+             py::arg("pay_days"), py::arg("accrued_factor_usd"), py::arg("accrued_factor_mxn"),
+             py::arg("pay_usd"), py::arg("initial_exchange"), py::arg("final_exchange"),
+             py::arg("day_base") = 360.0, py::arg("csa_discount") = true,
+             "Cross currency swap aged to today (USD SOFR leg against MXN TIIE-F + spread leg). "
+             "pay_usd = pays USD, receives MXN.")
+        .def_readwrite("notional_usd",       &XccySwapSpec::notionalUsd)
+        .def_readwrite("fx_rate",            &XccySwapSpec::fxRate)
+        .def_readwrite("spread",             &XccySwapSpec::spread)
+        .def_readwrite("start_days",         &XccySwapSpec::startDays)
+        .def_readwrite("pay_days",           &XccySwapSpec::payDays)
+        .def_readwrite("accrued_factor_usd", &XccySwapSpec::accruedFactorUsd)
+        .def_readwrite("accrued_factor_mxn", &XccySwapSpec::accruedFactorMxn)
+        .def_readwrite("pay_usd",            &XccySwapSpec::payUsd)
+        .def_readwrite("initial_exchange",   &XccySwapSpec::initialExchange)
+        .def_readwrite("final_exchange",     &XccySwapSpec::finalExchange)
+        .def_readwrite("day_base",           &XccySwapSpec::dayBase)
+        .def_readwrite("csa_discount",       &XccySwapSpec::csaDiscount);
+
+    py::class_<NettingSetSpec>(m, "NettingSetSpec")
+        .def(py::init([](std::vector<RateSwapSpec> swaps, std::vector<XccySwapSpec> xccys) {
+                 return NettingSetSpec{std::move(swaps), std::move(xccys)};
+             }),
+             py::arg("swaps") = std::vector<RateSwapSpec>{}, py::arg("xccys") = std::vector<XccySwapSpec>{},
+             "Netting set of swaps and cross currency swaps (all valued together, in MXN).")
+        .def_readwrite("swaps",  &NettingSetSpec::swaps)
+        .def_readwrite("xccys",  &NettingSetSpec::xccys);
+
+    py::class_<ExposureMarket>(m, "ExposureMarket")
+        .def(py::init([](const qf::termstructure::YieldCurve& tiie, const qf::termstructure::YieldCurve& sofr,
+                         double spot, std::optional<qf::termstructure::YieldCurve> mxnUsd) {
+                 return ExposureMarket{tiie, sofr, std::move(mxnUsd), spot};
+             }),
+             py::arg("tiie"), py::arg("sofr"), py::arg("spot"), py::arg("mxn_usd") = py::none(),
+             "TIIE-F and SOFR curves (qfpy.YieldCurve), USDMXN spot (MXN per USD) and, if any spec uses "
+             "csa_discount, the MXN-USD curve.");
+
+    py::class_<ExposureModel>(m, "ExposureModel")
+        .def(py::init([](double aMxn, double sigmaMxn, double aUsd, double sigmaUsd, double fxVol,
+                         double rhoMxnUsd, double rhoMxnFx, double rhoUsdFx) {
+                 return ExposureModel{aMxn, sigmaMxn, aUsd, sigmaUsd, fxVol, rhoMxnUsd, rhoMxnFx, rhoUsdFx};
+             }),
+             py::arg("a_mxn"), py::arg("sigma_mxn"), py::arg("a_usd"), py::arg("sigma_usd"), py::arg("fx_vol"),
+             py::arg("rho_mxn_usd"), py::arg("rho_mxn_fx"), py::arg("rho_usd_fx"),
+             "Hull-White one factor per currency plus lognormal USDMXN, risk-neutral MXN measure.");
+
+    py::class_<SimConfig>(m, "SimConfig")
+        .def(py::init([](std::size_t nPaths, unsigned seed, double pfeQuantile, std::vector<int> reportDays) {
+                 return SimConfig{nPaths, seed, pfeQuantile, std::move(reportDays)};
+             }),
+             py::arg("n_paths"), py::arg("seed"), py::arg("pfe_quantile"), py::arg("report_days"),
+             "Paths, seed, PFE quantile in (0,1) and report days (from today, increasing, first = 0).");
+
+    // The path-by-path matrices of the C++ profile stay inside the object (compute_xva needs them for
+    // the standard errors) but are not exposed.
+    py::class_<ExposureProfile>(m, "ExposureProfile")
+        .def_readonly("days",           &ExposureProfile::days)
+        .def_readonly("times",          &ExposureProfile::times)
+        .def_readonly("expected_value", &ExposureProfile::expectedValue)
+        .def_readonly("epe",            &ExposureProfile::epe)
+        .def_readonly("ene",            &ExposureProfile::ene)
+        .def_readonly("pfe",            &ExposureProfile::pfe)
+        .def_readonly("epe_disc",       &ExposureProfile::epeDisc)
+        .def_readonly("ene_disc",       &ExposureProfile::eneDisc)
+        .def_readonly("value_at_zero",  &ExposureProfile::valueAtZero);
+
+    py::class_<ExposureEngine>(m, "ExposureEngine")
+        .def(py::init<ExposureMarket, ExposureModel, SimConfig>(),
+             py::arg("market"), py::arg("model"), py::arg("config"))
+        .def("simulate", &ExposureEngine::simulate, py::arg("sets"),
+             "Simulate every netting set on the same paths. Returns one ExposureProfile per set (MXN).")
+        .def("trade_values_at_zero", &ExposureEngine::tradeValuesAtZero, py::arg("netting_set"),
+             "Value in MXN at t = 0 of each trade (swaps first, then cross currency swaps).");
+
+    py::class_<XvaResult>(m, "XvaResult")
+        .def_readonly("cva",        &XvaResult::cva)
+        .def_readonly("cva_stderr", &XvaResult::cvaStdErr)
+        .def_readonly("dva",        &XvaResult::dva)
+        .def_readonly("dva_stderr", &XvaResult::dvaStdErr)
+        .def_readonly("fva",        &XvaResult::fva)
+        .def_readonly("total",      &XvaResult::total);
+
+    m.def("compute_xva", &computeXva,
+          py::arg("profile"), py::arg("counterparty"), py::arg("counterparty_lgd"),
+          py::arg("own"), py::arg("own_lgd"), py::arg("funding_spread"),
+          "CVA, DVA and FVA of a netting set from its discounted exposure, with the Monte Carlo standard "
+          "errors of CVA and DVA. total = cva - dva + fva. ValueError on invalid LGD, spread or profile.");
 
     // ── SwapType enum ─────────────────────────────────────────────
     // qfpy registers the same C++ enum; registering it twice makes `import qfxva` fail with
