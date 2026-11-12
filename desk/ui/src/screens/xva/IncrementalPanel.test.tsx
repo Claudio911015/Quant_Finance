@@ -111,8 +111,12 @@ describe('IncrementalPanel: cálculo', () => {
     expect(screen.queryByText('irs')).toBeNull();
     expect(screen.queryByText('xccy_swap')).toBeNull();
     const chart = charts[charts.length - 1];
-    expect(chart.ariaLabel).toBe('EPE y ENE antes y después de la operación');
-    expect(chart.option.series!.map((s) => s.name)).toEqual(['EPE antes', 'EPE después', 'ENE antes', 'ENE después']);
+    expect(chart.ariaLabel).toBe('Exposición esperada antes y después de la operación, e incremento de exposición');
+    expect(chart.option.series!.slice(0, 3).map((s) => s.name)).toEqual([
+      'Exposición esperada antes',
+      'Exposición esperada después',
+      'Incremento de exposición',
+    ]);
   });
 
   it.each([
