@@ -1,5 +1,451 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Introducción, arquitectura y convenciones}\label{cap:introduccion}
+\begin{sloppypar}
 
-Arquitectura de QF Desk (C++ por \texttt{qfpy}, backend Flask/SQLite, interfaz) y convenciones generales: monedas, bases de días, signos, fechas y unidades.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap01-proposito}
+
+QF Desk es una estación de trabajo local con la que la tesorería de una empresa mexicana valúa de forma
+independiente del banco sus derivados (swaps de tasa TIIE de Fondeo y SOFR, forwards y opciones USDMXN,
+caps, floors, swaptions, bonos y cross currency swaps), los guarda en un portafolio con su historia y mide
+su riesgo. Toda la matemática financiera vive en la biblioteca C++ \texttt{Quant\_Finance} (espacio de
+nombres \texttt{qf}), que se expone a Python con los bindings \texttt{qfpy}; el backend Flask de
+\texttt{desk/api} valida, orquesta fechas y fijaciones y persiste en SQLite; la interfaz React de
+\texttt{desk/ui} presenta los resultados. Este capítulo describe esas piezas y, sobre todo, las
+\emph{convenciones} que comparten todos los productos: monedas, fechas, bases de días, signos y unidades.
+
+Este documento describe lo que el código \emph{hace}, no la teoría del libro. Cada fórmula remite con
+\texttt{\textbackslash codigo} a la función que la implementa (ruta relativa a la raíz del repositorio y
+símbolo, sin números de línea); donde el código se aparta de la referencia hay un recuadro «Diferencia con la
+referencia», y cada capítulo cierra con los límites y supuestos que el código impone. Las discrepancias
+entre el código y lo que declara la pantalla de Metodología de la aplicación no se corrigen aquí: se anotan
+en \texttt{docs/tex/HALLAZGOS.md}. El mapa del documento es el siguiente.
+
+\begin{itemize}
+  \item Capítulo~\ref{cap:curvas}: construcción de las curvas TIIE-F, SOFR y de descuento MXN bajo colateral USD.
+  \item Capítulo~\ref{cap:swaps-ois}: swaps de tasa OIS (TIIE-F y SOFR), tasa par y valuación a una fecha.
+  \item Capítulo~\ref{cap:fx}: forward FX, opción FX (Garman--Kohlhagen) y opción sobre acción.
+  \item Capítulo~\ref{cap:hull-white}: Hull--White, cap/floor y swaption.
+  \item Capítulo~\ref{cap:bonos}: bonos de cupón fijo.
+  \item Capítulo~\ref{cap:xccy}: cross currency swap USDMXN.
+  \item Capítulo~\ref{cap:ciclo-vida}: ciclo de vida de una operación, liquidaciones y P\&L entre dos fechas.
+  \item Capítulo~\ref{cap:riesgo}: DV01, escenarios, VaR paramétrico e histórico, P\&L explicado y límites.
+  \item Capítulo~\ref{cap:coberturas}: contabilidad de coberturas bajo IFRS~9.
+  \item Capítulo~\ref{cap:operaciones}: flujos, confirmaciones y conciliación con el banco.
+  \item Capítulo~\ref{cap:validacion}: validación independiente contra QuantLib.
+  \item Capítulo~\ref{cap:datos}: fuentes de datos y su procedencia.
+  \item Capítulos~\ref{cap:xva} y~\ref{cap:exoticos-fx}: XVA y exóticos de FX (marcadores; los escribe cada corte al cerrarse).
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap01-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. En este capítulo se añaden los siguientes (todos
+con la unidad indicada).
+
+\begin{itemize}
+  \item $t_0$: fecha de valuación; es el \texttt{as\_of} del snapshot de mercado con el que se valúa (fecha ISO).
+  \item $\Delta(a,b)$: número de días naturales entre las fechas $a\le b$, es decir \texttt{(b - a).days} (días).
+  \item $T(d)$: tiempo en años de la fecha $d$ medido desde $t_0$ (años).
+  \item $p$: longitud en días del periodo de pago de una curva (\texttt{period\_days}: 28 para TIIE-F y para el cross currency swap, 365 para SOFR).
+  \item $D$ y $n$: plazo del contrato en días y número de periodos de pago; $d_k$ es el día del $k$-ésimo pago contado desde el inicio.
+  \item $f$: frecuencia de pago, periodos por año (año$^{-1}$).
+  \item $s\in\{+1,-1\}$: signo de la posición vista desde la empresa que la tiene.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap01-modelo}
+
+\subsection{Fechas y tiempo}\label{sec:cap01-fechas}
+
+El desk trabaja con \emph{días naturales}. Toda valuación recibe una fecha $t_0$ (el \texttt{as\_of} del
+snapshot, ver \codigo{desk/api/market.py}{MarketContext}) y mide el tiempo de cualquier fecha $d$ como
+\begin{equation}\label{eq:cap01-tiempo}
+  T(d) = \frac{\Delta(t_0,d)}{365},
+\end{equation}
+la convención «$t=\text{días}/365$» de las curvas, de los forwards y opciones FX y de los calendarios de pago.
+En C++ la constante vive, por módulo, como \texttt{kDaysPerYear = 365.0}
+(\codigo{src/instruments/ois_swap.cpp}{kDaysPerYear}, \codigo{src/instruments/fx_forward.cpp}{kDaysPerYear});
+en Python como \codigo{desk/api/valuation.py}{_DAYS_PER_YEAR}.
+
+\paragraph{Calendario de pagos.} Un contrato de plazo $D$ días con periodos de $p$ días paga en los días
+\begin{equation}\label{eq:cap01-pagos}
+  d_k = k\,p \quad (k=1,\dots,K-1), \qquad d_K = D, \qquad K=\lceil D/p\rceil ,
+\end{equation}
+de modo que el último periodo es más corto cuando $D$ no es múltiplo de $p$. Es exactamente
+\codigo{include/qf/termstructure/ois_bootstrap.hpp}{oisPaymentDays}, expuesta en Python como
+\texttt{ois\_payment\_days}. Los días de pago son los pactados: \emph{no se ajustan} por días inhábiles.
+El tiempo de pago es $T_k=d_k/365$ (ecuación~\eqref{eq:cap01-tiempo} con $t_0$ como inicio) y la fracción de
+devengo de cada periodo es la de la sección~\ref{sec:cap01-bases}.
+
+\paragraph{Fechas de una operación.} Una operación guarda tres fechas, $\text{pacto}\le\text{inicio}<\text{vencimiento}$
+(\codigo{desk/api/db.py}{SCHEMA}, tabla \texttt{trades}). Si la petición no las trae,
+\texttt{trade\_date} es el \texttt{as\_of} del snapshot indicado (o de \texttt{MX-DEMO}) y
+\texttt{start\_date} es \texttt{trade\_date}; el vencimiento es
+$\text{inicio}+D$ días, con
+\begin{equation}\label{eq:cap01-plazo}
+  D=\begin{cases}
+    n\,p & \text{swap de tasa y cap/floor},\\
+    28\,n & \text{cross currency swap},\\
+    \text{días} & \text{forward y opción FX},\\
+    \operatorname{round}(365\,n/f) & \text{bono},\\
+    \max\bigl(1,\operatorname{round}(365\,y)\bigr) & \text{swaption } (y=\text{años a la expiración}) \text{ y opción sobre acción},
+  \end{cases}
+\end{equation}
+donde $\operatorname{round}$ es el \texttt{round} de Python~3 (las mitades van al entero par). Es la función
+\codigo{desk/api/portfolio.py}{default_maturity} (con \codigo{desk/api/portfolio.py}{_tenor_days}). Si la
+petición trae \texttt{maturity\_date}, manda la fecha y se reescribe el plazo
+(\codigo{desk/api/portfolio.py}{fit_to_maturity}): $n=\max\bigl(1,\operatorname{round}(\Delta(\text{inicio},\text{vencimiento})/p)\bigr)$
+para swaps de tasa y cap/floor (análogo con 28 días para el cross currency swap),
+$n=\max(1,\operatorname{round}(f\,\Delta/365))$ para el bono y $y=\Delta/365$ para swaption y opción sobre
+acción; el vencimiento guardado es entonces el que resulta de la ecuación~\eqref{eq:cap01-plazo} con los
+términos reescritos, que puede diferir de la fecha pedida por el redondeo.
+
+\paragraph{Descuento.} Las curvas del desk guardan tasas cero con capitalización continua, de modo que
+\begin{equation}\label{eq:cap01-descuento}
+  \DF{c}{T} = e^{-\zr{c}{T}\,T}
+\end{equation}
+(\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::discountFactor}); el capítulo~\ref{cap:curvas} detalla
+cómo se construyen y se interpolan.
+
+\subsection{Bases de días y fracción de devengo}\label{sec:cap01-bases}
+
+La biblioteca define cuatro convenciones en \codigo{include/qf/math/daycount.hpp}{DayCountConvention}. La
+fracción de año de un periodo de $\Delta$ días es
+\begin{equation}\label{eq:cap01-bases}
+  \yf{a}{b}=\begin{cases}
+    \Delta(a,b)/360 & \text{ACT/360},\\
+    \Delta(a,b)/365 & \text{ACT/365},\\
+    \Delta(a,b)/N_y & \text{ACT/ACT ISDA},
+  \end{cases}
+\end{equation}
+con $N_y$ los días del año de referencia, que pasa quien llama (por omisión 365),
+implementada en \codigo{src/math/daycount.cpp}{yearFraction}. La base 30/360 \emph{no} se puede evaluar con un
+conteo de días: \texttt{yearFraction} lanza \texttt{std::logic\_error} y los constructores de
+\codigo{include/qf/instruments/ois_swap.hpp}{OisSwap} y de
+\codigo{include/qf/instruments/xccy_swap.hpp}{XccySwap} rechazan 30/360 con \texttt{std::invalid\_argument}.
+Los nombres se leen con \codigo{src/math/daycount.cpp}{dayCountFromString}.
+
+Para instrumentos que solo conocen la frecuencia de pago $f$ y no fechas (bono, cap/floor, swaption) la
+biblioteca aproxima los días reales del periodo con $365/f$ y usa
+\codigo{src/math/daycount.cpp}{periodFraction}:
+\begin{equation}\label{eq:cap01-periodo-uniforme}
+  \tau(f)=\begin{cases}
+    \dfrac{365}{360\,f} & \text{ACT/360},\\[1ex]
+    \dfrac{1}{f} & \text{ACT/365, ACT/ACT ISDA y 30/360}.
+  \end{cases}
+\end{equation}
+Con $f=365/p$, que es lo que pasa el backend a cap/floor y swaption junto con ACT/360
+(\codigo{desk/api/pricing/rates.py}{_cap_floor_instrument}, \codigo{desk/api/pricing/rates.py}{_swaption_instrument}),
+resulta $\tau=p/360$, la misma fracción de devengo ACT/360 de un periodo de $p$ días. El bono, en cambio, se
+construye sin base explícita y hereda el valor por omisión ACT/365 del binding
+(\codigo{desk/api/pricing/rates.py}{_bond_instrument}), de modo que su cupón es $\text{valor nominal}\cdot c/f$ y
+sus pagos caen en $i/f$ años.
+
+\Cref{tab:cap01-productos} resume qué usa cada producto.
+
+\begin{table}[ht]
+  \centering\small
+  \caption{Moneda, medida del tiempo y devengo de cada producto del desk.}\label{tab:cap01-productos}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}p{3.1cm}>{\raggedright\arraybackslash}p{4.7cm}@{}}
+    \toprule
+    Producto & Moneda del nocional & Tiempo & Devengo \\
+    \midrule
+    \texttt{irs} TIIE-F & MXN & $T=d/365$ & ACT/360, cupón de 28 días, flotante compuesta diaria \\
+    \texttt{irs} SOFR & USD & $T=d/365$ & ACT/360, cupón de 365 días \\
+    \texttt{cap\_floor}, \texttt{swaption} & la de la curva & años, pagos cada $1/f$ & ACT/360 por \texttt{periodFraction} con $f=365/p$ \\
+    \texttt{bond} & la de la curva (TIIE-F por omisión) & años, pagos en $i/f$ & cupón $c/f$ (ACT/365 por omisión del binding; capítulo~\ref{cap:bonos}) \\
+    \texttt{fx\_forward}, \texttt{fx\_option} & USD (el PV sale en MXN) & $T=\text{días}/365$ & sin devengo \\
+    \texttt{equity\_option} & PV en MXN & años dados en la operación & sin devengo; Black--Scholes con los insumos de la operación \\
+    \texttt{xccy\_swap} & USD y MXN & $T=d/365$ & ACT/360 en ambas patas, cupones de 28 días \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{diferencia}
+  La referencia habitual \citep{hull2018} toma las fracciones de devengo de las fechas reales de cada periodo
+  con la base pactada; aquí hay dos aproximaciones declaradas. (i)~El tiempo de las curvas es siempre
+  $\text{días}/365$ aunque el devengo sea ACT/360, de modo que un cupón de 28 días vence en
+  $T=28/365\approx 0.0767$ años y devenga $\tau=28/360\approx 0.0778$. (ii)~Los instrumentos que solo
+  conocen la frecuencia (bono, cap/floor, swaption) usan los periodos uniformes de la
+  ecuación~\eqref{eq:cap01-periodo-uniforme} y no un calendario de fechas. Las fechas de pago no se ajustan
+  por días inhábiles.
+\end{diferencia}
+
+\subsection{Moneda, unidades y descuento}\label{sec:cap01-unidades}
+
+La moneda de reporte del portafolio es el peso. Un valor en dólares se convierte con el spot del snapshot,
+\begin{equation}\label{eq:cap01-reporte}
+  \PV_{\MXN}=\PV_{\USD}\cdot\Spot ,
+\end{equation}
+donde $\Spot$ es el USDMXN en pesos por dólar (\texttt{pv * mkt.spot} en
+\codigo{desk/api/valuation.py}{value_trade} cuando la curva del producto es de USD; el forward y la opción FX y
+la opción sobre acción ya salen en pesos). El total del portafolio es la suma de los PV en pesos de las
+operaciones (\codigo{desk/api/portfolio.py}{valuation}). Las tasas y volatilidades van siempre en
+\emph{decimal} en la API y en la base ($0.07=7\,\%$; cotas de \codigo{desk/api/validation.py}{MAX_RATE} y
+\codigo{desk/api/validation.py}{MIN_RATE}); $1~\pb=10^{-4}$; la interfaz formatea a porcentaje con cuatro
+decimales y los montos con separador de miles y moneda (\codigo{desk/ui/src/lib/format.ts}{fmtMoney}). Los
+nocionales están en la moneda de su pata: MXN para TIIE-F, USD para SOFR y para los productos FX.
+
+\subsection{Signos}\label{sec:cap01-signos}
+
+Todo valor presente se expresa desde la empresa que tiene la posición: $\PV>0$ es un activo y $\PV<0$ un
+pasivo. El sentido de la posición lo fija un campo \texttt{side} por producto (\cref{tab:cap01-signos}),
+que entra al C++ como un signo $s$ multiplicando el valor; así, un swap de tasa vale
+\begin{equation}\label{eq:cap01-signo-swap}
+  \PV=s\,\bigl(\PV_{\text{flotante}}-\PV_{\text{fija}}\bigr),\qquad s=+1\text{ (pagador de la fija)},\; s=-1\text{ (receptor)},
+\end{equation}
+(\codigo{src/instruments/ois_swap.cpp}{OisSwap::cashFlows}); la opción FX multiplica precio y griegas por
+$s\,N_{\USD}$ con $s=+1$ si se compra (\codigo{src/instruments/fx_option.cpp}{FxOption::greeks}), el forward
+FX comprado vale $N_{\USD}(\Spot P_{\USD}(T)-\K P_{\MXN}(T))$, con $P_{\USD}$ la curva SOFR y $P_{\MXN}$ la curva MXN que fija el colateral (\texttt{TIIE-F} por omisión), y con signo contrario si se vende
+(\codigo{src/instruments/fx_forward.cpp}{FxForward::npv}) y el cross currency swap que \emph{paga USD} recibe
+MXN (\codigo{src/instruments/xccy_swap.cpp}{XccySwap::cashFlows}). Cap/floor, swaption, bono y opción sobre
+acción no tienen lado: siempre son posiciones largas (nocional o cantidad estrictamente positivos).
+
+\begin{table}[ht]
+  \centering\small
+  \caption{Campo \texttt{side} (y tipo) de cada producto y su efecto en el signo del PV.}\label{tab:cap01-signos}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{4.0cm}>{\raggedright\arraybackslash}p{7.3cm}@{}}
+    \toprule
+    Producto & Campo & Significado de $s=+1$ \\
+    \midrule
+    \texttt{irs} & \texttt{side}: \texttt{payer}/\texttt{receiver} & paga la tasa fija y recibe la flotante \\
+    \texttt{fx\_forward} & \texttt{side}: \texttt{buy}/\texttt{sell} & compra USD al precio pactado $\K$ \\
+    \texttt{fx\_option} & \texttt{side}: \texttt{buy}/\texttt{sell}; \texttt{option\_type}: \texttt{call}/\texttt{put} & posición larga; \texttt{call} es el derecho a comprar USD \\
+    \texttt{xccy\_swap} & \texttt{side}: \texttt{pay\_usd}/\texttt{pay\_mxn} & \texttt{pay\_usd}: paga USD y recibe MXN \\
+    \texttt{cap\_floor}, \texttt{swaption}, \texttt{bond}, \texttt{equity\_option} & \texttt{cap\_type}, \texttt{swaption\_type}, ninguno, \texttt{option\_type} & sin lado: siempre largo (la swaption \texttt{payer}/\texttt{receiver} describe el swap subyacente, no la posición) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Para el riesgo, el DV01 se define con el signo
+\begin{equation}\label{eq:cap01-dv01}
+  \DVO = \PV(\text{base})-\PV(\text{curva}+1~\pb),
+\end{equation}
+donde el choque es un desplazamiento paralelo de 1~\pb\ de las tasas cero
+(\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::parallelBump}); es positivo si el valor sube cuando
+bajan las tasas (el capítulo~\ref{cap:riesgo} da el DV01 por plazo). Los importes liquidados (cupones,
+terminaciones, ejercicios) van en pesos y son positivos si \emph{cobra} el tenedor
+(capítulo~\ref{cap:ciclo-vida}).
+
+\subsection{Calendarios de días inhábiles}\label{sec:cap01-calendarios}
+
+El módulo \codigo{desk/api/calendars.py}{is_business_day} define dos calendarios con reglas fijas para
+2020--2040: \texttt{MX} (inhábiles bancarios) y \texttt{US} (calendario SIFMA, el de la publicación de SOFR).
+Un día es hábil si es de lunes a viernes y no es feriado del calendario. Los calendarios \emph{no ajustan fechas
+de pago}: sirven para decidir si una fijación sin publicar es una fijación faltante o un día en que el índice
+no se publica (\codigo{desk/api/valuation.py}{accrued_factor}), para el FIX de un flujo que cae en día inhábil
+(\codigo{desk/api/settlement.py}{_fix}) y para los avisos de fecha inhábil de los flujos pronosticados de las coberturas
+(\codigo{desk/api/hedges.py}{_designation_warnings}, capítulo~\ref{cap:coberturas}). Cada índice usa un calendario
+(\codigo{desk/api/calendars.py}{INDEX_CALENDAR}: TIIE-F y USDMXN con \texttt{MX}, SOFR con \texttt{US}) y cada
+moneda otro (\codigo{desk/api/calendars.py}{CURRENCY_CALENDAR}). Los feriados son:
+\begin{itemize}
+  \item \texttt{MX} (\codigo{desk/api/calendars.py}{_mexico}): 1 de enero; primer lunes de febrero; tercer lunes de marzo; Jueves y Viernes Santo; 1 de mayo; 16 de septiembre; 2 de noviembre; tercer lunes de noviembre; 12 y 25 de diciembre; y el 1 de octubre en 2024, 2030 y 2036 (transmisión del Poder Ejecutivo). Un feriado de fecha fija que cae en sábado o domingo \emph{no} se traslada.
+  \item \texttt{US} (\codigo{desk/api/calendars.py}{_united_states}): Año Nuevo, Martin Luther King (tercer lunes de enero), Presidents (tercer lunes de febrero), Viernes Santo, Memorial (último lunes de mayo), 4 de julio, Labor (primer lunes de septiembre), Columbus (segundo lunes de octubre), Veterans (11 de noviembre), Thanksgiving (cuarto jueves de noviembre), Navidad, y Juneteenth (19 de junio) desde 2022. Un feriado de fecha fija en domingo pasa al lunes siguiente y en sábado al viernes anterior, salvo el 1 de enero en sábado, que no pasa al año anterior (\codigo{desk/api/calendars.py}{_observed}).
+\end{itemize}
+Jueves y Viernes Santo salen del domingo de Pascua con el algoritmo gregoriano anónimo
+\citep{meeus1998}, \codigo{desk/api/calendars.py}{_easter}: con $y$ el año, $a=y \bmod 19$, $b=\lfloor y/100\rfloor$,
+$c=y\bmod 100$, $d=\lfloor b/4\rfloor$, $e=b\bmod 4$, $g_1=\lfloor (b+8)/25\rfloor$,
+$g_2=\lfloor (b-g_1+1)/3\rfloor$, $h=(19a+b-d-g_2+15)\bmod 30$, $i=\lfloor c/4\rfloor$, $k=c\bmod 4$,
+$l=(32+2e+2i-h-k)\bmod 7$, $m=\lfloor (a+11h+22l)/451\rfloor$ y $q=h+l-7m+114$, la Pascua es el día
+$(q \bmod 31)+1$ del mes $\lfloor q/31\rfloor$. Fuera de 2020--2040 \texttt{is\_holiday} responde falso y
+\texttt{holidays} lanza \texttt{ValueError}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap01-implementacion}
+
+\subsection{Capas}\label{sec:cap01-capas}
+
+\begin{table}[ht]
+  \centering\small
+  \caption{Capas de QF Desk.}\label{tab:cap01-capas}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.4cm}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{8.9cm}@{}}
+    \toprule
+    Capa & Tecnología & Responsabilidad \\
+    \midrule
+    Motor & C++20, espacio de nombres \texttt{qf} & Toda la matemática financiera: curvas, instrumentos, modelos, riesgo. Archivos \texttt{include/qf/**} y \texttt{src/**}. \\
+    Bindings & pybind11 (\texttt{qfpy}) & Expone el motor a Python; el módulo compilado vive en \texttt{build/src/}. \\
+    Backend & Flask, SQLite, Python 3.8 & Valida, orquesta fechas y fijaciones, valúa operaciones, persiste. \texttt{desk/api/**}. \\
+    Interfaz & React 18, TypeScript, Vite & Pantallas de mercado, pricers, portafolio, riesgo, coberturas, operaciones, validación y metodología. \texttt{desk/ui/**}. \\
+    Base & SQLite & Archivo \codigo{desk/api/db.py}{DEFAULT_DB_PATH}: snapshots de mercado, operaciones y eventos, fijaciones y las tablas de cada corte. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Motor y bindings.} Las interfaces del motor siguen los patrones Strategy y Observer
+\citep{gamma1995}: los modelos de tasa y de renta variable y los motores de valuación son intercambiables, y
+\codigo{include/qf/core/market_environment.hpp}{MarketEnvironment} es el contenedor de datos de mercado
+(curvas con nombre, spots, volatilidades y superficies) que notifica a sus suscriptores
+\codigo{include/qf/core/imarket_observer.hpp}{IMarketObserver} cuando cambia. Un
+\codigo{include/qf/instruments/instrument.hpp}{Instrument} se valúa contra un entorno con
+\texttt{pv(env)}; las curvas se consultan por nombre (\texttt{"TIIE-F"}, \texttt{"SOFR"}, y la curva de
+colateral \texttt{"MXN-USD"} cuando el snapshot la trae). Los motores de renta variable que reciben un
+\emph{ticker} leen spot, volatilidad y tasa del entorno con
+\codigo{include/qf/pricingengines/detail/env_resolver.hpp}{resolveEquityParams}; el desk no usa ese camino,
+porque su opción sobre acción llama a Black--Scholes con los insumos guardados en la operación
+(\codigo{desk/api/pricing/fx.py}{_equity_bs}). El módulo Python \texttt{qfpy} se importa a través de
+\codigo{desk/api/qf.py}{_BUILD_SRC}, que añade \texttt{build/src} a la ruta de búsqueda y lanza un error en
+español si no está compilado; se compila para el Python 3.8 de Anaconda y el backend usa ese intérprete.
+
+\paragraph{Backend.} \codigo{desk/api/app.py}{create_app} arma la aplicación Flask: abre la base, crea el
+esquema (\codigo{desk/api/db.py}{init_schema}, que antes migra una base del primer corte), siembra el mercado
+y el portafolio de demostración solo en el primer arranque (\codigo{desk/api/app.py}{_seed_if_empty}, con
+\codigo{desk/api/seed_market.py}{seed_market} y \codigo{desk/api/seed_trades.py}{seed_trades}; las semillas de
+crédito y XVA se describen en el capítulo~\ref{cap:xva}), registra los \emph{blueprints} de
+\texttt{desk/api/routes} y, si existe \texttt{desk/ui/dist}, sirve la interfaz construida desde el mismo
+puerto (5070). Todo error de entrada es un \codigo{desk/api/errors.py}{ApiError} que se serializa como
+\texttt{\{"error", "field"\}} (más \texttt{"code"} si lo trae) con estado 400, 404 o 409; ningún endpoint
+responde 500 ante una entrada inválida. La validación de frontera está en
+\codigo{desk/api/validation.py}{body_object}, \codigo{desk/api/validation.py}{number} y similares, con cotas
+(\codigo{desk/api/validation.py}{MAX_AMOUNT}, \codigo{desk/api/pricing/base.py}{MAX_PERIODS}) para que ningún
+valor absurdo desborde a infinito.
+
+\paragraph{Productos.} Cada producto es un \codigo{desk/api/pricing/base.py}{Product} con cinco funciones
+(\texttt{validate}, \texttt{price}, \texttt{pv\_mxn}, \texttt{describe}) registrado en
+\codigo{desk/api/pricing/__init__.py}{PRODUCTS}: \texttt{irs}, \texttt{cap\_floor}, \texttt{swaption},
+\texttt{bond} (\codigo{desk/api/pricing/rates.py}{PRODUCTS}), \texttt{fx\_forward}, \texttt{fx\_option},
+\texttt{equity\_option} (\codigo{desk/api/pricing/fx.py}{PRODUCTS}) y \texttt{xccy\_swap}
+(\codigo{desk/api/pricing/xccy.py}{PRODUCTS}). El pricer de una petición \texttt{POST /api/price/<producto>} es
+\codigo{desk/api/routes/price.py}{price}: valida los parámetros, carga el snapshot
+(\codigo{desk/api/market.py}{load_context}) y llama a \texttt{Product.price}. La valuación del portafolio es
+\codigo{desk/api/portfolio.py}{valuation}: recorre las operaciones, valúa cada una a la fecha del snapshot con
+\codigo{desk/api/valuation.py}{value_trade} (estado derivado de los eventos con
+\codigo{desk/api/lifecycle.py}{state}) y, si una falla, deja el error en su fila sin detener las demás.
+
+\paragraph{Mercado.} Un snapshot es una fila de \texttt{snapshots} con un JSON (\texttt{data}) de
+cotizaciones, spot, superficie de volatilidad, parámetros de Hull--White y factores de riesgo.
+\codigo{desk/api/market.py}{MarketContext} lo vuelve objetos de \texttt{qfpy} (curvas por
+\texttt{bootstrap\_ois}, superficie, entorno), conserva los pilares y sabe producir copias con curvas
+desplazadas o recalibradas (\codigo{desk/api/market.py}{MarketContext.shifted}). La fecha de valuación es
+\texttt{as\_of}.
+
+\subsection{Persistencia}\label{sec:cap01-persistencia}
+
+El esquema vive como texto en \codigo{desk/api/db.py}{SCHEMA} y se aplica con \texttt{CREATE TABLE IF NOT
+EXISTS}; la base se abre con \codigo{desk/api/db.py}{connect} (\texttt{row\_factory = sqlite3.Row}) y las marcas
+de tiempo son UTC ISO~8601 sin microsegundos (\codigo{desk/api/db.py}{now_iso}). Principio: los hechos son
+eventos inmutables, así que las tablas de historial llevan disparadores de SQLite que abortan \texttt{UPDATE} y
+\texttt{DELETE} («es solo de inserción»). \Cref{tab:cap01-tablas} las agrupa por tema; las dos tablas
+de crédito se describen en el capítulo~\ref{cap:xva}.
+
+\begin{table}[ht]
+  \centering\small
+  \caption{Tablas de la base y capítulo que las describe.}\label{tab:cap01-tablas}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.7cm}>{\raggedright\arraybackslash}p{6.8cm}>{\raggedright\arraybackslash}p{1.9cm}>{\raggedright\arraybackslash}p{1.3cm}@{}}
+    \toprule
+    Tabla & Contenido & Solo inserción & Cap. \\
+    \midrule
+    \texttt{snapshots} & fotografía de mercado (JSON en \texttt{data}); editable salvo \texttt{MKT-LIVE} & no & \ref{cap:datos} \\
+    \texttt{counterparties} & contrapartes por nombre & no & \ref{cap:ciclo-vida} \\
+    \texttt{trades} & identidad y términos de la operación (JSON normalizado en \texttt{terms}); el código nunca la actualiza & no & \ref{cap:ciclo-vida} \\
+    \texttt{trade\_events} & hechos de la operación (ejecución, cambios, terminación) & sí & \ref{cap:ciclo-vida} \\
+    \texttt{fixings} & fijaciones diarias de TIIE-F, SOFR y USDMXN; la API nunca sobrescribe & no & \ref{cap:datos} \\
+    \texttt{counterparty\_events} & historial de la moneda de colateral & sí & \ref{cap:curvas} \\
+    \texttt{hedge\_relationships}, \texttt{hedge\_events}, \texttt{hedge\_periods} & relaciones de cobertura, sus eventos y sus periodos & sí & \ref{cap:coberturas} \\
+    \texttt{settings}, \texttt{trade\_refs} & ajustes y referencia bancaria de cada operación & no & \ref{cap:operaciones} \\
+    \texttt{reconciliations}, \texttt{reconciliation\_rows} & conciliaciones guardadas & sí & \ref{cap:operaciones} \\
+    \texttt{factor\_history}, \texttt{limits}, \texttt{limit\_events}, \texttt{limit\_breaches}, \texttt{scenario\_sets}, \texttt{scenario\_set\_events} & historia de factores, límites, excesos y conjuntos de escenarios & sí & \ref{cap:riesgo} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\texttt{DELETE /api/trades/<id>} responde siempre 409 («una operación no se borra: termínala»,
+\codigo{desk/api/routes/trades.py}{delete_trade}) y la API rechaza editar \texttt{MKT-LIVE} con 409.
+
+\subsection{Interfaz}\label{sec:cap01-interfaz}
+
+La interfaz es una aplicación de una sola página: las pantallas se cargan por ruta con \texttt{React.lazy}
+(\codigo{desk/ui/src/App.tsx}{MarketScreen}, \codigo{desk/ui/src/App.tsx}{PortfolioScreen},
+\codigo{desk/ui/src/App.tsx}{RiskScreen}, \codigo{desk/ui/src/App.tsx}{MethodologyScreen}) y no hace cálculo
+financiero: el PV y el riesgo vienen siempre del backend (solo las gráficas de payoff al vencimiento se
+calculan en el navegador). La pantalla de Metodología
+(\codigo{desk/ui/src/screens/MethodologyScreen.tsx}{MethodologyScreen}) es la declaración pública de modelos,
+convenciones y límites; este documento la contrasta con el código.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico}\label{sec:cap01-ejemplo}
+
+Los valores siguientes se obtuvieron ejecutando las funciones citadas (no hay script en \texttt{verificacion/}
+para este capítulo, que está fuera de los capítulos~2--12); el fragmento final los reproduce.
+
+\paragraph{Calendario de pagos y devengo.} Un swap TIIE-F a $D=100$ días con $p=28$ paga en los días
+$28,\,56,\,84,\,100$ (ecuación~\eqref{eq:cap01-pagos}, $K=\lceil 100/28\rceil=4$). El primer cupón devenga
+$\tau=28/360=0.07778$ y vence en $T=28/365=0.07671$ años; el último, de 16 días, devenga $16/360=0.04444$.
+Un cupón SOFR de $p=365$ días devenga $365/360=1.01389$ y vence en $T=1$.
+
+\paragraph{Fechas.} Con \texttt{as\_of} $=2026\text{-}11\text{-}10$, un swap TIIE-F de 26 periodos vence 728
+días después, el 2028-11-07 (ecuación~\eqref{eq:cap01-plazo}). Si la petición trae
+\texttt{maturity\_date} $=2027\text{-}11\text{-}10$ ($\Delta=365$ días), el número de periodos es
+$\operatorname{round}(365/28)=\operatorname{round}(13.04)=13$ y el vencimiento guardado es 364 días después
+del inicio, el 2027-11-09. Un bono semestral de 10 periodos vence $\operatorname{round}(365\cdot10/2)=1825$ días
+después, el 2031-11-09 (no el 2031-11-10: el año bisiesto de 2028 se pierde porque se cuenta a 365 días por año).
+
+\paragraph{Calendarios.} En 2026 la Pascua es el 5 de abril, así que el Jueves y el Viernes Santo son el 2 y el
+3 de abril; el 2 de noviembre (lunes) es feriado de \texttt{MX}; el tercer lunes de noviembre es el 16; el 10 de
+noviembre es hábil en ambos calendarios; en \texttt{US}, el 11 de noviembre (Veterans Day) y el 26 de
+noviembre (Thanksgiving) no lo son.
+
+\begin{lstlisting}
+from datetime import date
+from desk.api.qf import qfpy
+from desk.api import calendars, portfolio
+print(list(qfpy.ois_payment_days(100, 28)))              # [28, 56, 84, 100]
+s = date(2026, 11, 10)
+print(portfolio.default_maturity("irs", {"curve": "TIIE-F", "periods": 26}, s))  # 2028-11-07
+print(calendars._easter(2026), calendars.is_business_day("MX", date(2026, 11, 2)))
+\end{lstlisting}
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap01-validacion}
+
+Las convenciones de este capítulo las cubren las pruebas siguientes. Bases de días y fracciones de periodo:
+\codigo{tests/test_daycount.cpp}{periodFraction} (ACT/365 es $1/f$, ACT/360 es mayor, ACT/ACT y 30/360
+coinciden con ACT/365 y \texttt{yearFraction} con 30/360 lanza) y \codigo{tests/test_daycount.cpp}{yearFraction}.
+Contenedor de mercado: \codigo{tests/test_market_environment.cpp}{addCurve} (ida y vuelta de curvas, spots y
+volatilidades, y error si falta uno). Calendarios:
+\codigo{desk/api/tests/test_calendars.py}{test_mexican_bank_holidays_are_not_business_days},
+\codigo{desk/api/tests/test_calendars.py}{test_us_sifma_holidays_are_not_business_days},
+\codigo{desk/api/tests/test_calendars.py}{test_holy_week_follows_easter} y
+\codigo{desk/api/tests/test_calendars.py}{test_easter_algorithm_on_known_years}. Arquitectura y fronteras:
+\codigo{desk/api/tests/test_skeleton.py}{test_qfpy_importable_via_desk},
+\codigo{desk/api/tests/test_portfolio.py}{test_create_list_and_delete_is_refused}, y la inmutabilidad del
+historial en
+\codigo{desk/api/tests/test_schema_migration.py}{test_trade_events_are_insert_only}.
+
+\paragraph{Comprobación adicional contra los datos publicados.} Al documentar el calendario \texttt{US} se
+contrastó con la publicación real de SOFR (API de la Fed de Nueva York, \citealt{nyfed2026}), año por año de
+2020 a 2026: 1\,712 observaciones, del 2020-01-02 al 2026-11-09. Todos los días que el calendario marca como
+hábiles tienen SOFR, y la única fecha con SOFR publicada que el calendario marca inhábil es el 2023-11-10
+(viernes), día en que se observó Veterans Day (sábado 11); las Reservas Federales abren los viernes
+anteriores a un feriado en sábado \citep{frb2026}. Es un hallazgo de bajo impacto, anotado en
+\texttt{HALLAZGOS.md}. Las recomendaciones de SIFMA para 2026 \citep{sifma2026} coinciden con los feriados del
+código, con la salvedad de que SIFMA recomienda para el Viernes Santo 2026 un cierre anticipado (no completo),
+mientras que el código y la publicación de SOFR lo tratan como día sin SOFR. Los feriados \texttt{MX} de 2026
+coinciden con la lista de Banxico \citep{banxico2026c}. No se comprobaron los feriados \texttt{MX} de los
+demás años ni los \texttt{US} posteriores a 2026.
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap01-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \textbf{Datos.} El snapshot \texttt{MX-DEMO} es sintético; \texttt{MKT-LIVE} es mixto (curva SOFR aproximada, spot y volatilidades de SOFR y USDMXN de fuentes reales, el resto sintético). El detalle está en el capítulo~\ref{cap:datos}.
+    \item \textbf{Fechas.} Días naturales, $T=\text{días}/365$, SOFR en periodos de 365 días y fechas de pago sin ajuste por días inhábiles. Los calendarios cubren 2020--2040 y solo rigen fijaciones, FIX y coberturas.
+    \item \textbf{Bases.} Sin 30/360 con conteo de días; ACT/ACT ISDA solo con los días del año que pasa quien llama. Cap/floor, swaption y bono usan periodos uniformes (no fechas reales).
+    \item \textbf{Bono.} Periodos uniformes; la convención del M-Bono de 182 días queda fuera.
+    \item \textbf{Renta variable.} La opción sobre acción aporta su PV pero cero al DV01, a los escenarios y al VaR, porque su valor no depende de las curvas ni del spot del snapshot (\codigo{desk/api/pricing/fx.py}{_equity_pv_mxn}).
+    \item \textbf{Operaciones.} Se valúan a la fecha del snapshot; las terminadas se conservan (no se borran).
+    \item \textbf{Payoff.} Las gráficas de payoff son de presentación: se calculan en el navegador.
+    \item \textbf{Moneda.} Reporte en MXN al spot del snapshot.
+    \item \textbf{Usuarios.} Un solo usuario, sin inicio de sesión ni roles; el servidor escucha en el puerto 5070 sin autenticación.
+    \item \textbf{Calendarios.} Reglas codificadas, no tomadas de una publicación oficial por año: solo se contrastaron los feriados \texttt{MX} de 2026 y los \texttt{US} de 2020--2026 (sección~\ref{sec:cap01-validacion}).
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap01-referencias}
+
+Las convenciones de devengo y descuento son las habituales de los mercados de tasas \citep{hull2018}; la
+arquitectura por interfaces intercambiables y entornos observables sigue los patrones de \citet{gamma1995}; el
+algoritmo de la Pascua es el de \citet{meeus1998}. Los calendarios se contrastaron con las fuentes
+\citet{banxico2026c}, \citet{sifma2026} y \citet{frb2026}.
+\end{sloppypar}
