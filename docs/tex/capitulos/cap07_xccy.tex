@@ -1,5 +1,305 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Cross currency swap}\label{cap:xccy}
 
-Valuación del cross currency swap MXN-USD con la base de cross currency y el colateral.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap07-proposito}
+
+El producto \texttt{xccy\_swap} es un cross currency swap USDMXN de \emph{base} y de \emph{nocional constante}: la
+pata en dólares paga SOFR compuesta sin diferencial y la pata en pesos paga TIIE-F compuesta más un
+diferencial $\psi$; las dos pagan en las mismas fechas, cada 28 días, y pueden intercambiar los nocionales al
+inicio y al vencimiento. El valor se expresa en pesos desde la óptica del tenedor. Este capítulo describe el
+instrumento de C++ (\codigo{include/qf/instruments/xccy_swap.hpp}{XccySwap}), cómo el backend lo envejece a
+la fecha del snapshot y lo valúa (\codigo{desk/api/xccy.py}{aged_xccy}, \codigo{desk/api/pricing/xccy.py}{_price}) y qué
+curvas usa. La construcción de las curvas, incluida \texttt{MXN-USD}, está en el capítulo~\ref{cap:curvas}; la
+capitalización de las fijaciones overnight que alimentan el periodo en curso, en el
+capítulo~\ref{cap:swaps-ois}; los flujos liquidados y el P\&L, en el capítulo~\ref{cap:ciclo-vida}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap07-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. En este capítulo, los días son enteros contados
+desde la fecha de valuación y, para abreviar, $P_c(e)=\DF{c}{e/365}$ si $e>0$ y $P_c(e)=1$ si $e\le0$ (la
+curva $c$ es $\cSOFR$, $\cTIIE$ o $\cMXNcol$ y el argumento se da en días). Símbolos propios:
+$N_{\mathrm U}$ es el nocional en \USD{}; $X_{\mathrm p}$ el tipo de cambio pactado (\MXN{} por \USD{}) y
+$N_{\mathrm M}=N_{\mathrm U}X_{\mathrm p}$ el nocional en \MXN{}, fijo desde el inicio;
+$\psi$ es el diferencial sobre la pata TIIE-F (decimal; $-0.0010=-10$~\pb) y $\psi^{*}$ el diferencial par;
+$\theta=+1$ si el tenedor paga la pata en dólares (\texttt{PayUsd}) y $\theta=-1$ si la paga en pesos
+(\texttt{PayMxn});
+$e_0$ es el inicio del periodo 1 (negativo si ya empezó), $e_1<\dots<e_n$ los días de pago y
+$\tau_i=(e_i-e_{i-1})/360$ el devengo del periodo $i$;
+$G_{\mathrm U}$ y $G_{\mathrm M}$ son los factores acumulados de las fijaciones ya conocidas del periodo 1 de
+cada pata (iguales a $1$ si el periodo no ha empezado);
+$\mathbf 1_{\mathrm{ini}}$ y $\mathbf 1_{\mathrm{fin}}$ valen $1$ si hay intercambio de nocional inicial y
+final;
+$V_{\mathrm U}$ y $V_{\mathrm M}$ son los valores de cada pata \emph{vistos por quien la recibe}, en su moneda;
+$\Ann_{\mathrm M}=\sum_i\tau_i\,P_{\cMXNcol}(e_i)$ es la anualidad de la pata en pesos.
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap07-modelo}
+
+\subsection{Calendario y devengo}\label{sec:cap07-calendario}
+
+Ambas patas comparten el calendario $e_0<e_1<\dots<e_n$ con $e_1>0$ (el constructor rechaza fechas de pago
+vacías, no crecientes o que no empiezan después de $e_0$,
+\codigo{src/instruments/xccy_swap.cpp}{XccySwap::XccySwap}). El devengo es
+$\tau_i=(e_i-e_{i-1})/360$ (ACT/360; el constructor admite también ACT/365 y ACT/ACT, rechaza 30/360, y el
+backend siempre usa ACT/360; \codigo{src/instruments/xccy_swap.cpp}{buildPeriods}). Un factor de descuento a
+un día $e\le0$ vale $1$: la fecha de valuación no se descuenta y un periodo que empezó antes se proyecta desde
+ella (\codigo{src/instruments/xccy_swap.cpp}{discountAt}). El tiempo de cada curva es $e/365$, como en el
+resto del desk.
+
+\subsection{Cupón flotante por réplica}\label{sec:cap07-cupon}
+
+El cupón compuesto overnight de un periodo se valúa por réplica con factores de descuento de la curva de
+proyección $p$, igual que en el capítulo~\ref{cap:swaps-ois}. Para una pata de nocional $N$, diferencial
+$\psi_{\mathrm{pata}}$ ($0$ en la pata USD y $\psi$ en la pata MXN) y $G_i=G$ si $i=1$ y $G_i=1$ si $i>1$:
+\begin{equation}\label{eq:cap07-cupon}
+  C_i = N\left(G_i\,\frac{P_p(e_{i-1})}{P_p(e_i)} - 1\right) + N\,\psi_{\mathrm{pata}}\,\tau_i ,
+\end{equation}
+donde $P_p(e_0)=1$ si $e_0\le0$. Es la fila \texttt{coupon} de cada pata en
+\codigo{src/instruments/xccy_swap.cpp}{legRows}. El diferencial se devenga con el $\tau_i$ simple ACT/360 sobre
+el nocional en pesos, sin capitalizarse; en el periodo 1 de un swap ya empezado, $\tau_1$ es el del periodo
+completo (el diferencial de los días transcurridos también se paga).
+
+\subsection{Valor de cada pata y del swap}\label{sec:cap07-valor}
+
+Las filas de intercambio son $-N$ en $e_0$ (solo si $\mathbf 1_{\mathrm{ini}}=1$ y $e_0\ge0$: un inicio que ya
+ocurrió no se vuelve a contar) y $+N$ en $e_n$ (si $\mathbf 1_{\mathrm{fin}}=1$), vistas por quien recibe la
+pata: quien la recibe paga el nocional al inicio y lo recupera al final. Con $P_d$ la curva con que se descuenta
+la pata ($\cSOFR$ la de dólares y $\cMXNcol$ la de pesos), el valor de una pata es
+\begin{equation}\label{eq:cap07-pata}
+  V = \sum_{i=1}^{n} C_i\,P_d(e_i) \;-\; N\,\mathbf 1_{\mathrm{ini}}\,P_d(e_0) \;+\; N\,\mathbf 1_{\mathrm{fin}}\,P_d(e_n) .
+\end{equation}
+La pata USD se proyecta y se descuenta con SOFR; la pata MXN se proyecta con TIIE-F y se descuenta con
+$\cMXNcol$ (\texttt{MXN-USD}). Quien paga dólares recibe pesos; el valor del swap en pesos, desde el tenedor, es
+\begin{equation}\label{eq:cap07-npv}
+  \PV = \theta\,\bigl(V_{\mathrm M} - \Spot\,V_{\mathrm U}\bigr),
+\end{equation}
+con $\Spot$ el spot USDMXN del entorno (la pata USD vale su valor presente en dólares por el spot, no por un
+forward). La ecuación~\eqref{eq:cap07-npv} es la suma de \texttt{presentValueMxn} de las filas que devuelve
+\codigo{src/instruments/xccy_swap.cpp}{XccySwap::cashFlows}, y \codigo{src/instruments/xccy_swap.cpp}{XccySwap::npv}
+la acumula; los renglones de ambas patas se ordenan por día de pago (la de dólares primero si empatan,
+\codigo{include/qf/instruments/xccy_swap.hpp}{XccyCashFlow}). Por construcción
+$\PV_{\texttt{PayUsd}}=-\PV_{\texttt{PayMxn}}$.
+
+\subsection{Identidades de las patas y diferencial par}\label{sec:cap07-identidades}
+
+El código no usa las siguientes identidades; se derivan de las ecuaciones~\eqref{eq:cap07-cupon} y
+\eqref{eq:cap07-pata} y sirven para entender el valor y para los ejemplos. Como la pata USD se proyecta y se
+descuenta con la misma curva, $C_i\,P_{\cSOFR}(e_i)=N(G_iP(e_{i-1})-P(e_i))$ y la suma telescopea:
+\begin{equation}\label{eq:cap07-pata-usd}
+  V_{\mathrm U} = N_{\mathrm U}\Bigl[\,G_{\mathrm U}\,P_{\cSOFR}(e_0) - \mathbf 1_{\mathrm{ini}}\,P_{\cSOFR}(e_0)
+  - (1-\mathbf 1_{\mathrm{fin}})\,P_{\cSOFR}(e_n)\Bigr],
+\end{equation}
+con $G_{\mathrm U}=1$ si $e_0\ge0$ y $P_{\cSOFR}(e_0)=1$ si $e_0\le0$. Con ambos intercambios y un periodo que
+no ha empezado, $V_{\mathrm U}=0$: la pata en dólares vale cero y el valor del swap no depende del spot; con un
+swap ya empezado y el intercambio final, $V_{\mathrm U}=N_{\mathrm U}G_{\mathrm U}$ (el principal más lo ya
+devengado). La pata MXN no telescopea porque proyecta y descuenta con curvas distintas: con ambos intercambios, $e_0=0$ y
+$\psi=0$, su valor es $N_{\mathrm M}$ por el numerador de la ecuación~\eqref{eq:cap07-par-nuevo}, que se anula
+cuando $P_{\cMXNcol}=P_{\cTIIE}$ (base cero) porque entonces
+$(P(e_{i-1})/P(e_i)-1)P(e_i)=P(e_{i-1})-P(e_i)$ y la suma telescopea. El valor es lineal en $\psi$ con pendiente
+$\theta\,N_{\mathrm M}\Ann_{\mathrm M}$, de modo que el diferencial par es exacto:
+\begin{equation}\label{eq:cap07-spread-par}
+  \psi^{*} = \psi - \frac{\theta\,\PV}{N_{\mathrm M}\,\Ann_{\mathrm M}},
+\end{equation}
+que es \codigo{src/instruments/xccy_swap.cpp}{XccySwap::parSpread}; es el mismo para los dos lados. Un swap nuevo
+con ambos intercambios cumple
+\begin{equation}\label{eq:cap07-par-nuevo}
+  \psi^{*} = -\,\frac{-1+\sum_{i=1}^{n}\bigl(P_{\cTIIE}(e_{i-1})/P_{\cTIIE}(e_i)-1\bigr)P_{\cMXNcol}(e_i)+P_{\cMXNcol}(e_n)}
+  {\Ann_{\mathrm M}} ,
+\end{equation}
+y el numerador es la base: con $P_{\cMXNcol}=P_{\cTIIE}$ vale cero.
+
+\subsection{Curvas, base y colateral}\label{sec:cap07-curvas}
+
+La curva $\cMXNcol$ es el descuento en pesos de un contrato con colateral en dólares y se calibra, con puntos
+forward hasta un año y base de cross currency después, de modo que un \texttt{XccySwap} unitario, a spot, con
+ambos intercambios y al diferencial cotizado, vale cero
+(\codigo{include/qf/termstructure/xccy_bootstrap.hpp}{bootstrapXccyDiscount}; capítulo~\ref{cap:curvas}). El
+diferencial par de un swap con las fechas de una cotización de base es, por eso, la propia cotización
+(ejemplo~4). La idea de descontar cada flujo con la curva de su moneda de colateral sigue a \citet{fujii2009}, que construye curvas múltiples con y sin colateral; la base es la desviación de la paridad
+cubierta de tasas que documenta \citet{du2018}.
+
+\begin{diferencia}
+  En la referencia multicurva \citep{fujii2009} la curva con que se descuenta un flujo depende del colateral
+  del contrato. El desk aplica eso a los productos en pesos con la moneda de colateral \emph{vigente de la
+  contraparte} (\codigo{desk/api/collateral.py}{currency_on}), pero el cross currency swap se descuenta
+  \emph{siempre} con \texttt{MXN-USD}, sin consultar a la contraparte
+  (\codigo{desk/api/xccy.py}{discount_curve}); si el snapshot no trae la curva, usa \texttt{TIIE-F} con el aviso
+  \texttt{no\_csa\_curve}. Así lo declara la Metodología («Cross currency swap»).
+\end{diferencia}
+
+\subsection{Envejecimiento a la fecha de valuación}\label{sec:cap07-envejecimiento}
+
+El backend arma los argumentos del constructor desde las fechas de la operación
+(\codigo{desk/api/xccy.py}{aged_xccy_terms}). Con $t_s$ el inicio, $t_m$ el vencimiento y $t$ la fecha de
+valuación, el calendario desde el inicio son los días $k_i=28\,i$ para $i<m$ y $k_m=t_m-t_s$ el último (un
+periodo final más corto si hace falta; \codigo{src/python_bindings/qfpy.cpp}{ois_payment_days}); el alta
+redondea el plazo a periodos enteros (\codigo{desk/api/portfolio.py}{fit_to_maturity}). Con
+$\ell=t-t_s$ días transcurridos (negativo si no ha empezado), el primer periodo pendiente $i^{\circ}$ es el
+menor $i$ con $k_i>\ell$ y
+\begin{equation}\label{eq:cap07-aging}
+  e_0=k_{i^{\circ}-1}-\ell,\qquad e_j=k_{i^{\circ}+j-1}-\ell\ (j\ge1),\qquad
+  \mathbf 1_{\mathrm{ini}}=[\texttt{exchange}\in\{\texttt{both},\texttt{initial}\}\ \wedge\ t_s\ge t],
+\end{equation}
+con $k_0=0$; $\mathbf 1_{\mathrm{fin}}=[\texttt{exchange}\in\{\texttt{both},\texttt{final}\}]$. Si el periodo
+$i^{\circ}$ ya empezó ($k_{i^{\circ}-1}<\ell$), $G_{\mathrm U}$ y $G_{\mathrm M}$ son los factores que da
+\codigo{desk/api/valuation.py}{accrued_factor} para SOFR y TIIE-F desde el comienzo del periodo hasta $t$, con
+las fijaciones registradas y los avisos de las faltantes (capítulo~\ref{cap:swaps-ois}); si no, valen $1$. Un
+pago con $k_i\le\ell$ ya salió del valor. El nocional no se reajusta: $N_{\mathrm M}=N_{\mathrm U}X_{\mathrm p}$ se
+fija con el tipo de cambio pactado.
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap07-implementacion}
+
+\begin{description}
+  \item[Instrumento.] \codigo{include/qf/instruments/xccy_swap.hpp}{XccySwap} guarda los términos y valida
+    el constructor; \codigo{src/instruments/xccy_swap.cpp}{legRows} construye las filas de una pata
+    (ecuación~\eqref{eq:cap07-cupon} y los intercambios) y \codigo{src/instruments/xccy_swap.cpp}{XccySwap::cashFlows} las
+    combina con el signo del lado (\codigo{include/qf/instruments/xccy_swap.hpp}{XccySide}) y la conversión
+    al spot; \codigo{src/instruments/xccy_swap.cpp}{XccySwap::npv} suma y
+    \codigo{src/instruments/xccy_swap.cpp}{XccySwap::parSpread} aplica la ecuación~\eqref{eq:cap07-spread-par}.
+    El binding es \codigo{src/python_bindings/qfpy.cpp}{XccySwap}.
+  \item[Envejecimiento.] \codigo{desk/api/xccy.py}{aged_xccy_terms} implementa la
+    ecuación~\eqref{eq:cap07-aging} y devuelve los términos;
+    \codigo{desk/api/xccy.py}{aged_xccy} construye el \texttt{qfpy.XccySwap}.
+  \item[Valor y flujos proyectados.] \codigo{desk/api/xccy.py}{pv_mxn} devuelve el \texttt{npv} del
+    instrumento envejecido y \codigo{desk/api/xccy.py}{projected} sus filas de \texttt{cashFlows}, que usa la ficha
+    de la operación.
+  \item[Alta a la par.] \codigo{desk/api/xccy.py}{resolve} completa los términos faltantes: el tipo de cambio
+    pactado es el spot del snapshot y el diferencial es el par de la ecuación~\eqref{eq:cap07-spread-par}
+    (calculado con el diferencial en cero porque el valor es lineal);
+    \codigo{desk/api/xccy.py}{at_par} lo hace al dar de alta una operación.
+  \item[Pricer.] \codigo{desk/api/pricing/xccy.py}{_swap} arma una operación que empieza en la fecha del
+    snapshot y vence a $28$ días por periodo; \codigo{desk/api/pricing/xccy.py}{_price} devuelve el valor, el
+    diferencial par, el nocional en pesos, la curva de descuento y las tres sensibilidades que calcula
+    \codigo{desk/api/pricing/xccy.py}{_dv01}: $\PV(\text{base})-\PV(+1~\pb)$ con un desplazamiento paralelo de
+    $1$~\pb de la tasa cero de \texttt{MXN-USD}, de \texttt{TIIE-F} o de \texttt{SOFR}
+    (\codigo{desk/api/market.py}{MarketContext.shifted}). \texttt{MXN-USD} es una curva dependiente: un choque a
+    \texttt{TIIE-F}, \texttt{SOFR} o al spot la recalibra con las cotizaciones fijas, y solo su propio
+    desplazamiento la mueve directamente (\codigo{desk/api/market.py}{_calibrate_csa}). Sin la curva en el snapshot,
+    la sensibilidad a \texttt{MXN-USD} es $0$.
+  \item[Liquidaciones.] \codigo{desk/api/xccy.py}{settled} deriva los cupones de ambas patas (compuestos con las
+    fijaciones diarias y $\tau$ ACT/360) y los intercambios de nocional, con el FIX USDMXN de la fecha de los
+    flujos en dólares; el intercambio inicial sigue en el valor hasta su fecha incluida y se liquida en la
+    ventana en que sale de él (capítulo~\ref{cap:ciclo-vida}).
+\end{description}
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap07-ejemplo}
+
+Los valores se reproducen con \codigo{docs/tex/verificacion/cap07_xccy.py}{swap}, que llama a
+\texttt{qfpy.XccySwap} y al pricer del backend (y recalcula a mano las ecuaciones de este capítulo para
+comprobar que concuerdan). Insumos de los ejemplos 1 a 4: curvas planas en tasa cero continua, \texttt{SOFR} a
+$4.00\,\%$, \texttt{TIIE-F} a $7.00\,\%$ y \texttt{MXN-USD} a $6.80\,\%$; spot $\Spot=18.60$,
+$N_{\mathrm U}=10^{7}$ USD, $X_{\mathrm p}=18.50$ (de modo que $N_{\mathrm M}=1.85\times10^{8}$ MXN), lado
+\texttt{PayUsd}, ambos intercambios y periodos de $28$ días.
+
+\paragraph{1. Diferencial par de un swap nuevo.} Con $n=3$ ($e=28,56,84$), $\tau=28/360$,
+$P_{\cTIIE}(e_{i-1})/P_{\cTIIE}(e_i)-1=e^{0.07\cdot28/365}-1=0.0053843$ y
+$\sum_iP_{\cMXNcol}(e_i)=2.9688910$, el numerador de la ecuación~\eqref{eq:cap07-par-nuevo} es
+$-1+0.0053843\cdot2.9688910+P_{\cMXNcol}(84)=0.00045792$ y $\Ann_{\mathrm M}=\tau\cdot2.9688910$, de modo que
+$\psi^{*}=\verif{cap07-spread-par}{-0.0019830717}$, es decir $-19.83$~\pb (tolerancia $10^{-9}$). Es negativo
+porque la pata en pesos, con $\psi=0$, vale algo positivo para quien la recibe (se descuenta con una curva de
+6.80~\%, menor que la de proyección, 7.00~\%) y un diferencial negativo lo compensa.
+
+\paragraph{2. Valor con diferencial $-10$~\pb.} Con $\psi=-0.0010$, el valor es lineal en $\psi$
+(ecuación~\eqref{eq:cap07-spread-par}): $\PV=N_{\mathrm M}\Ann_{\mathrm M}(\psi-\psi^{*})
+=\verif{cap07-pv-spread}{41995.8823}$ \MXN{} (tolerancia $10^{-3}$); el tenedor del lado \texttt{PayMxn}
+tiene el valor opuesto. Los diez renglones de \texttt{cashFlows} son: intercambio inicial de dólares
+($+N_{\mathrm U}$, valor $+18.60\,N_{\mathrm U}$ en pesos) y de pesos ($-N_{\mathrm M}$) en el día $0$; tres cupones
+de cada pata; y los intercambios finales en el día $84$. El primer cupón en pesos es
+$N_{\mathrm M}\,(e^{0.07\cdot28/365}-1+\psi\tau)=\verif{cap07-cupon-mxn}{981707.8265}$ \MXN{}
+(tolerancia $10^{-3}$).
+
+\paragraph{3. El mismo swap, envejecido diez días.} Con $\ell=10$ días transcurridos, el primer
+periodo pendiente es el primero ($k_1=28>10$), $e_0=-10$ y los pagos quedan en $e=18,46,74$. Los factores acumulados de los diez días, entradas
+del ejemplo, son $G_{\mathrm U}=1+0.04\cdot10/360$ y $G_{\mathrm M}=1+0.07\cdot10/360$. Por la
+ecuación~\eqref{eq:cap07-pata-usd}, $V_{\mathrm U}=N_{\mathrm U}G_{\mathrm U}$ (no hay intercambio inicial), de
+modo que la pata en dólares vale $-18.60\,N_{\mathrm U}G_{\mathrm U}=-186\,206\,666.67$ \MXN{} para \texttt{PayUsd}; la
+pata en pesos vale $185\,391\,640.70$ \MXN{} (suma de la ecuación~\eqref{eq:cap07-pata}), y el valor del swap con
+$\psi=-0.0010$ es $\PV=\verif{cap07-pv-envejecido}{-815025.9654}$ \MXN{} (tolerancia $10^{-3}$). La pérdida
+de casi un millón de pesos refleja el nocional constante: el nocional en pesos sigue siendo
+$N_{\mathrm U}\cdot18.50$ mientras la pata en dólares se convierte al spot $18.60$.
+
+\paragraph{4. Cierre con la calibración.} En el snapshot sintético \texttt{MX-DEMO} (que se siembra en una base
+SQLite temporal), la curva \texttt{MXN-USD} se calibra con bases cotizadas de $-10$ pb a 2 años y $-12$ pb a 3
+años (spot 18.60). El pricer del backend, con $5\times10^{6}$ USD, ambos intercambios y $26$ periodos
+($728$ días), devuelve un diferencial par de $\verif{cap07-spread-par-2a}{-0.0010000}$ y, con $39$ periodos
+($1092$ días), de $\verif{cap07-spread-par-3a}{-0.0012000}$ (tolerancia $10^{-7}$ en ambos): el swap con las
+fechas de la cotización reprecia a su cotización. Como además cualquier choque a \texttt{TIIE-F} o \texttt{SOFR}
+recalibra \texttt{MXN-USD} con las cotizaciones fijas, el valor de ese swap sigue siendo cero y sus DV01 con
+respecto a esas dos curvas son cero (el script lo comprueba a $10^{-6}$); todo el riesgo de tasa del swap a
+2 años cae en \texttt{MXN-USD}, con
+$\mathrm{DV01}_{\cMXNcol}=\verif{cap07-dv01-mxn-usd}{17402.6118}$ \MXN{} por $1$~\pb{} (tolerancia $10^{-3}$).
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap07-validacion}
+
+La suite de C++ (\codigo{tests/test_xccy_swap.cpp}{XccySwap}, suite \texttt{XccySwap}) comprueba:
+\begin{itemize}
+  \item \texttt{ParSpreadMakesTheValueZero}: el valor al diferencial par es cero, al inicio, con inicio diferido y con un periodo en curso, y el par no depende del diferencial de partida ni del lado;
+  \item \texttt{ValueIsLinearInTheSpreadWithTheMxnAnnuity}: el valor es lineal en el diferencial con la anualidad de la pata en pesos;
+  \item \texttt{PayUsdIsMinusPayMxn}: los dos lados son opuestos;
+  \item \texttt{FinalExchangeChangesTheValueByTheDiscountedNotionals} e \texttt{InitialExchangeChangesTheValueByTheNotionalsAtTheStartDate}: cada intercambio cambia el valor en su valor presente;
+  \item \texttt{ManualValueOfATwoPeriodSwap}: cálculo manual de dos periodos, con proyección en \texttt{TIIE-F} y descuento en \texttt{MXN-USD};
+  \item \texttt{CashFlowTableSumsToNpvAndIsOrderedByDate}: la tabla de flujos suma el valor y está ordenada por fecha;
+  \item \texttt{AgedSwapMatchesTheOriginalValueRebasedToTheNewDatePerLeg}: el swap envejecido coincide con el original reubicado en la nueva fecha, pata por pata.
+\end{itemize}
+La calibración con que se construye \texttt{MXN-USD} se prueba en
+\codigo{tests/test_xccy_bootstrap.cpp}{bootstrapXccyDiscount}: cada forward y cada swap de base reprecian a su
+cotización. En Python,
+\codigo{tests/test_xccy_py.py}{test_swap_at_par_spread_is_worth_zero},
+\codigo{tests/test_xccy_py.py}{test_sides_are_mirror_images} y
+\codigo{tests/test_xccy_py.py}{test_cash_flows_are_accessible_and_sum_to_npv} cubren el binding, y en el backend
+\codigo{desk/api/tests/test_xccy_product.py}{test_price_without_spread_is_par_and_matches_the_two_year_basis_quote},
+\codigo{desk/api/tests/test_xccy_product.py}{test_price_risk_dv01s_match_a_manual_bump},
+\codigo{desk/api/tests/test_xccy_product.py}{test_exchange_option_changes_the_pv_and_the_initial_exchange_is_valued},
+\codigo{desk/api/tests/test_xccy_product.py}{test_price_without_the_csa_curve_discounts_with_tiie} y
+\codigo{desk/api/tests/test_xccy_product.py}{test_pnl_identity_holds_and_settled_is_both_coupons_at_the_fix} cubren el
+pricer, el descuento sin curva y la identidad de P\&L.
+
+El cross currency swap \emph{no} está en la validación contra QuantLib (capítulo~\ref{cap:validacion}): el reporte
+vigente compara siete productos y no incluye este (\codigo{desk/validation/report.json}{summary}). Su
+verificación independiente son las identidades de este capítulo recalculadas a mano y la calibración de
+\texttt{MXN-USD}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap07-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \emph{Convenciones.} TIIE-F compuesta diaria, cupones cada 28 días, ACT/360 en ambas patas, SOFR
+          compuesta a 28 días y nocional constante: son un \emph{supuesto de convención} (práctica general
+          de mercado) pendiente de confirmar contra la nota de Banorte y la metodología de CME (Metodología,
+          «Colateral y curvas MXN»).
+    \item \emph{Nocional constante.} Sin reinicio a mercado de ninguna pata. El nocional en pesos se fija con
+          el tipo de cambio pactado. Una vez empezado el swap, la pata en dólares vale su principal más lo
+          devengado convertido al spot de hoy y la de pesos conserva el nocional pactado, así que
+          $N_{\mathrm U}(\Spot-X_{\mathrm p})$ forma parte del valor (ejemplo~3).
+    \item \emph{Intercambios.} El inicial sigue en el valor hasta el día de inicio incluido y, al salir, se
+          liquida en el P\&L al FIX de ese día (Metodología, «Cross currency swap»). El pricer admite cuatro modos
+          (\texttt{both}, \texttt{initial}, \texttt{final}, \texttt{none}); la Metodología describe el caso con
+          ambos intercambios.
+    \item \emph{Colateral y curvas.} Siempre se descuenta con \texttt{MXN-USD} aunque la contraparte tenga
+          colateral en pesos; sin la curva, con \texttt{TIIE-F} y aviso \texttt{no\_csa\_curve}. En \texttt{MX-DEMO}
+          la curva es sintética y \texttt{MKT-LIVE} no la trae (no hay fuente libre), por lo que allí el swap
+          se descuenta con \texttt{TIIE-F} (Metodología, «Curva MXN-USD»).
+    \item \emph{Fechas.} Las fechas de pago son las pactadas: no se ajustan por días inhábiles ni hay rezago de
+          pago (Metodología, «Calendarios»). Al dar de alta, el plazo se redondea a periodos enteros de $28$ días.
+    \item \emph{Alta a la par.} Con inicio igual a la fecha del snapshot, el diferencial par es el de la cotización
+          y el valor es cero. Con inicio anterior, el diferencial que se guarda es el par del swap
+          \emph{envejecido} sin fijaciones y el tipo de cambio pactado es el spot del snapshot, no el de la fecha
+          de inicio (hallazgo H15 de \texttt{HALLAZGOS.md}).
+    \item \emph{Alcance.} No hay plantilla de confirmación imprimible ni exportación FpML para este producto, ni
+          comparación contra QuantLib; el riesgo de crédito del swap pertenece al capítulo~\ref{cap:xva}.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap07-referencias}
+
+El valor por réplica de la pata flotante, como razón de factores de descuento, es el tratamiento estándar de las
+tasas forward simples \citep{andersen2010,hull2018}; el descuento por moneda de colateral y la extracción de la
+base de cross currency están en \citet{fujii2009} y el fenómeno de base en \citet{du2018}. Los swaps
+de divisas con intercambio de principales, valuados como una cartera de bonos o de forwards, se presentan en
+\citet{hull2018}.
