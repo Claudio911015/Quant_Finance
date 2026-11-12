@@ -183,3 +183,19 @@ Qué hace el código: `MDF_FETCH` por omisión es `<directorio de MDF_DB>/exampl
 Qué declara la Metodología/el diseño: `desk/README.md`, «Datos de mercado reales»: «`MDF_FETCH`: `~/Git/MarketDataFeed/build/examples/fetch_sofr`» como ruta por omisión.
 Impacto: bajo; solo afecta a quien cambie `MDF_DB` y espere que el ejecutable siga en la ruta fija. Un refresco con la ruta equivocada responde 502 («No se pudo ejecutar MarketDataFeed»).
 Capítulo: 13 (Fuentes de datos y procedencia)
+
+## H21 — El XVA se integra sobre la malla de reporte mensual con el extremo derecho; la Metodología habla de «malla diaria» y no declara esa discretización
+Archivo: `desk/api/risk/xva.py` (y `desk/api/risk/credit.py`)
+Símbolo: `report_days` (usa `credit._grid`) y, en C++, `computeXva` (suma sobre `profile.times`)
+Qué hace el código: la simulación avanza por días, pero CVA, DVA y FVA se calculan solo con los perfiles descontados de la malla de reporte (hoy y fechas mensuales hasta el primer mes que alcanza el último vencimiento), multiplicando el perfil de cada fecha por la probabilidad de incumplimiento del intervalo que termina en ella (regla del extremo derecho). En una fecha en que una operación ya pagó su último flujo el valor es cero, así que el intervalo donde vence aporta exposición cero. Medido con `docs/tex/verificacion/cap14_xva.py` (mismas trayectorias, solo cambia la malla): Banco Ejemplo (IRS TIIE-F de 200 millones envejecido más XCCY de 10 millones de USD con intercambio final, 2 años) tiene CVA 91 386.08 con la malla mensual y 94 347.53 con malla diaria (+3.24 %; el error estándar de Monte Carlo del CVA es 3.4 %). Un swap receptor de un solo periodo de 28 días (PV 40 226 MXN, intensidad plana 2 %, LGD 0.6) tiene CVA exactamente 0 con la malla mensual (fechas 0 y 30 días) y 35.72 MXN con malla diaria.
+Qué declara la Metodología/el diseño: Metodología, XVA, «Modelo y medida»: «Malla diaria, trayectorias y semilla fijas»; los límites del XVA no mencionan que los ajustes se integren sobre una malla mensual con el extremo derecho. El diseño (R2) pide la exposición reportada en una malla mensual, pero no declara su efecto sobre el CVA.
+Impacto: sesgo sistemático a la baja en operaciones cuya exposición se concentra al final (intercambio final de un XCCY) y CVA cero en operaciones que vencen antes de la primera fecha mensual; en el ejemplo es del tamaño del error de Monte Carlo. No cambia la forma de los perfiles publicados (EPE, ENE, PFE mensuales).
+Capítulo: 14 (XVA y curvas de crédito)
+
+## H22 — La Metodología dice que cada operación se descuenta con la curva de su contraparte; el código descuenta SOFR con SOFR y la pata MXN del XCCY con MXN-USD sea cual sea el colateral
+Archivo: `desk/api/risk/xva.py`
+Símbolo: `_swap_spec`, `_xccy_spec`
+Qué hace el código: solo el IRS TIIE-F cambia de curva con el colateral de la contraparte (`csa_discount` si el colateral es USD y el snapshot trae MXN-USD). El IRS SOFR siempre descuenta con SOFR. El XCCY usa `with_collateral("USD")`: su pata MXN descuenta con MXN-USD (TIIE-F si el snapshot no la trae) aunque la contraparte tenga colateral MXN, y su pata USD con SOFR; es lo que hace la valuación del desk (capítulo 7), y el motor coincide con el PV del desk en t = 0.
+Qué declara la Metodología/el diseño: Metodología, XVA, «Modelo y medida»: «Cada operación se descuenta con la curva de su contraparte.»
+Impacto: bajo; la frase lee como si el colateral de la contraparte eligiera la curva de todos los productos, y solo lo hace en el IRS TIIE-F. El PV y el XVA son coherentes con la valuación del desk.
+Capítulo: 14 (XVA y curvas de crédito)
