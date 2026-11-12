@@ -203,6 +203,29 @@ describe('CreditCurvesPanel: edición', () => {
   });
 });
 
+describe('CreditCurvesPanel: texto solo para lectores de pantalla', () => {
+  it('la cabecera «Quitar» sigue en el DOM, dentro del contenedor de la tabla', async () => {
+    await renderPanel();
+    const sr = document.querySelector('.xva-sr');
+    expect(sr?.textContent).toBe('Quitar');
+    expect(sr?.closest('.xva-scroll')).not.toBeNull();
+  });
+
+  it('ese contenedor es el ancestro posicionado de .xva-sr (verificación estática)', async () => {
+    // Un `position: absolute` sin ancestro posicionado cuelga del bloque inicial: ni el `overflow` del
+    // contenedor de la tabla lo recorta y agranda el documento (10 px de desborde en `/xva` a 1280 px).
+    // jsdom no calcula la maquetación; el desborde real se midió en navegador. `fs` se importa con
+    // especificador no literal (el proyecto no trae @types/node).
+    const { readFileSync } = (await import(/* @vite-ignore */ 'node:fs' as string)) as {
+      readFileSync(path: string, encoding: string): string;
+    };
+    const css = readFileSync('src/screens/XvaScreen.css', 'utf8');
+    const rule = (selector: string) => new RegExp(`(?:^|\\n)${selector.replace('.', '\\.')}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
+    expect(rule('.xva-sr')).toMatch(/position:\s*absolute/);
+    expect(rule('.xva-scroll')).toMatch(/position:\s*relative/);
+  });
+});
+
 describe('survivalOption', () => {
   it('antepone el año 0 con supervivencia 1', () => {
     const option = survivalOption(OWN) as (typeof charts)[number]['option'];

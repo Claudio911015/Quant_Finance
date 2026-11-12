@@ -116,6 +116,7 @@
 
 /* Tablas: el contenedor desplaza en horizontal si no caben; la página no. */
 .xva-scroll {
+  position: relative; /* contexto de posición de .xva-sr: sin él el texto absoluto agranda el documento */
   max-width: 100%;
   overflow-x: auto;
 }
