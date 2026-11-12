@@ -359,6 +359,23 @@ describe('MethodologyScreen', () => {
       expect(xvaRow('Definiciones')).toContain('sumas sobre la malla de integración');
     });
 
+    it('T6: la fila de sensibilidades declara adjunta, unidades, costo y límites', () => {
+      renderScreen();
+      const row = xvaRow('Sensibilidades del XVA');
+      expect(row).toContain('adjunta');
+      expect(row).toContain('MXN por pb');
+      expect(row).toContain('1 % del spot');
+      expect(row).toContain('punto de volatilidad');
+      expect(row).toContain('mismas trayectorias, malla y semilla');
+      expect(row).toContain('como máximo 2 hilos');
+      expect(row).toContain('decenas de segundos');
+      expect(row).toContain('2 × número de insumos');
+      expect(row).toContain('derivadas parciales');
+      expect(row).toContain('no se recalibran');
+      expect(row).toContain('AGPL-3.0');
+      expect(row).toContain('QF_WITH_XAD=OFF');
+    });
+
     it('explica el incremental como diferencia con y sin la operación', () => {
       renderScreen();
       expect(xvaRow('XVA incremental')).toContain('con y sin');
