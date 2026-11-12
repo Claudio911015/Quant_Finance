@@ -127,6 +127,26 @@ def test_us_new_year_on_a_saturday_is_not_moved_to_the_previous_year():
     assert calendars.is_holiday("US", date(2023, 1, 2)) and not calendars.is_holiday("US", date(2023, 1, 1))
 
 
+def test_us_veterans_day_on_a_saturday_is_not_moved_to_the_friday():
+    # H19: la Fed de Nueva York publicó SOFR el viernes 2023-11-10 (5.32 %) y las Reservas Federales abren el viernes
+    # anterior a un feriado en sábado (Fed, K.8): el Día de los Veteranos en sábado no se traslada.
+    assert date(2023, 11, 11).weekday() == 5
+    assert calendars.is_business_day("US", date(2023, 11, 10)) and not calendars.is_holiday("US", date(2023, 11, 10))
+    assert not calendars.is_business_day("US", date(2023, 11, 11))  # sábado de todos modos
+    assert calendars.is_holiday("US", date(2023, 11, 11))  # sigue en la tabla, como el 1 de enero en sábado
+    assert calendars.is_business_day("US", date(2028, 11, 10))  # el siguiente caso: sábado 2028-11-11
+    # en domingo sí pasa al lunes, y entre semana no se mueve
+    assert date(2029, 11, 11).weekday() == 6
+    assert calendars.is_holiday("US", date(2029, 11, 12)) and not calendars.is_business_day("US", date(2029, 11, 12))
+    assert calendars.is_holiday("US", date(2026, 11, 11))
+
+
+def test_us_saturday_holidays_that_do_close_the_friday_keep_their_observed_date():
+    # Los demás traslados al viernes coinciden con la ausencia de SOFR (2020-07-03, 2021-12-24, 2026-07-03).
+    for friday in (date(2020, 7, 3), date(2021, 12, 24), date(2026, 7, 3)):
+        assert friday.weekday() == 4 and calendars.is_holiday("US", friday) and not calendars.is_business_day("US", friday)
+
+
 def test_us_juneteenth_exists_from_2022_only():
     assert not calendars.is_holiday("US", date(2021, 6, 18)) and not calendars.is_holiday("US", date(2021, 6, 19))
     assert calendars.is_holiday("US", date(2022, 6, 20))  # 19 de junio en domingo -> lunes

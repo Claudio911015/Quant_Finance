@@ -138,7 +138,7 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Calendarios',
-        text: 'Inhábiles bancarios de México para TIIE-F y de publicación de SOFR (SIFMA) en EE. UU. para SOFR, por reglas 2020–2040. Una fijación no publicada en día inhábil de su índice no es faltante. Las fechas de pago son las pactadas: no se ajustan por inhábil.',
+        text: 'Inhábiles bancarios de México para TIIE-F y de publicación de SOFR (SIFMA) en EE. UU. para SOFR, por reglas 2020–2040. Un feriado fijo de EE. UU. en domingo pasa al lunes y en sábado al viernes, salvo el 1 de enero y el Día de los Veteranos (SOFR se publicó el viernes 2023-11-10). Una fijación no publicada en día inhábil de su índice no es faltante. Las fechas de pago son las pactadas: no se ajustan por inhábil.',
       },
       {
         label: 'Riesgo',

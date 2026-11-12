@@ -69,6 +69,7 @@ describe('MethodologyScreen', () => {
     expect(row('Efecto del colateral')).toContain('MXN-USD');
     expect(row('Cross currency swap')).toContain('Nocional constante');
     expect(row('Calendarios')).toContain('no se ajustan por inhábil');
+    expect(row('Calendarios')).toContain('salvo el 1 de enero y el Día de los Veteranos'); // H19
   });
 
   it('declara las limitaciones que dejó la auditoría del corte 3', () => {

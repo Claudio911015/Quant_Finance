@@ -6,7 +6,8 @@ No ajustan fechas de pago.
 
 * MX: inhábiles bancarios. Un feriado fijo en sábado o domingo no se traslada.
 * US: calendario SIFMA (el de la publicación de SOFR). Un feriado fijo en domingo pasa al lunes
-  siguiente y uno en sábado al viernes anterior, salvo el 1 de enero en sábado (no pasa al año anterior).
+  siguiente y uno en sábado al viernes anterior, salvo el 1 de enero en sábado (no pasa al año anterior)
+  y el Día de los Veteranos en sábado (SOFR se publicó el viernes 2023-11-10; no pasa al viernes).
 """
 from datetime import date, timedelta
 from functools import lru_cache
@@ -50,11 +51,15 @@ def _last_weekday(year: int, month: int, weekday: int) -> date:
     return last - timedelta(days=(last.weekday() - weekday) % 7)
 
 
-def _observed(d: date, is_new_year: bool = False) -> date:
-    """Día en que se observa un feriado fijo de EE. UU.: domingo -> lunes, sábado -> viernes."""
+def _observed(d: date, saturday_to_friday: bool = True) -> date:
+    """Día en que se observa un feriado fijo de EE. UU.: domingo -> lunes, sábado -> viernes.
+
+    `saturday_to_friday=False` deja el sábado donde está: el 1 de enero no se traslada al año anterior y
+    el Día de los Veteranos tampoco (la Fed de Nueva York publicó SOFR el viernes 2023-11-10 y las Reservas
+    Federales abren el viernes anterior a un feriado en sábado, K.8)."""
     if d.weekday() == 6:
         return d + timedelta(days=1)
-    if d.weekday() == 5 and not is_new_year:  # el 1 de enero en sábado no se traslada al año anterior
+    if d.weekday() == 5 and saturday_to_friday:
         return d - timedelta(days=1)
     return d
 
@@ -81,7 +86,7 @@ def _mexico(year: int) -> Dict[date, str]:
 
 def _united_states(year: int) -> Dict[date, str]:
     table = {
-        _observed(date(year, 1, 1), is_new_year=True): "New Year's Day",
+        _observed(date(year, 1, 1), saturday_to_friday=False): "New Year's Day",
         _nth_weekday(year, 1, _MONDAY, 3): "Martin Luther King Jr.",
         _nth_weekday(year, 2, _MONDAY, 3): "Presidents Day",
         _easter(year) - timedelta(days=2): "Good Friday",
@@ -89,7 +94,7 @@ def _united_states(year: int) -> Dict[date, str]:
         _observed(date(year, 7, 4)): "Independence Day",
         _nth_weekday(year, 9, _MONDAY, 1): "Labor Day",
         _nth_weekday(year, 10, _MONDAY, 2): "Columbus Day",
-        _observed(date(year, 11, 11)): "Veterans Day",
+        _observed(date(year, 11, 11), saturday_to_friday=False): "Veterans Day",
         _nth_weekday(year, 11, _THURSDAY, 4): "Thanksgiving",
         _observed(date(year, 12, 25)): "Christmas",
     }
