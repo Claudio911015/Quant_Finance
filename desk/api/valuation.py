@@ -108,18 +108,19 @@ def accrued_factor(
     return qfpy.compound_overnight([e[0] for e in entries], [int(e[1]) for e in entries], 360.0)
 
 
-def aged_swap(
+def aged_swap_terms(
     trade: Dict[str, Any],
     terms: Dict[str, Any],
     mkt: MarketContext,
     fixings: Fixings,
     warnings: List[Dict[str, Any]],
-) -> "qfpy.OisSwap":
-    """El swap de la operación envejecido a `mkt.as_of`: calendario por fechas desde `start_date`
-    y periodo en curso con el factor acumulado de las fijaciones diarias.
+) -> Dict[str, Any]:
+    """Los términos del swap envejecido a `mkt.as_of`, tal como los recibe `qfpy.OisSwap` (y el motor de XVA):
+    `{notional, fixed_rate, start_days, pay_days, accrued_factor, side, curve, discount}`.
 
-    Es el instrumento que valúa `value_trade` y cuyos flujos proyecta la ficha. `terms` son los
-    términos vigentes (`lifecycle.state`); los avisos de fijaciones faltantes se añaden a `warnings`.
+    Calendario por fechas desde `start_date` y periodo en curso con el factor acumulado de las fijaciones
+    diarias (los avisos de fijaciones faltantes se añaden a `warnings`). `side` es el texto de los términos
+    (`"payer"`/`"receiver"`) y `discount` la curva de descuento (solo TIIE-F cambia con el colateral).
 
     @raise ValueError si falta `fixed_rate` o `mkt.as_of` es posterior al último pago.
     """
@@ -138,16 +139,43 @@ def aged_swap(
     factor = 1.0
     if period_start < elapsed:
         factor = accrued_factor(curve, start + timedelta(days=period_start), on, fixings, mkt, warnings)
-    side = qfpy.SwapType.Payer if terms["side"] == "payer" else qfpy.SwapType.Receiver
+    return {
+        "notional": terms["notional"],
+        "fixed_rate": terms["fixed_rate"],
+        "start_days": period_start - elapsed,
+        "pay_days": [k - elapsed for k in pay[first:]],
+        "accrued_factor": factor,
+        "side": terms["side"],
+        "curve": curve,
+        "discount": discount,
+    }
+
+
+def aged_swap(
+    trade: Dict[str, Any],
+    terms: Dict[str, Any],
+    mkt: MarketContext,
+    fixings: Fixings,
+    warnings: List[Dict[str, Any]],
+) -> "qfpy.OisSwap":
+    """El swap de la operación envejecido a `mkt.as_of` (ver `aged_swap_terms`).
+
+    Es el instrumento que valúa `value_trade` y cuyos flujos proyecta la ficha. `terms` son los
+    términos vigentes (`lifecycle.state`); los avisos de fijaciones faltantes se añaden a `warnings`.
+
+    @raise ValueError si falta `fixed_rate` o `mkt.as_of` es posterior al último pago.
+    """
+    a = aged_swap_terms(trade, terms, mkt, fixings, warnings)
+    side = qfpy.SwapType.Payer if a["side"] == "payer" else qfpy.SwapType.Receiver
     return qfpy.OisSwap(
-        terms["notional"],
-        terms["fixed_rate"],
-        period_start - elapsed,
-        [k - elapsed for k in pay[first:]],
-        factor,
+        a["notional"],
+        a["fixed_rate"],
+        a["start_days"],
+        a["pay_days"],
+        a["accrued_factor"],
         side,
-        curve,
-        discount_curve_key="" if discount == curve else discount,
+        a["curve"],
+        discount_curve_key="" if a["discount"] == a["curve"] else a["discount"],
     )
 
 

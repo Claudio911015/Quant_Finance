@@ -81,6 +81,12 @@ def create_app(db_path: Optional[Union[str, Path]] = None, seed: bool = True) ->
             seed_conn.close()
     # --- fin corte 6 ---
 
+    # --- corte 9: XVA ---
+    from desk.api.routes import xva as xva_routes
+
+    app.register_blueprint(xva_routes.bp)
+    # --- fin corte 9 (rutas) ---
+
     @app.get("/", defaults={"path": ""})
     @app.get("/<path:path>")
     def spa(path):

@@ -40,15 +40,18 @@ def discount_curve(mkt: MarketContext) -> str:
     return mkt.with_collateral("USD").mxn_discount
 
 
-def aged_xccy(
+def aged_xccy_terms(
     trade: Dict[str, Any], terms: Dict[str, Any], mkt: MarketContext, fixings: Fixings, warnings: Warnings
-) -> "qfpy.XccySwap":
-    """El cross currency swap de la operación envejecido a `mkt.as_of`.
+) -> Dict[str, Any]:
+    """Los términos del cross currency swap envejecido a `mkt.as_of`, tal como los recibe `qfpy.XccySwap`
+    (y el motor de XVA): `{notional_usd, fx_rate, spread, start_days, pay_days, accrued_factor_usd,
+    accrued_factor_mxn, side, initial_exchange, final_exchange, discount, csa_discount}`.
 
     Calendario `ois_payment_days((vencimiento − inicio).days, 28)` desde `start_date`; el periodo en curso
     lleva el factor acumulado de SOFR (pata USD) y de TIIE-F (pata MXN). El intercambio inicial solo
     entra si `start_date >= as_of` (y `exchange` lo pide); el final, si `exchange` lo pide. Los avisos de
-    fijaciones faltantes y `no_csa_curve` se añaden a `warnings`.
+    fijaciones faltantes y `no_csa_curve` se añaden a `warnings`. `discount` es la curva de la pata MXN
+    y `csa_discount` es `discount == "MXN-USD"`.
 
     @raise ValueError si falta `fx_rate` o `spread` (ver `resolve`) o `mkt.as_of` es posterior al último pago.
     """
@@ -72,21 +75,45 @@ def aged_xccy(
     vm = mkt.with_collateral("USD")
     if vm.csa_missing:
         warnings.append(valuation._warning("no_csa_curve", None, [], _NO_CSA_MESSAGE))
-    side = qfpy.XccySide.PayUsd if terms["side"] == "pay_usd" else qfpy.XccySide.PayMxn
+    return {
+        "notional_usd": terms["notional_usd"],
+        "fx_rate": terms["fx_rate"],
+        "spread": terms["spread"],
+        "start_days": period_start - elapsed,
+        "pay_days": [k - elapsed for k in pay[first:]],
+        "accrued_factor_usd": usd,
+        "accrued_factor_mxn": mxn,
+        "side": terms["side"],
+        "initial_exchange": terms["exchange"] in ("both", "initial") and start >= on,
+        "final_exchange": terms["exchange"] in ("both", "final"),
+        "discount": vm.mxn_discount,
+        "csa_discount": vm.mxn_discount == "MXN-USD",
+    }
+
+
+def aged_xccy(
+    trade: Dict[str, Any], terms: Dict[str, Any], mkt: MarketContext, fixings: Fixings, warnings: Warnings
+) -> "qfpy.XccySwap":
+    """El cross currency swap de la operación envejecido a `mkt.as_of` (ver `aged_xccy_terms`).
+
+    @raise ValueError si falta `fx_rate` o `spread` (ver `resolve`) o `mkt.as_of` es posterior al último pago.
+    """
+    a = aged_xccy_terms(trade, terms, mkt, fixings, warnings)
+    side = qfpy.XccySide.PayUsd if a["side"] == "pay_usd" else qfpy.XccySide.PayMxn
     return qfpy.XccySwap(
-        terms["notional_usd"],
-        terms["fx_rate"],
-        terms["spread"],
-        period_start - elapsed,
-        [k - elapsed for k in pay[first:]],
-        usd,
-        mxn,
+        a["notional_usd"],
+        a["fx_rate"],
+        a["spread"],
+        a["start_days"],
+        a["pay_days"],
+        a["accrued_factor_usd"],
+        a["accrued_factor_mxn"],
         side,
-        terms["exchange"] in ("both", "initial") and start >= on,
-        terms["exchange"] in ("both", "final"),
+        a["initial_exchange"],
+        a["final_exchange"],
         "SOFR",
         "TIIE-F",
-        vm.mxn_discount,
+        a["discount"],
     )
 
 
