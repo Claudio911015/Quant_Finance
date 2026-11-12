@@ -1,4 +1,18 @@
 % filas del capítulo 12: símbolo & significado & unidad \\ (4.ª columna, macro, opcional; toda fila termina en \\)
-% Ejemplo: $w_k$ & peso del vértice $k$ & adimensional \\
-% Sustituir la fila de abajo por las filas propias del capítulo (no definir macros nuevas; ver README.md).
-\multicolumn{4}{@{}l}{\textit{Sin símbolos propios por ahora.}} \\
+$V^{\mathrm{desk}}_c$, $V^{\mathrm{QL}}_c$ & PV del caso $c$ en el escritorio y en QuantLib & moneda del caso \\
+$N_c$ & nocional de referencia del caso (base de la diferencia relativa) & moneda del caso \\
+$\Delta V_c$ & diferencia absoluta $|V^{\mathrm{desk}}_c - V^{\mathrm{QL}}_c|$ & moneda del caso \\
+$\epsilon_c$ & diferencia relativa $\Delta V_c / N_c$ & adimensional \\
+$\varepsilon_p$ & tolerancia relativa del producto $p$ & adimensional \\
+$\bar\epsilon_c$, $\hat\epsilon_c$ & cota y valor esperado de una diferencia conocida & adimensional \\
+$d_k$, $T_k = d_k/365$ & día y plazo del pilar $k$ de una curva & días, años \\
+$P_k$, $z_k$ & factor de descuento y tasa cero continua del pilar $k$ & adimensional, decimal anual \\
+$D_\infty$ & día del nodo lejano añadido en QuantLib (36500) & días \\
+$d^{\ast}_j$ & día de la fecha intermedia $j$ de la comparación de curvas ($j = 0,\dots,9$) & días \\
+$\delta_{\mathrm{pil}}$, $\delta_{\mathrm{int}}$ & diferencia máxima de factor de descuento en pilares y en fechas intermedias & adimensional \\
+$\ell$ & días del periodo de pago de la curva & días \\
+$s$ & signo del lado: compra $+1$, venta $-1$ & adimensional \\
+$F$, $\rho$, $f$, $n$ & valor nominal, tasa de cupón, cupones por año y número de cupones de un bono & moneda, decimal anual, 1/año, cupones \\
+$N^{\mathrm{USD}}$ & nocional en USD de un forward o una opción USDMXN & USD \\
+$q$ & cantidad de títulos de una opción sobre acción & títulos \\
+$T_{\mathrm{ej}}$, $d_{\mathrm{ej}}$, $Y$, $m$ & plazo y día de ejercicio de una swaption, años de su swap y número de pagos & años, días, años, pagos \\

@@ -1,5 +1,466 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Validación contra QuantLib}\label{cap:validacion}
 
-Método de validación contra QuantLib, tolerancias y resultados.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap12-proposito}
+
+Los capítulos~\ref{cap:curvas} a~\ref{cap:xccy} describen los modelos que el escritorio valúa con su motor C++.
+Este capítulo documenta el arnés de \codigo{desk/validation/README.md}{Regenerar},
+que compara el valor presente (PV) de 62 casos con el que calcula QuantLib 1.44, una implementación ajena,
+a partir de las mismas curvas, del mismo spot, de las mismas volatilidades y de los mismos parámetros de
+Hull--White. En la terminología de la guía de gestión de riesgo de modelo de las autoridades bancarias de Estados Unidos es un
+ejercicio de \emph{benchmarking}: comparar las entradas y salidas de un modelo con las de modelos alternativos
+\citep{fed2011}; el marco general de validación de modelos de valuación se puede consultar en \citet{morini2011}.
+
+El arnés produce \codigo{desk/validation/report.json}{totals}, que el backend sirve en
+\codigo{desk/api/routes/validation.py}{get_report} y la pantalla «Validación» de la interfaz muestra. QuantLib vive
+en un entorno de Python aparte (\codigo{desk/validation/common.py}{QUANTLIB_PYTHON}); el backend y sus suites
+nunca lo importan. Una coincidencia con QuantLib prueba que el escritorio y QuantLib calculan lo mismo con los mismos
+insumos; no prueba que los insumos sean correctos ni que se hayan armado igual (sección~\ref{sec:cap12-limites}).
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap12-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. Aquí, un \emph{caso} $c$ es una fila de
+\texttt{cases.json} (producto $p(c)$, parámetros, nocional y PV del escritorio). Las curvas se evalúan en años,
+$T = d/365$, con $d$ en días enteros desde la fecha de valuación. Los símbolos propios del capítulo son:
+$V^{\mathrm{desk}}_c$ y $V^{\mathrm{QL}}_c$, PV del caso en el escritorio y en QuantLib (moneda del caso);
+$N_c$, nocional de referencia del caso (base de la diferencia relativa); $\Delta V_c$ y $\epsilon_c$, diferencia
+absoluta y relativa; $\varepsilon_p$, tolerancia del producto; $\bar\epsilon_c$ y $\hat\epsilon_c$, cota y valor
+esperado de una diferencia conocida; $(d_k, T_k, P_k, z_k)$, día, plazo en años, factor de descuento y tasa cero
+continua del pilar $k$ de una curva, con $k = 1,\dots,n$; $D_\infty$, día del nodo lejano que se añade en QuantLib;
+$\delta_{\mathrm{pil}}$ y $\delta_{\mathrm{int}}$, diferencias máximas de factor de descuento en pilares y en fechas
+intermedias; $\ell$, días del periodo de pago de la curva; $s = \pm 1$, signo del lado (compra $+1$, venta $-1$);
+$F$, $\rho$, $f$ y $n$, valor nominal, tasa de cupón, cupones por año y número de cupones de un bono;
+$N^{\mathrm{USD}}$, nocional en USD de un forward o una opción USDMXN; $q$, cantidad de títulos de una opción sobre acción;
+$T_{\mathrm{ej}}$ y $d_{\mathrm{ej}}$, plazo (años) y día de ejercicio de una swaption, $Y$ los años de su swap y
+$m$ el número de pagos.
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap12-modelo}
+
+\subsection{Flujo de tres pasos}\label{sec:cap12-flujo}
+
+La comparación se arma en tres pasos que encadena \codigo{desk/validation/make_report.sh}{run_quantlib.py}
+(tabla~\ref{tab:cap12-pasos}). Cada paso lee y escribe archivos versionados, de modo que un tercero repite el
+último paso sin QuantLib.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+Paso & Programa & Intérprete & Escribe \\
+\midrule
+1 & \texttt{export\_cases} & Python del backend (3.8) & \texttt{cases.json} \\
+2 & \texttt{run\_quantlib} & entorno \texttt{quantsuite-oracle} (3.12) & \texttt{reference.json} \\
+3 & \texttt{compare} & Python del backend (3.8) & \texttt{report.json} \\
+\bottomrule
+\end{tabular}
+\caption{Pasos de la validación. El paso 3 también lee \texttt{known\_differences.json}.}\label{tab:cap12-pasos}
+\end{table}
+
+El paso 1 construye una base SQLite en memoria con el snapshot sintético \texttt{MX-DEMO} y las siete operaciones de
+ejemplo, y exporta, por cada curva, los pilares y los factores de descuento que calcula el propio escritorio
+(\codigo{desk/validation/export_cases.py}{export_curves}); por cada caso, sus parámetros, sus insumos
+adicionales (\codigo{desk/validation/export_cases.py}{_inputs}), el nocional de referencia
+(\codigo{desk/validation/export_cases.py}{_notional_currency}) y el PV del escritorio, que sale del mismo pricer que usa la
+aplicación (\codigo{desk/validation/export_cases.py}{_case}). La fecha de valuación es la fecha \texttt{as\_of} del
+snapshot. Los 62 casos son las 7 operaciones del portafolio de ejemplo más una batería fija
+(tabla~\ref{tab:cap12-casos}); \codigo{desk/validation/export_cases.py}{build_cases} los numera por producto, primero los
+de portafolio y luego los de batería.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Producto & Portafolio & Batería & Casos \\
+\midrule
+Swap OIS (\texttt{irs}) & 3 & 9 & 12 \\
+Forward USDMXN (\texttt{fx\_forward}) & 2 & 6 & 8 \\
+Opción USDMXN (\texttt{fx\_option}) & 1 & 9 & 10 \\
+Opción sobre acción (\texttt{equity\_option}) & 0 & 8 & 8 \\
+Bono (\texttt{bond}) & 0 & 8 & 8 \\
+Cap/floor (\texttt{cap\_floor}) & 1 & 7 & 8 \\
+Swaption (\texttt{swaption}) & 0 & 8 & 8 \\
+\midrule
+Total & 7 & 55 & 62 \\
+\bottomrule
+\end{tabular}
+\caption{Composición de los casos. La batería fija cubre lados, plazos y dinero (dentro, en y fuera del dinero).}\label{tab:cap12-casos}
+\end{table}
+
+\subsection{Curvas reconstruidas en QuantLib}\label{sec:cap12-curvas}
+
+QuantLib no hace el bootstrap de las curvas: recibe los factores de descuento ya armados por el escritorio
+(capítulo~\ref{cap:curvas}) y los convierte en una curva de tasa cero. Con los pilares $(d_k, P_k)$ del escritorio,
+la tasa cero continua de cada pilar es
+\begin{equation}\label{eq:cap12-cero}
+  z_k = -\frac{\ln P_k}{T_k}, \qquad T_k = \frac{d_k}{365}, \qquad k = 1,\dots,n,
+\end{equation}
+implementada en \codigo{desk/validation/ql_curves.py}{_zero}. La curva de QuantLib es un \texttt{ZeroCurve} lineal
+en tasa cero continua con base Actual/365 Fijo, sin calendario, con extrapolación habilitada y con dos nodos
+añadidos, uno en el día $0$ y otro en el día $D_\infty$ (\codigo{desk/validation/common.py}{FAR_DAYS}, $D_\infty = 36500$),
+que repiten el cero del primer y del último pilar:
+\begin{equation}\label{eq:cap12-nodos}
+  \bigl\{(0, z_1),\ (d_1, z_1),\ (d_2, z_2),\ \dots,\ (d_n, z_n),\ (D_\infty, z_n)\bigr\}.
+\end{equation}
+Entre dos nodos consecutivos, con $T_k \le T \le T_{k+1}$,
+\begin{equation}\label{eq:cap12-interpolacion}
+  z(T) = z_k + \frac{T - T_k}{T_{k+1} - T_k}\,(z_{k+1} - z_k),
+  \qquad P(T) = e^{-z(T)\,T},
+\end{equation}
+con cero plano antes del primer pilar y después del último. Es la misma regla que aplica el motor del escritorio:
+interpolación lineal de la tasa cero en $T = d/365$, cero plano fuera de los pilares y
+$P(T) = e^{-z(T)T}$ (\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::discountFactor},
+\codigo{src/math/interpolation.cpp}{Interpolator::operator()}). La reconstrucción está en
+\codigo{desk/validation/ql_curves.py}{build_curve}; \codigo{desk/validation/run_quantlib.py}{build_context} fija la
+fecha de evaluación de QuantLib (\codigo{desk/validation/ql_curves.py}{setup}) y arma una curva por nombre.
+
+La comparación de curvas se hace en dos conjuntos de fechas. En los pilares, $\delta_{\mathrm{pil}}$; en
+$10$ fechas intermedias, estrictamente dentro de $[d_1, d_n]$, $\delta_{\mathrm{int}}$ (\codigo{desk/validation/common.py}{check_days}):
+\begin{align}
+  d^{\ast}_j &= \operatorname{round}\!\Bigl(d_1 + \frac{(j + \tfrac12)\,(d_n - d_1)}{10}\Bigr), \quad j = 0,\dots,9,
+  \label{eq:cap12-dias-intermedios}\\
+  \delta_{\mathrm{pil}} &= \max_{k}\,\bigl|\DF{\mathrm{desk}}{T_k} - \DF{\mathrm{QL}}{T_k}\bigr| \le 10^{-12},
+  \qquad
+  \delta_{\mathrm{int}} = \max_{j}\,\bigl|\DF{\mathrm{desk}}{T^{\ast}_j} - \DF{\mathrm{QL}}{T^{\ast}_j}\bigr| \le 10^{-8},
+  \label{eq:cap12-dif-curvas}
+\end{align}
+con $\operatorname{round}$ de Python (al entero par en los empates), $T^{\ast}_j = d^{\ast}_j/365$ y las tolerancias
+\codigo{desk/validation/common.py}{PILLAR_TOLERANCE} y \codigo{desk/validation/common.py}{CHECK_TOLERANCE}. Los $10$ puntos son
+\codigo{desk/validation/common.py}{CHECK_COUNT}. \codigo{desk/validation/compare.py}{_curve_checks} calcula ambos máximos y
+marca la curva como \texttt{ok} si cumple los dos.
+
+\subsection{Diferencia de PV, tolerancia y veredicto}\label{sec:cap12-diferencia}
+
+Para cada caso, con $V^{\mathrm{desk}}_c$ del paso 1 y $V^{\mathrm{QL}}_c$ del paso 2,
+\begin{equation}\label{eq:cap12-diferencia}
+  \Delta V_c = \bigl|V^{\mathrm{desk}}_c - V^{\mathrm{QL}}_c\bigr|, \qquad
+  \epsilon_c = \frac{\Delta V_c}{N_c},
+\end{equation}
+calculadas por \codigo{desk/validation/common.py}{diffs}; si $V^{\mathrm{QL}}_c$ falta o no es finito no hay
+diferencia y el caso falla. El nocional de referencia $N_c$ y la moneda en que se mide $\Delta V_c$ son:
+el nocional para \texttt{irs}, \texttt{cap\_floor} y \texttt{swaption} (moneda de la curva); el valor nominal $F$ para
+\texttt{bond} (moneda de la curva); el nocional en USD por el spot del snapshot, $N^{\mathrm{USD}}\Spot$, para
+\texttt{fx\_forward} y \texttt{fx\_option} (MXN); y la cantidad por el spot de la acción para
+\texttt{equity\_option} (MXN) (\codigo{desk/validation/export_cases.py}{_notional_currency}).
+
+La tolerancia $\varepsilon_p$ es relativa y depende del producto (tabla~\ref{tab:cap12-tolerancias},
+\codigo{desk/validation/common.py}{TOLERANCES}). El veredicto de cada caso
+(\codigo{desk/validation/common.py}{classify}) es
+\begin{equation}\label{eq:cap12-veredicto}
+  \text{veredicto}(c) =
+  \begin{cases}
+    \text{ok} & \epsilon_c \le \varepsilon_{p(c)},\\[2pt]
+    \text{explicada} & \varepsilon_{p(c)} < \epsilon_c \le \bar\epsilon_c \ \text{con entrada conocida},\\[2pt]
+    \text{falla} & \text{en otro caso,}
+  \end{cases}
+\end{equation}
+donde «entrada conocida» es una entrada de \texttt{known\_differences.json} para el caso $c$, que aporta $\bar\epsilon_c$,
+y un caso sin PV de QuantLib falla.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{@{}lc@{}}
+\toprule
+Producto & $\varepsilon_p$ \\
+\midrule
+\texttt{irs}, \texttt{fx\_option}, \texttt{equity\_option}, \texttt{bond} & $10^{-6}$ \\
+\texttt{fx\_forward} & $10^{-8}$ \\
+\texttt{cap\_floor}, \texttt{swaption} (Hull--White) & $5\times 10^{-4}$ \\
+\bottomrule
+\end{tabular}
+\caption{Tolerancias relativas al nocional de referencia $N_c$.}\label{tab:cap12-tolerancias}
+\end{table}
+
+Una diferencia conocida es una entrada de \codigo{desk/validation/known_differences.json}{differences} con caso,
+tipo (\texttt{convention}, \texttt{interpolation} o \texttt{defect}; \codigo{desk/validation/common.py}{KNOWN_KINDS}),
+causa, valor esperado $\hat\epsilon_c$ y cota $\bar\epsilon_c$. La prueba de humo exige que el valor esperado
+reproduzca lo observado a $\pm 10\,\%$ y que la causa tenga al menos $40$ caracteres:
+\begin{equation}\label{eq:cap12-esperada}
+  \bigl|\hat\epsilon_c - \epsilon_c\bigr| \le 0.10\,\epsilon_c.
+\end{equation}
+Un \texttt{defect} es un defecto del escritorio que sigue abierto. Hoy el archivo no tiene entradas.
+
+\subsection{Pricers de referencia y traducción de convenciones}\label{sec:cap12-pricers}
+
+\codigo{desk/validation/run_quantlib.py}{price_case} valúa cada caso con el pricer de su producto y, si éste lanza una
+excepción, deja \texttt{pv\_ref} vacío y el mensaje en \texttt{error} sin detener el arnés. Los pricers usan fechas
+enteras, \texttt{NullCalendar} y \texttt{Unadjusted}: QuantLib nunca ajusta una fecha. Las traducciones son:
+\begin{description}
+  \item[\texttt{irs}] (\codigo{desk/validation/ql_rates.py}{price_irs}) Un \texttt{OvernightIndexedSwap} con valor
+    telescópico y \texttt{DiscountingSwapEngine} sobre la misma curva para proyectar y descontar; pata fija y flotante
+    Actual/360, calendario explícito $\{0\} \cup \{\text{días de pago}\}$ (los de \texttt{qfpy.ois\_payment\_days}), spread cero, sin
+    rezago de pago y sin fijaciones. El signo lo da el lado (\texttt{payer}/\texttt{receiver}).
+  \item[\texttt{bond}] (\codigo{desk/validation/ql_rates.py}{price_bond}) Un \texttt{FixedRateBond} Actual/365 con
+    \texttt{DiscountingBondEngine}, principal a la par al vencimiento y fechas de pago
+    $d_i = \operatorname{round}(365\,i/f)$ días, $i = 1,\dots,n$ (ecuación~\eqref{eq:cap12-bono-ql}).
+  \item[\texttt{cap\_floor}] (\codigo{desk/validation/ql_hw.py}{price_cap_floor}) \texttt{Cap} o \texttt{Floor} sobre una
+    pierna \texttt{IborLeg} Actual/360 sin rezago de fijación, con fechas $i\,\ell$ días ($i = 0,\dots,n$), y
+    \texttt{AnalyticCapFloorEngine} con un \texttt{HullWhite}$(\hwa, \hwsig)$ ajustado a la misma curva; $\hwa$ y $\hwsig$
+    son los que el escritorio aplicó al caso (\texttt{hw\_a} y \texttt{hw\_sigma} de los insumos). Según el propio texto del
+    método, el primer caplet fija hoy y vale su intrínseco, como en el escritorio.
+  \item[\texttt{swaption}] (\codigo{desk/validation/ql_hw.py}{price_swaption}) Una \texttt{Swaption} europea con ejercicio
+    en $d_{\mathrm{ej}} = \operatorname{round}(365\,T_{\mathrm{ej}})$ días y un \texttt{VanillaSwap} cuyas patas fija y flotante
+    tienen fechas $d_{\mathrm{ej}} + i\,\ell$, $i = 0,\dots,m$, con $m = \operatorname{round}(365\,Y/\ell)$ y $Y$ los años del
+    swap; \texttt{JamshidianSwaptionEngine} con el mismo \texttt{HullWhite}. La lógica del lado del escritorio está en el
+    capítulo~\ref{cap:hull-white}.
+  \item[\texttt{fx\_forward}] (\codigo{desk/validation/ql_fx.py}{price_fx_forward}) Un \texttt{FxForward} con USD como
+    moneda origen y MXN como destino, strike como tasa pactada, pago en hoy $+\,d$ días, y
+    \texttt{DiscountingFxForwardEngine} con la curva SOFR para USD, la TIIE-F para MXN y el spot del snapshot. Comprar USD es recibir
+    la moneda origen. Antes de aceptar el PV, el pricer exige que el forward justo de QuantLib coincida con el del escritorio:
+    \begin{equation}\label{eq:cap12-forward-justo}
+      \bigl|X^{\mathrm{QL}}_{\mathrm{justo}} - X^{\mathrm{desk}}\bigr| \le 10^{-10}\,\max\bigl(1, |X^{\mathrm{desk}}|\bigr);
+    \end{equation}
+    si no, el caso se descarta con error porque el sentido del spot o de las monedas estaría invertido. El PV es
+    \texttt{npvTargetCurrency()} (MXN).
+  \item[\texttt{fx\_option}] (\codigo{desk/validation/ql_fx.py}{price_fx_option}) Un \texttt{GarmanKohlagenProcess} con SOFR como
+    tasa foránea, TIIE-F como doméstica y volatilidad plana $\sigma$ (\texttt{BlackConstantVol}, Actual/365) igual a la que
+    el escritorio leyó de su superficie en $(K, T)$, más \texttt{AnalyticEuropeanEngine}. El PV es
+    $V^{\mathrm{QL}} = s\,N^{\mathrm{USD}}\,\mathrm{NPV}_{\mathrm{GK}}$, con el signo de \codigo{desk/validation/ql_fx.py}{_sign}.
+  \item[\texttt{equity\_option}] (\codigo{desk/validation/ql_fx.py}{price_equity_option}) Un proceso de
+    Black--Scholes--Merton (\texttt{Black\allowbreak Scholes\allowbreak Merton\allowbreak Process})
+    con tasa libre de riesgo y dividendo continuos planos (Actual/365), volatilidad y spot propios del caso, y
+    \texttt{AnalyticEuropeanEngine}; $V^{\mathrm{QL}} = q\,\mathrm{NPV}_{\mathrm{BSM}}$ con $q$ la cantidad. No depende de
+    las curvas del snapshot.
+\end{description}
+Las fórmulas de Garman--Kohlhagen y de Black--Scholes que implementan los motores analíticos de QuantLib son las de
+\citet{garman1983} y \citet{black1973}; la de la swaption por descomposición de bonos, la de \citet{jamshidian1989} sobre el
+modelo de \citet{hull1990}; el capítulo~\ref{cap:fx} y el capítulo~\ref{cap:hull-white} dicen cuál es la fórmula
+que aplica cada una en el escritorio.
+
+\subsection{Bono: fechas enteras y cupón Actual/365}\label{sec:cap12-bono}
+
+El caso del bono es el único donde la traducción de convenciones deja una diferencia sistemática. El escritorio paga el
+cupón $i$ en el plazo $t_i = i/f$ años (el programa exporta ese calendario en los insumos del caso) y cada cupón vale
+$F\rho/f$; QuantLib sólo admite fechas enteras y paga lo que devenga Actual/365 entre ellas. Con $d_0 = 0$,
+\begin{align}
+  V^{\mathrm{desk}} &= \sum_{i=1}^{n} \Bigl(\frac{F\rho}{f} + F\,\mathbb{1}_{i = n}\Bigr)\,\DF{\mathrm{desk}}{\tfrac{i}{f}}, \label{eq:cap12-bono-desk}\\
+  V^{\mathrm{QL}} &= \sum_{i=1}^{n} \Bigl(F\rho\,\frac{d_i - d_{i-1}}{365} + F\,\mathbb{1}_{i = n}\Bigr)\,\DF{\mathrm{QL}}{\tfrac{d_i}{365}},
+  \qquad d_i = \operatorname{round}\!\Bigl(\frac{365\,i}{f}\Bigr). \label{eq:cap12-bono-ql}
+\end{align}
+Si $365/f$ es entero (un bono a $91$ o $28$ días, anual) las dos expresiones coinciden y la diferencia es cero; si
+no, como en el semestral por omisión de $182.5$ días, $d_i$ se redondea (al par en los empates:
+$182, 365, 548, 730, 912, 1095$) y los cupones de QuantLib difieren de $F\rho/f$. El capítulo~\ref{cap:bonos}
+documenta el lado del escritorio.
+
+\begin{diferencia}
+  El PV del bono en el escritorio y en QuantLib difiere de forma sistemática y acotada por la traducción de
+  convenciones, no por un error de valuación: el escritorio usa plazos fraccionarios $i/f$ y cupón $F\rho/f$, y
+  QuantLib fechas enteras con cupón Actual/365 (ecuaciones~\eqref{eq:cap12-bono-desk} y \eqref{eq:cap12-bono-ql}). Con
+  $f = 2$ y $6$ cupones la diferencia es de unas millonésimas del nocional (sección~\ref{sec:cap12-ejemplo}); los otros siete
+  bonos de la batería usan plazos en días enteros y coinciden a $2\times 10^{-15}$ del nocional o menos. Los demás pricers de referencia no tienen diferencia de
+  convención con el escritorio en los casos que se comparan.
+\end{diferencia}
+
+\begin{diferencia}
+  QuantLib no valida el bootstrap ni la superficie de volatilidad: recibe las curvas como factores de descuento ya
+  armados y las opciones USDMXN con la volatilidad $\sigma$ que el escritorio ya leyó en $(K, T)$. Por eso en los
+  pilares $\delta_{\mathrm{pil}}$ es cero salvo redondeo (la tasa cero se obtiene de los mismos factores,
+  ecuación~\eqref{eq:cap12-cero}); la comprobación independiente de la interpolación son las $10$ fechas intermedias.
+\end{diferencia}
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap12-implementacion}
+
+La tabla~\ref{tab:cap12-mapa} lleva cada fórmula a su función. Las constantes (tolerancias, número de fechas
+intermedias, nodo lejano) viven en \codigo{desk/validation/common.py}{TOLERANCES}, no en cada programa, y las comparten el paso 1,
+el paso 3 y la prueba de humo.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{@{}p{0.40\textwidth}p{0.55\textwidth}@{}}
+\toprule
+Ecuación o paso & Función \\
+\midrule
+Exportación (paso 1) & \codigo{desk/validation/export_cases.py}{build} \\
+Casos y batería & \codigo{desk/validation/export_cases.py}{_battery_raw} \\
+Cero de un pilar~\eqref{eq:cap12-cero} & \codigo{desk/validation/ql_curves.py}{_zero} \\
+Curva QuantLib~\eqref{eq:cap12-nodos},~\eqref{eq:cap12-interpolacion} & \codigo{desk/validation/ql_curves.py}{build_curve} \\
+Fechas intermedias~\eqref{eq:cap12-dias-intermedios} & \codigo{desk/validation/common.py}{check_days} \\
+Diferencias de DF en QuantLib~\eqref{eq:cap12-dif-curvas} & \codigo{desk/validation/ql_curves.py}{curve_report} \\
+Referencia (paso 2) & \codigo{desk/validation/run_quantlib.py}{run} \\
+Diferencia de PV~\eqref{eq:cap12-diferencia} & \codigo{desk/validation/common.py}{diffs} \\
+Veredicto~\eqref{eq:cap12-veredicto} & \codigo{desk/validation/common.py}{classify} \\
+Comparación (paso 3) & \codigo{desk/validation/compare.py}{compare} \\
+Filas por caso y resumen & \codigo{desk/validation/compare.py}{_case_rows}, \codigo{desk/validation/compare.py}{_summary} \\
+Diferencias conocidas & \codigo{desk/validation/compare.py}{_known_rows} \\
+\bottomrule
+\end{tabular}
+\caption{Mapa de ecuaciones y pasos a funciones.}\label{tab:cap12-mapa}
+\end{table}
+
+El PV del escritorio de cada caso sale de los mismos pricers que usa la aplicación:
+\codigo{desk/api/pricing/rates.py}{_irs_price}, \codigo{desk/api/pricing/rates.py}{_bond_price},
+\codigo{desk/api/pricing/rates.py}{_cap_floor_price}, \codigo{desk/api/pricing/rates.py}{_swaption_price},
+\codigo{desk/api/pricing/fx.py}{_fx_forward_price}, \codigo{desk/api/pricing/fx.py}{_fx_option_price} y
+\codigo{desk/api/pricing/fx.py}{_equity_price}; los casos de portafolio pasan por
+\codigo{desk/api/valuation.py}{value_trade}. El contexto de mercado es el de
+\codigo{desk/api/market.py}{load_context}, con colateral en pesos (curva de descuento \texttt{TIIE-F}), y las dos curvas
+validadas son las de \codigo{desk/api/market.py}{CURVES}. El reporte se sirve con
+\codigo{desk/api/routes/validation.py}{get_report}, que además vuelve a calcular el último commit que tocó el código de
+valuación (\codigo{desk/validation/common.py}{desk_commit}) para avisar si cambió después de generar el reporte.
+
+El texto del método de cada producto (los objetos de QuantLib y las convenciones de las secciones anteriores) se guarda en
+\codigo{desk/validation/ql_rates.py}{METHODS}, \codigo{desk/validation/ql_hw.py}{METHODS} y
+\codigo{desk/validation/ql_fx.py}{METHODS}, y el reporte lo muestra por producto. La Metodología de la aplicación resume la
+validación en \codigo{desk/ui/src/screens/MethodologyScreen.tsx}{VALIDATION_SECTIONS}; el diseño está en
+\codigo{docs/superpowers/qf-desk/corte7/design.md}{D3}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap12-ejemplo}
+
+Los dos ejemplos se reproducen con \codigo{docs/tex/verificacion/cap12_validacion.py}{df_intermedio_tiie}, que construye
+el snapshot \texttt{MX-DEMO} en una base en memoria, recalcula los PV con el código del proyecto y lee el PV de QuantLib
+de \texttt{reference.json}.
+
+\paragraph{Interpolación en una fecha intermedia.} La primera fecha intermedia de la curva TIIE-F es, por la
+ecuación~\eqref{eq:cap12-dias-intermedios} con $d_1 = 1$ y $d_n = 3640$, $d^{\ast}_0 = \operatorname{round}(1 + 3639/20) =
+\verif{cap12-dia-intermedio}{183}$ (entero; tolerancia absoluta $0.5$). Los pilares vecinos son $d_k = 168$ y $d_{k+1} = 364$, con
+tasas cero continuas $z_k = \verif{cap12-cero-168}{0.0692594461}$ y $z_{k+1} = \verif{cap12-cero-364}{0.0682356258}$
+(tolerancia absoluta $10^{-10}$). Con la ecuación~\eqref{eq:cap12-interpolacion},
+\begin{align*}
+  z(T^{\ast}_0) &= z_k + \frac{183 - 168}{364 - 168}\,(z_{k+1} - z_k) = \verif{cap12-cero-intermedio}{0.0691810925},\\
+  P(T^{\ast}_0) &= e^{-z(T^{\ast}_0)\,183/365} = \verif{cap12-df-intermedio}{0.965909325757},
+\end{align*}
+con tolerancias absolutas $10^{-10}$ y $10^{-11}$. Es el factor de descuento que calcula el escritorio y, a
+$1.1\times 10^{-16}$ o menos, el de QuantLib en esa fecha (tabla~\ref{tab:cap12-curvas}).
+
+\paragraph{Diferencia de PV del bono \texttt{bond-08}.} Bono TIIE-F de valor nominal $F = 100\,000\,000$ \MXN, cupón
+$\rho = 7.5\,\%$, $n = 6$ cupones con $f = 2$ por año (plazo de $182.5$ días). El PV del escritorio es
+$V^{\mathrm{desk}} = \verif{cap12-pv-bond08}{101567609.1726}$ \MXN y el de QuantLib,
+$V^{\mathrm{QL}} = \verif{cap12-pv-ref-bond08}{101567615.1126}$ \MXN (tolerancia absoluta $10^{-4}$ \MXN en ambos). Con la
+ecuación~\eqref{eq:cap12-diferencia} y $N_c = F$,
+\[
+  \Delta V_c = \verif{cap12-dif-abs-bond08}{5.94}\ \MXN \ (\text{tolerancia } 5\times 10^{-3}),
+  \qquad
+  \epsilon_c = \verif{cap12-dif-rel-bond08}{5.94e-8} \ (\text{tolerancia } 5\times 10^{-11}),
+\]
+que está dentro de $\varepsilon_{\mathrm{bond}} = 10^{-6}$, es el máximo de todos los bonos y explica la caja
+\emph{diferencia} de la sección~\ref{sec:cap12-bono}. Recalculando la ecuación~\eqref{eq:cap12-bono-ql} con los factores de descuento de la curva
+TIIE-F del escritorio (fechas $182, 365, 548, 730, 912, 1095$) se obtiene
+$\verif{cap12-pv-bond08-fechas-enteras}{101567615.1126}$ \MXN (tolerancia $10^{-4}$ \MXN), igual al de QuantLib: la
+diferencia entera se debe a las fechas enteras y al cupón Actual/365.
+
+\paragraph{Margen de tolerancia en una swaption.} Para \texttt{swaption-03} (pagadora TIIE-F, expira a $730$ días, swap de
+$5$ años, strike $6.8\,\%$, nocional de $200\,000\,000$ \MXN) la diferencia absoluta es
+$\Delta V_c = \verif{cap12-dif-abs-swaption03}{0.5957}$ \MXN (tolerancia $5\times 10^{-5}$) y la relativa,
+$\epsilon_c = \verif{cap12-dif-rel-swaption03}{2.98e-9}$ (tolerancia $5\times 10^{-12}$), cinco órdenes de magnitud bajo
+$\varepsilon_{\mathrm{swaption}} = 5\times 10^{-4}$ (sección~\ref{sec:cap12-limites}).
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap12-validacion}
+
+\subsection{Resultados del reporte versionado}
+
+El reporte versionado trae $62$ casos: $62$ dentro de tolerancia, $0$ explicados y $0$ fuera, y las dos curvas
+(\texttt{TIIE-F} y \texttt{SOFR}, $10$ pilares y $10$ fechas intermedias cada una) dentro de las tolerancias de la
+ecuación~\eqref{eq:cap12-dif-curvas} (\codigo{desk/validation/report.json}{summary}). La tabla~\ref{tab:cap12-resultados}
+resume la peor diferencia por producto; todas las absolutas están en \MXN.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{@{}lrrrrl@{}}
+\toprule
+Producto & Casos & $\varepsilon_p$ & Peor $\Delta V_c$ & Peor $\epsilon_c$ & Caso \\
+\midrule
+\texttt{irs} & 12 & $10^{-6}$ & $1.50\times 10^{-6}$ & $5.99\times 10^{-15}$ & \texttt{irs-02} \\
+\texttt{fx\_forward} & 8 & $10^{-8}$ & $3.73\times 10^{-8}$ & $3.08\times 10^{-16}$ & \texttt{fx\_forward-05} \\
+\texttt{fx\_option} & 10 & $10^{-6}$ & $9.31\times 10^{-9}$ & $1.13\times 10^{-16}$ & \texttt{fx\_option-06} \\
+\texttt{equity\_option} & 8 & $10^{-6}$ & $2.18\times 10^{-11}$ & $1.09\times 10^{-16}$ & \texttt{equity\_option-01} \\
+\texttt{bond} & 8 & $10^{-6}$ & $5.94$ & $5.94\times 10^{-8}$ & \texttt{bond-08} \\
+\texttt{cap\_floor} & 8 & $5\times 10^{-4}$ & $3.26\times 10^{-8}$ & $2.79\times 10^{-16}$ & \texttt{cap\_floor-02} \\
+\texttt{swaption} & 8 & $5\times 10^{-4}$ & $0.596$ & $2.98\times 10^{-9}$ & \texttt{swaption-03} \\
+\bottomrule
+\end{tabular}
+\caption{Peor diferencia absoluta y relativa por producto en el reporte versionado (el caso es el de la peor diferencia
+relativa).}\label{tab:cap12-resultados}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Curva & Pilares / intermedias & $\delta_{\mathrm{pil}}$ & $\delta_{\mathrm{int}}$ \\
+\midrule
+\texttt{TIIE-F} (\MXN) & $10 / 10$ & $0$ & $1.11\times 10^{-16}$ \\
+\texttt{SOFR} (\USD) & $10 / 10$ & $0$ & $1.11\times 10^{-16}$ \\
+\bottomrule
+\end{tabular}
+\caption{Diferencia máxima de factor de descuento entre el escritorio y QuantLib (tolerancias $10^{-12}$ y $10^{-8}$).}\label{tab:cap12-curvas}
+\end{table}
+
+Salvo el bono, que arrastra la diferencia de convención de la sección~\ref{sec:cap12-bono}, y la swaption, donde la
+diferencia es de $10^{-9}$, todos los productos coinciden con QuantLib a precisión de máquina en relación con el nocional.
+
+\subsection{Historia: la swaption que detectó la validación}
+
+El arnés detectó un defecto de \codigo{src/instruments/swaption.cpp}{Swaption::price}: para una
+swaption receptora TIIE-F con expiración corta (\texttt{swaption-04}, $182$ días) el escritorio devolvía un PV de $0$ donde
+QuantLib daba $92\,158.63$ \MXN, porque la raíz de Jamshidian quedaba fuera del intervalo de bisección, y además omitía un
+término de varianza del factor $A$ de Hull--White (según el README del arnés y el mensaje del commit de la corrección,
+\texttt{2f5b733}). La corrección añadió pruebas de regresión que comparan contra una integración numérica independiente
+(\codigo{tests/test_swaption.cpp}{quadraturePrice}). Desde entonces las ocho swaptions coinciden con QuantLib y
+\texttt{known\_differences.json} está vacío.
+
+\subsection{Pruebas del repositorio}
+
+La suite del backend cubre el arnés sin importar QuantLib. \codigo{desk/api/tests/test_validation_report.py}{test_el_reporte_versionado_no_tiene_problemas}
+recalcula las diferencias y los veredictos de \texttt{report.json} (\codigo{desk/api/tests/test_validation_report.py}{_problems}), que los totales y el
+resumen cuadren, que haya al menos $60$ casos y $5$ por producto, que las entradas conocidas estén explicadas y
+acotadas, y que ninguna curva quede fuera de tolerancia. \codigo{desk/api/tests/test_validation_report.py}{_source_problems}
+cruza además cada cifra del reporte con \texttt{cases.json} y \texttt{reference.json}, de modo que un PV editado a mano
+dentro de tolerancia también se detecta. Otras pruebas fijan las piezas del arnés:
+\codigo{desk/api/tests/test_validation_curves.py}{test_classify}, \codigo{desk/api/tests/test_validation_curves.py}{test_diffs},
+\codigo{desk/api/tests/test_validation_curves.py}{test_check_days_son_diez_y_estrictamente_interiores},
+\codigo{desk/api/tests/test_validation_cases.py}{test_hay_62_casos_con_ids_unicos_y_numerados_por_producto},
+\codigo{desk/api/tests/test_validation_cases.py}{test_pv_desk_coincide_con_el_pricer} y
+\codigo{desk/api/tests/test_validation_cases.py}{test_ningun_caso_pasa_del_ultimo_pilar_de_su_curva}. Los cinco
+archivos \texttt{test\_validation\_*.py} (informe, curvas, casos, comparación y ruta) pasan: 39 pruebas al redactar
+este capítulo.
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap12-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \textbf{Sólo se compara el PV.} No se validan riesgos ni griegas (DV01, escenarios, VaR), XVA, contabilidad
+      de coberturas, envejecimiento de operaciones con fijaciones ni datos de mercado reales de un proveedor
+      (Metodología, «Qué no se compara»). El portafolio se valúa sólo en la fecha \texttt{as\_of} del snapshot
+      \texttt{MX-DEMO}, que es sintético; la coincidencia no dice nada sobre la calidad de los datos
+      (capítulo~\ref{cap:datos}).
+    \item \textbf{El bootstrap y la superficie de volatilidad no se validan contra una segunda implementación.}
+      QuantLib recibe los factores de descuento ya armados y la $\sigma$ ya leída por el escritorio. En los
+      pilares la comparación de curvas es una identidad salvo redondeo; sólo las $10$ fechas intermedias
+      comprueban la interpolación (capítulo~\ref{cap:curvas}).
+    \item \textbf{La extrapolación plana no se ejerce}: ningún caso pasa del último pilar de su curva
+      (\codigo{desk/api/tests/test_validation_cases.py}{test_ningun_caso_pasa_del_ultimo_pilar_de_su_curva}).
+    \item \textbf{Sólo las curvas \texttt{TIIE-F} y \texttt{SOFR} con colateral en pesos.} La curva MXN colateralizada en USD, el
+      colateral USD y el cross currency swap (capítulo~\ref{cap:xccy}) no entran al arnés: los siete productos validados no
+      incluyen \texttt{xccy\_swap}. Tampoco hay calendarios de días hábiles ni ajuste de fechas: QuantLib usa
+      \texttt{NullCalendar}, \texttt{Unadjusted} y fechas enteras (capítulo~\ref{cap:ciclo-vida}), y los plazos de la
+      batería caen en días enteros.
+    \item \textbf{Tolerancia holgada en Hull--White.} La tolerancia de \texttt{cap\_floor} y \texttt{swaption} es
+      $5\times 10^{-4}$ del nocional y la peor diferencia observada es $2.98\times 10^{-9}$: un defecto de hasta
+      $5\times 10^{-4}$ pasaría sin avisar (el defecto de \texttt{swaption-04} era de $1.84\times 10^{-3}$).
+      La Metodología la justifica porque «las implementaciones y convenciones del modelo difieren»; ver
+      \texttt{HALLAZGOS.md} (H05).
+    \item \textbf{El reporte puede quedar desfasado del código.} La suite verifica la coherencia del reporte con
+      \texttt{cases.json} y \texttt{reference.json}, y la aplicación avisa en tiempo de ejecución si el último commit de
+      valuación difiere del guardado, pero ninguna prueba vuelve a comparar el \texttt{cases.json} versionado con el
+      código actual, ni vuelve a ejecutar QuantLib.
+    \item \textbf{Cobertura de la batería.} El portafolio de ejemplo no incluye opciones sobre acción, bonos ni swaptions:
+      esos tres productos sólo se validan con la batería fija ($8$ casos cada uno).
+    \item \textbf{Lo que la Metodología no declara.} La lista «Qué no se compara» de la Metodología omite varios de los
+      puntos anteriores que el README del arnés sí declara (bootstrap, superficie de volatilidad); ver
+      \texttt{HALLAZGOS.md} (H06).
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap12-referencias}
+
+La comparación con una implementación alternativa como parte de la validación continua de un modelo se enmarca en
+\citet{fed2011}; \citet{morini2011} es un texto de referencia sobre riesgo de modelo para quants, traders y validadores. Las
+fórmulas que los motores analíticos de QuantLib reproducen son las de \citet{garman1983}, \citet{black1973},
+\citet{hull1990} y \citet{jamshidian1989}; para comparar métodos de interpolación de curvas véase \citet{hagan2006}, y
+para el ajuste del modelo de Hull--White a la curva inicial, \citet{brigo2006}.
