@@ -1392,6 +1392,17 @@ TEST(ExposureEngine, AadRejectsNonLinearCurves) {
     EXPECT_NO_THROW(ExposureEngine(makeMarket(), demoModel(), cfg).xvaSensitivities(set, hazard, 0.6, hazard, 0.6, 0.005));
 }
 
+TEST(ExposureEngine, AadFundingSpreadErrorNamesTheMethodThatRejectsIt) {
+    const FlatHazardRate hazard(0.02);
+    const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(10, schedule(0, 30, 5)));
+    try {
+        engine.xvaSensitivities(setOf({s0()}), hazard, 0.6, hazard, 0.6, -0.005);
+        FAIL() << "a negative funding spread must be rejected";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("xvaSensitivities: funding spread"), std::string::npos) << e.what();
+    }
+}
+
 TEST(ExposureEngine, AadMaxThreadsCapsTheWorkersAndKeepsTheResult) {
     // One tape per worker thread. The cap bounds the tapes (memory); the paths are summed in order of their chunk, so
     // only the rounding of the sum depends on it.

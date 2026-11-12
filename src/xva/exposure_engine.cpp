@@ -1132,7 +1132,7 @@ XvaSensitivities ExposureEngine::xvaSensitivities(const NettingSetSpec& set, con
     validateLgd(counterpartyLgd, "counterparty");
     validateLgd(ownLgd, "own");
     if (!std::isfinite(fundingSpread) || fundingSpread < 0.0)
-        throw std::invalid_argument("computeXva: funding spread must be finite and >= 0");
+        throw std::invalid_argument("ExposureEngine::xvaSensitivities: funding spread must be finite and >= 0");
     requireLinear(market_.tiie, "TIIE-F");
     requireLinear(market_.sofr, "SOFR");
     if (market_.mxnUsd) requireLinear(*market_.mxnUsd, "MXN-USD");
