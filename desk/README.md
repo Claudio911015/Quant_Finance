@@ -33,7 +33,7 @@ Para usar otro intérprete de Python: `QF_PYTHON=/ruta/a/python ./desk/run.sh`.
 
 - `BANXICO_TOKEN`: token de la API SIE de Banxico, necesario solo para traer TIIE de Fondeo (SF331451) y FIX (SF43718) desde la fuente. Se lee solo del entorno del proceso del backend; nunca se guarda en base ni se devuelve en respuestas. Se obtiene registrándose en el portal SIE API de Banxico (https://www.banxico.org.mx/SieAPIRest/service/v1/token), que pide captcha; lo genera el usuario. Sin ella, el resto de la aplicación funciona igual.
 - `MDF_DB`: base de MarketDataFeed (por omisión `~/Git/MarketDataFeed/build/sofr.db`).
-- `MDF_FETCH`: ejecutable `fetch_sofr` de MarketDataFeed (por omisión `~/Git/MarketDataFeed/build/examples/fetch_sofr`).
+- `MDF_FETCH`: ejecutable `fetch_sofr` de MarketDataFeed (por omisión `examples/fetch_sofr` dentro del directorio de `MDF_DB`: con `MDF_DB` sin definir es `~/Git/MarketDataFeed/build/examples/fetch_sofr`, pero si solo se define `MDF_DB` el ejecutable que se busca cambia con ella).
 
 ## Fijaciones desde la fuente
 
@@ -87,7 +87,7 @@ Ejemplo de cron (respaldo diario a las 02:30):
 - `MKT-LIVE` se construye desde la base de MarketDataFeed (SOFR y Treasuries) y FRED (DEXMXUS). Se actualiza con el botón "Actualizar datos" de la pantalla Mercado o con `POST /api/market/refresh`. Es de solo lectura y cada actualización lo reescribe por completo. `MX-DEMO` no cambia.
 - Rutas por omisión (sobrescribibles con variables de entorno):
   - `MDF_DB`: `~/Git/MarketDataFeed/build/sofr.db`
-  - `MDF_FETCH`: `~/Git/MarketDataFeed/build/examples/fetch_sofr`
+  - `MDF_FETCH`: `<directorio de MDF_DB>/examples/fetch_sofr` (con `MDF_DB` por omisión, `~/Git/MarketDataFeed/build/examples/fetch_sofr`)
 - Actualizar la base a mano:
 
   ```bash
