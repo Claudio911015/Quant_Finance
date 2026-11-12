@@ -55,8 +55,10 @@ def _observed(d: date, saturday_to_friday: bool = True) -> date:
     """Día en que se observa un feriado fijo de EE. UU.: domingo -> lunes, sábado -> viernes.
 
     `saturday_to_friday=False` deja el sábado donde está: el 1 de enero no se traslada al año anterior y
-    el Día de los Veteranos tampoco (la Fed de Nueva York publicó SOFR el viernes 2023-11-10 y las Reservas
-    Federales abren el viernes anterior a un feriado en sábado, K.8)."""
+    el Día de los Veteranos tampoco. La excepción del Día de los Veteranos se fijó por contraste con los
+    datos: la Fed de Nueva York publicó SOFR el viernes 2023-11-10 (HALLAZGOS.md, H19, 2020-2026). No la
+    respalda la página K.8 de la Fed, que dice lo mismo de todo feriado en sábado (los Bancos de la Reserva
+    abren el viernes anterior) y por tanto tampoco separa este feriado del 4 de julio, que sí se traslada."""
     if d.weekday() == 6:
         return d + timedelta(days=1)
     if d.weekday() == 5 and saturday_to_friday:
