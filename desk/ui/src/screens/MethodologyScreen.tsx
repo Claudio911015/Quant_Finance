@@ -435,6 +435,10 @@ const XVA_SECTIONS: Section[] = [
         text: 'Sintéticas: no son datos de mercado. Bootstrap tramo a tramo de CDS con prima trimestral ACT/360, recuperación dada y descuento con TIIE-F; intensidad constante por tramos. Con datos reales se cargarían diferenciales de CDS o de bonos del emisor. Si una contraparte no tiene curva, se usa un respaldo plano, con aviso de supuesto.',
       },
       {
+        label: 'Convenciones del CDS',
+        text: 'Simplificadas respecto de un CDS de mercado. Las primas son trimestrales y caen en los días round(k·365/4) desde la fecha de valuación, sin fechas IMM ni calendario de días hábiles; un plazo que no es múltiplo de un trimestre termina en un pago corto en round(365·T). El plazo T de cada cotización se mide como 365·T días. La prima se devenga ACT/360 sobre esos días. El incumplimiento se supone a mitad de periodo: la pata de protección descuenta la probabilidad de incumplimiento de cada periodo con el factor de su punto medio, y la prima devengada hasta el incumplimiento es la mitad de la del periodo. Contra una integración diaria el spread par cambia menos de 1×10⁻⁴ en términos relativos (medido con las curvas sintéticas del desk).',
+      },
+      {
         label: 'Límites del XVA',
         text: 'Sin margen ni colateral en la exposición. Sin riesgo de correlación adversa (wrong-way). Base de cross currency determinista: un swap SOFR de una contraparte con colateral MXN queda con un sesgo determinista del tamaño de la base, porque el tipo de cambio deriva con esa base. EPE* se descuenta con la cuenta TIIE-F aunque el colateral sea USD. El periodo en curso se compone en continuo con la tasa simulada, mientras el desk capitaliza diario: diferencia de segundo orden. Excluidos: opciones, caps/floors, swaptions, bonos y forwards FX. El error de Monte Carlo se informa como error estándar del CVA. Fuera de alcance: KVA, MVA, contribuciones marginales por operación, XVA en PV o contabilidad.',
       },

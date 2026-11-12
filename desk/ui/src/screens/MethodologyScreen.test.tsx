@@ -273,6 +273,7 @@ describe('MethodologyScreen', () => {
         'Definiciones',
         'XVA incremental',
         'Curvas de crédito',
+        'Convenciones del CDS',
         'Límites del XVA',
       ]) {
         expect(xvaRow(label), label).not.toBe('');
@@ -320,6 +321,18 @@ describe('MethodologyScreen', () => {
       expect(xvaRow('Curvas de crédito')).toContain('no son datos de mercado');
       expect(xvaRow('Curvas de crédito')).toContain('Bootstrap');
       expect(xvaRow('Curvas de crédito')).toContain('CDS');
+    });
+
+    it('declara las convenciones simplificadas del CDS', () => {
+      renderScreen();
+      const row = xvaRow('Convenciones del CDS');
+      expect(row).toContain('trimestrales');
+      expect(row).toContain('round(k·365/4)');
+      expect(row).toContain('sin fechas IMM');
+      expect(row).toContain('calendario');
+      expect(row).toContain('ACT/360');
+      expect(row).toContain('mitad de periodo');
+      expect(row).toContain('prima devengada');
     });
 
     it('declara los límites: wrong-way, base determinista, productos excluidos y error de MC', () => {
