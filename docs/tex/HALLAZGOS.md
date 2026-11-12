@@ -167,3 +167,19 @@ Qué hace el código: `settled_flows` despacha el bono a `aging.bond_settled`, q
 Qué declara la Metodología/el diseño: Metodología, «Bono y cap/floor envejecidos»: «sus cupones y su amortización se liquidan»; el cap/floor y la swaption no tienen liquidación derivada.
 Impacto: ninguno en el cálculo; el encabezado del módulo describe un estado anterior y puede hacer creer que el cupón y la amortización de un bono no entran al P&L.
 Capítulo: 8 (Ciclo de vida, liquidaciones y P&L)
+
+## H19 — El calendario `US` marca inhábil el 2023-11-10, pero la Fed de Nueva York publicó SOFR ese día
+Archivo: `desk/api/calendars.py`
+Símbolo: `_united_states`, `_observed`
+Qué hace el código: un feriado de fecha fija en sábado se observa el viernes anterior (excepto el 1 de enero). Veterans Day de 2023 cayó en sábado (11 de noviembre), así que `is_business_day("US", date(2023, 11, 10))` es falso (`holidays("US", 2023)` lo nombra «Veterans Day»). Comprobación hecha el 2026-11-11 con la API de la Fed de Nueva York (`search.json`, año por año de 2020 a 2026; 1 712 observaciones del 2020-01-02 al 2026-11-09): todos los días que el calendario marca hábiles tienen SOFR, y la única fecha con SOFR publicada que el calendario marca inhábil es 2023-11-10 (`percentRate` 5.32). Las Reservas Federales abren el viernes anterior a un feriado en sábado (Fed, K.8), aunque el calendario SIFMA sí lo trata como cierre.
+Qué declara la Metodología/el diseño: Metodología, «Calendarios»: «de publicación de SOFR (SIFMA) en EE. UU. para SOFR, por reglas 2020–2040. Una fijación no publicada en día inhábil de su índice no es faltante.» El docstring del módulo dice «calendario SIFMA (el de la publicación de SOFR)».
+Impacto: bajo. Una operación envejecida a través del 2023-11-10 con SOFR cargada ese día la usa tal cual (una fijación cargada en día inhábil se usa), y una fijación faltante ese día no avisaría. Los demás sábados observados de 2020 a 2026 (3 de julio de 2020, 24 de diciembre de 2021, 3 de julio de 2026) sí coinciden con la ausencia de SOFR. El próximo caso de Veterans Day en sábado es el 2028-11-11 (viernes 2028-11-10): sin comprobar.
+Capítulo: 1 (Introducción, arquitectura y convenciones)
+
+## H20 — `MDF_FETCH` por omisión sigue a `MDF_DB`; el README lo da como una ruta fija
+Archivo: `desk/api/app.py`
+Símbolo: `create_app` (`app.config["MDF_FETCH"]`)
+Qué hace el código: `MDF_FETCH` por omisión es `<directorio de MDF_DB>/examples/fetch_sofr`. Con `MDF_DB` sin definir coincide con la ruta del README (`~/Git/MarketDataFeed/build/examples/fetch_sofr`); si solo se define `MDF_DB`, el ejecutable que se busca cambia con ella.
+Qué declara la Metodología/el diseño: `desk/README.md`, «Datos de mercado reales»: «`MDF_FETCH`: `~/Git/MarketDataFeed/build/examples/fetch_sofr`» como ruta por omisión.
+Impacto: bajo; solo afecta a quien cambie `MDF_DB` y espere que el ejecutable siga en la ruta fija. Un refresco con la ruta equivocada responde 502 («No se pudo ejecutar MarketDataFeed»).
+Capítulo: 13 (Fuentes de datos y procedencia)
