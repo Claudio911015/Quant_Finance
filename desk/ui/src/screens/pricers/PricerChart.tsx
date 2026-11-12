@@ -19,6 +19,8 @@ export type ChartData =
       currency: string;
       /** Días del periodo de pago de la curva (del snapshot); solo lo usan cap_floor y swaption. */
       periodDays?: number;
+      /** Serie ya calculada por el backend (exóticos con barrera): se dibuja tal cual, sin recalcularla desde `params`. */
+      series?: PayoffSeries;
     };
 
 type PayoffData = Extract<ChartData, { kind: 'payoff' }>;
@@ -26,6 +28,8 @@ type PayoffData = Extract<ChartData, { kind: 'payoff' }>;
 /** Serie de una gráfica de payoff. `spots` es el eje horizontal: precio del subyacente o tasa, según el producto. */
 export interface PayoffSeries {
   strike: number;
+  /** Una marca vertical por barrera; sin ella, la del strike. */
+  barriers?: number[];
   spots: number[];
   pnl: number[];
 }
@@ -187,6 +191,9 @@ export function payoffText(product: ProductId): PayoffText {
         mark: 'Strike',
         note: 'Aproximación con descuento plano; el PV exacto es el de arriba.',
       };
+    case 'fx_no_touch':
+    case 'fx_double_no_touch':
+      return { title: 'Valor contra spot', xName: 'Spot (MXN por USD)', series: 'Valor', mark: 'Barrera' };
     default:
       return {
         title: 'Resultado al vencimiento, neto de prima',
@@ -201,6 +208,7 @@ const fmtSpot = (v: number) => fmtNumber(v, 2);
 const fmtPct = (v: number) => `${fmtNumber(v * 100, 2)} %`;
 
 function payoffFor(data: PayoffData): { series: PayoffSeries; fmtX: (v: number) => string } | null {
+  if (data.series) return { series: data.series, fmtX: fmtSpot };
   let series: PayoffSeries | null;
   let fmtX = fmtSpot;
   switch (data.product) {
@@ -221,7 +229,7 @@ function payoffFor(data: PayoffData): { series: PayoffSeries; fmtX: (v: number) 
   return series && { series, fmtX };
 }
 
-function buildOption(data: ChartData): EChartsCoreOption | null {
+export function buildOption(data: ChartData): EChartsCoreOption | null {
   const text = token('--text-dim', '#a59e90');
   const line = token('--border', '#332f29');
   const pos = token('--pos', '#3fb68b');
@@ -295,6 +303,8 @@ function buildOption(data: ChartData): EChartsCoreOption | null {
   const { series, fmtX } = view;
   const labels = payoffText(data.product);
   const seriesName = `${labels.series} (${data.currency})`;
+  const marks = series.barriers ?? [series.strike];
+  const xs = [...series.spots, ...marks]; // la barrera queda en el borde de la zona viva: el eje debe alcanzarla
   return {
     ...base,
     // abajo cabe el nombre del eje, que con el margen de las demás gráficas quedaba recortado
@@ -306,8 +316,8 @@ function buildOption(data: ChartData): EChartsCoreOption | null {
     },
     xAxis: {
       type: 'value',
-      min: series.spots[0],
-      max: series.spots[series.spots.length - 1],
+      min: Math.min(...xs),
+      max: Math.max(...xs),
       name: labels.xName,
       nameLocation: 'middle',
       nameGap: 28,
@@ -337,7 +347,7 @@ function buildOption(data: ChartData): EChartsCoreOption | null {
           label: { color: text, fontSize: 11 },
           data: [
             { yAxis: 0, label: { show: false } },
-            { xAxis: series.strike, label: { formatter: labels.mark } },
+            ...marks.map((xAxis) => ({ xAxis, label: { formatter: labels.mark } })),
           ],
         },
       },
