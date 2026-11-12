@@ -116,7 +116,7 @@ Las sensibilidades del XVA se calculan por diferenciación adjunta con [XAD](htt
 Desde la raíz del repo:
 
 ```bash
-# C++ (506 tests)
+# C++ (518 tests con XAD, 510 con -DQF_WITH_XAD=OFF)
 cmake --build build -j4 2>&1 | tail -3 && cd build && ctest --output-on-failure 2>&1 | tail -3; cd ..
 
 # Bindings Python existentes
