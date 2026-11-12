@@ -23,3 +23,9 @@
   border-top: 1px solid var(--border-strong);
   font-weight: 600;
 }
+
+/* Unidad del grupo, en el mismo renglón que su título. */
+.xva-table .xva-sens__group .xva-sens__unit {
+  color: var(--text-dim);
+  font-weight: 400;
+}

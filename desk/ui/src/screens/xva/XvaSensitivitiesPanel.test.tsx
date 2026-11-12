@@ -26,11 +26,15 @@ const curvesTable = () => screen.getByRole('table', { name: 'Sensibilidad por cu
 const factorsTable = () =>
   screen.getByRole('table', { name: 'Sensibilidad a tipo de cambio, volatilidades, crédito y fondeo' });
 
-/** La fila de una tabla cuya primera celda es `label`, dentro del grupo (tbody) cuyo título es `group`. */
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** La fila de una tabla cuya primera celda es `label`, dentro del grupo (tbody) cuyo título es `group` (seguido,
+ * si lo trae, de « · unidad»). */
 function rowIn(table: HTMLElement, group: string, label: string): HTMLElement {
+  const title = new RegExp(`^${escape(group)}(?:\\s*·|$)`);
   const body = within(table)
     .getAllByRole('rowgroup')
-    .find((rg) => within(rg).queryByRole('rowheader', { name: group }) !== null && rg.tagName === 'TBODY');
+    .find((rg) => within(rg).queryByRole('rowheader', { name: title }) !== null && rg.tagName === 'TBODY');
   if (!body) throw new Error(`sin grupo ${group}`);
   return within(body).getByRole('row', { name: new RegExp(`^${label}(?:\\s|$)`) });
 }
@@ -60,13 +64,21 @@ describe('XvaSensitivitiesPanel: petición', () => {
     await screen.findByRole('table', { name: 'Sensibilidad por curva y pilar' });
   });
 
-  it('muestra «Calculando…» con el botón deshabilitado mientras la promesa no resuelve', async () => {
+  it('avisa antes de calcular que puede tardar decenas de segundos', () => {
+    renderPanel();
+    expect(screen.getByText(/pueden tardar decenas de segundos en conjuntos largos/)).toBeTruthy();
+    expect(screen.getByText(/tiempo real y lo que habría tardado por choques/)).toBeTruthy();
+    expect(screen.queryByText(/^Calculando las sensibilidades/)).toBeNull();
+  });
+
+  it('muestra «Calculando…» con el botón deshabilitado y el aviso de espera mientras la promesa no resuelve', async () => {
     let resolve: (r: XvaSensitivitiesResponse) => void = () => {};
     mocks.getXvaSensitivities.mockReturnValue(new Promise<XvaSensitivitiesResponse>((r) => (resolve = r)));
     renderPanel();
     click();
     const busy = screen.getByRole('button', { name: 'Calculando…' }) as HTMLButtonElement;
     expect(busy.disabled).toBe(true);
+    expect(screen.getByText(/^Calculando las sensibilidades: puede tardar decenas de segundos/)).toBeTruthy();
     resolve(FIXTURE);
     const again = (await screen.findByRole('button', { name: 'Calcular sensibilidades' })) as HTMLButtonElement;
     expect(again.disabled).toBe(false);
@@ -138,11 +150,19 @@ describe('XvaSensitivitiesPanel: resultado', () => {
     expect(within(table).getAllByRole('row', { name: /^DV01 paralelo/ })).toHaveLength(3);
   });
 
-  it('indica la unidad de las curvas, del resto de factores y del XVA de la contraparte', () => {
+  it('indica la unidad de las curvas y la de cada grupo de factores (tipo de cambio, volatilidades, CDS, intensidad, fondeo)', () => {
     expect(screen.getByRole('heading', { name: 'Curvas de tasas (MXN por pb)' })).toBeTruthy();
-    const foot = screen.getByText(/^Unidades\./).textContent ?? '';
-    expect(foot).toContain('MXN por 1 % del spot');
-    expect(foot).toContain('por pb de vol normal (σ Hull-White)');
+    const groups = within(factorsTable())
+      .getAllByRole('rowheader')
+      .map((h) => h.textContent)
+      .filter((t) => t?.includes(' · '));
+    expect(groups).toEqual([
+      'Tipo de cambio · MXN por 1 % del spot',
+      `Volatilidades · ${FIXTURE.units.vols}`,
+      `Crédito de ${ALFA} · MXN por pb de cotización de CDS`,
+      'Crédito propio · MXN por pb de intensidad',
+      'Fondeo · MXN por pb',
+    ]);
     const { xva } = FIXTURE;
     expect(screen.getByText(/^XVA de la contraparte:/).textContent).toContain(`CVA ${money(xva.cva_mxn)}`);
   });
@@ -171,6 +191,7 @@ describe('XvaSensitivitiesPanel: resultado', () => {
   });
 
   it('muestra los supuestos, el método y el costo medido frente a los choques', () => {
+    expect(screen.getByText(/^Un pilar o plazo en cero queda más allá del último vencimiento/)).toBeTruthy();
     expect(screen.getByText(/^Derivadas parciales:/)).toBeTruthy();
     expect(screen.getByText(/Diferenciación adjunta \(XAD 2\.2\.0\)/).textContent).toContain('Jacobiano de CDS: Reprecio');
     const cost = screen.getByText(/^Calculado en/).textContent ?? '';
@@ -178,6 +199,15 @@ describe('XvaSensitivitiesPanel: resultado', () => {
     expect(cost).toContain('0.42 s');
     expect(cost).toContain('48 insumos');
     expect(cost).toContain('40.3 s');
+  });
+
+  it('el eje de la gráfica rotula con la etiqueta del pilar sin los días (que quedan en el tooltip) y dice qué mide', () => {
+    const axis = charts[charts.length - 1].option as unknown as {
+      xAxis: { axisLabel: { formatter: (v: string) => string } };
+      yAxis: { name: string };
+    };
+    expect(axis.xAxis.axisLabel.formatter('1x28 / 1M (28 d)')).toBe('1x28 / 1M');
+    expect(axis.yAxis.name).toBe('CVA, MXN por pb');
   });
 
   it('una gráfica de barras del CVA por pilar con una serie por curva, alineada por plazo en días', () => {

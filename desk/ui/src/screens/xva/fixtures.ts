@@ -344,7 +344,7 @@ export const XVA_SENSITIVITIES_FIXTURE: XvaSensitivitiesResponse = {
     curves: 'MXN por pb',
     fx: 'MXN por 1 % del spot',
     vols: 'MXN por punto (vol USDMXN), por pb de vol normal (σ Hull-White), por 0.01 (a)',
-    cds: 'MXN por pb',
+    cds: 'MXN por pb (de cotización de CDS o, sin curva, de intensidad)',
     funding: 'MXN por pb',
   },
   curves: [

@@ -48,11 +48,11 @@ export function sensitivityOption(curves: XvaSensCurve[]): EChartsCoreOption {
       type: 'category',
       data: cats.map((c) => c.name),
       axisLine: { lineStyle: { color: cssColor('--border-strong') } },
-      axisLabel: { color: dim, rotate: 45, interval: 0 },
+      axisLabel: { color: dim, rotate: 45, interval: 0, formatter: (v: string) => v.replace(/ \(\d+ d\)$/, '') },
     },
     yAxis: {
       type: 'value',
-      name: 'MXN por pb',
+      name: 'CVA, MXN por pb',
       nameTextStyle: { color: dim },
       axisLabel: { color: dim, formatter: (v: number) => fmtNumber(v, 0) },
       axisLine: { lineStyle: { color: cssColor('--border-strong') } },
@@ -95,12 +95,13 @@ function Head({ first }: { first: string }) {
   );
 }
 
-function Group({ title, children }: { title: string; children: React.ReactNode }) {
+function Group({ title, unit, children }: { title: string; unit?: string; children: React.ReactNode }) {
   return (
     <tbody>
       <tr className="xva-sens__group">
         <th colSpan={5} scope="rowgroup">
           {title}
+          {unit && <span className="xva-sens__unit"> · {unit}</span>}
         </th>
       </tr>
       {children}
@@ -118,12 +119,17 @@ function Line({ label, row, strong }: { label: string; row: XvaSensRow; strong?:
 }
 
 /** Sin CDS cotizados (curva plana o supuesta) la sensibilidad de crédito es la de la intensidad de cada tramo. */
-function creditLines(credit: XvaSensCredit): { label: string; row: XvaSensRow }[] {
-  if (credit.cds.length > 0) return credit.cds.map((c) => ({ label: `CDS ${c.tenor}`, row: c }));
-  return credit.hazards.map((h) => ({
-    label: h.to_years === null ? 'Intensidad (tramo único)' : `Intensidad hasta ${fmtNumber(h.to_years, 2)} años`,
-    row: h,
-  }));
+function creditLines(credit: XvaSensCredit): { unit: string; lines: { label: string; row: XvaSensRow }[] } {
+  if (credit.cds.length > 0) {
+    return { unit: 'MXN por pb de cotización de CDS', lines: credit.cds.map((c) => ({ label: `CDS ${c.tenor}`, row: c })) };
+  }
+  return {
+    unit: 'MXN por pb de intensidad',
+    lines: credit.hazards.map((h) => ({
+      label: h.to_years === null ? 'Intensidad (tramo único)' : `Intensidad hasta ${fmtNumber(h.to_years, 2)} años`,
+      row: h,
+    })),
+  };
 }
 
 function CurvesTable({ curves }: { curves: XvaSensCurve[] }) {
@@ -146,29 +152,29 @@ function CurvesTable({ curves }: { curves: XvaSensCurve[] }) {
 
 function FactorsTable({ r }: { r: XvaSensitivitiesResponse }) {
   const entities = [
-    { title: `Crédito de ${r.counterparty}`, lines: creditLines(r.credit.counterparty) },
-    { title: 'Crédito propio', lines: creditLines(r.credit.own) },
+    { title: `Crédito de ${r.counterparty}`, ...creditLines(r.credit.counterparty) },
+    { title: 'Crédito propio', ...creditLines(r.credit.own) },
   ].filter((e) => e.lines.length > 0);
   return (
     <div className="xva-scroll">
       <table className="xva-table" aria-label="Sensibilidad a tipo de cambio, volatilidades, crédito y fondeo">
         <Head first="Factor" />
-        <Group title="Tipo de cambio">
+        <Group title="Tipo de cambio" unit={r.units.fx}>
           <Line label={r.fx.label} row={r.fx} />
         </Group>
-        <Group title="Volatilidades">
+        <Group title="Volatilidades" unit={r.units.vols}>
           {r.vols.map((v) => (
             <Line key={v.param} label={v.label} row={v} />
           ))}
         </Group>
         {entities.map((e) => (
-          <Group key={e.title} title={e.title}>
+          <Group key={e.title} title={e.title} unit={e.unit}>
             {e.lines.map((l) => (
               <Line key={l.label} label={l.label} row={l.row} />
             ))}
           </Group>
         ))}
-        <Group title="Fondeo">
+        <Group title="Fondeo" unit={r.units.funding}>
           <Line label="Diferencial de fondeo" row={r.funding} />
         </Group>
       </table>
@@ -199,6 +205,10 @@ function Result({ r }: { r: XvaSensitivitiesResponse }) {
             XVA de la contraparte: CVA {fmtMoney(xva.cva_mxn, 'MXN')} · DVA {fmtMoney(xva.dva_mxn, 'MXN')} · FVA{' '}
             {fmtMoney(xva.fva_mxn, 'MXN')} · total {fmtMoney(xva.total_mxn, 'MXN')}. Total = CVA − DVA + FVA.
           </p>
+          <p className="xva-note xva-note--plain">
+            Calculado en {fmtNumber(r.elapsed_s, 1)} s (una valuación del XVA tarda {fmtNumber(r.valuation_elapsed_s, 2)} s).
+            Por choques sobre los {fmtNumber(r.n_inputs, 0)} insumos tardaría unos {fmtNumber(r.bump_cost_estimate_s, 1)} s.
+          </p>
           <h3 className="xva-subtitle">Curvas de tasas ({r.units.curves})</h3>
           <CurvesTable curves={r.curves} />
           <div className="xva-sens__chart">
@@ -211,8 +221,8 @@ function Result({ r }: { r: XvaSensitivitiesResponse }) {
           <h3 className="xva-subtitle">Otros factores de riesgo</h3>
           <FactorsTable r={r} />
           <p className="xva-foot">
-            Unidades. Tipo de cambio: {r.units.fx}. Volatilidades: {r.units.vols}. CDS: {r.units.cds}. Fondeo:{' '}
-            {r.units.funding}.
+            Un pilar o plazo en cero queda más allá del último vencimiento de la contraparte: no influye en su
+            exposición.
           </p>
         </>
       )}
@@ -225,10 +235,6 @@ function Result({ r }: { r: XvaSensitivitiesResponse }) {
       )}
       <p className="xva-foot">
         {r.method}. Jacobiano de CDS: {r.cds_jacobian}. {fmtNumber(r.paths, 0)} trayectorias, semilla {r.seed}.
-      </p>
-      <p className="xva-foot">
-        Calculado en {fmtNumber(r.elapsed_s, 1)} s (una valuación del XVA tarda {fmtNumber(r.valuation_elapsed_s, 2)} s).
-        Por choques sobre los {fmtNumber(r.n_inputs, 0)} insumos tardaría unos {fmtNumber(r.bump_cost_estimate_s, 1)} s.
       </p>
     </div>
   );
@@ -278,13 +284,20 @@ export function XvaSensitivitiesPanel({ snapshotId, counterparty }: Props) {
       <h2 id="xva-sens-title">Sensibilidades de {counterparty}</h2>
       <p className="xva-note xva-note--plain">
         Derivadas del CVA, DVA y FVA respecto de las curvas, el tipo de cambio, las volatilidades, el crédito y el
-        fondeo, por diferenciación adjunta. Se calculan a petición.
+        fondeo, por diferenciación adjunta. Se calculan a petición y pueden tardar decenas de segundos en conjuntos
+        largos (muchas operaciones o vencimientos a 10 años); al terminar se muestra el tiempo real y lo que habría
+        tardado por choques.
       </p>
       <div className="xva-actions">
         <button type="button" className="xva-btn xva-btn--primary" onClick={calculate} disabled={calculating}>
           {calculating ? 'Calculando…' : 'Calcular sensibilidades'}
         </button>
       </div>
+      {calculating && (
+        <p className="xva-note xva-note--plain" aria-live="polite">
+          Calculando las sensibilidades: puede tardar decenas de segundos. El resto de la pantalla sigue disponible.
+        </p>
+      )}
       {error && (
         <p className="xva-note xva-note--error" role="alert">
           {error}
