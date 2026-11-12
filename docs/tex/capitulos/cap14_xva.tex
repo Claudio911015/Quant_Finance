@@ -1,6 +1,802 @@
-%% Capítulo marcador DEFINITIVO para este corte: lo escribe el corte de XVA al cerrar, con _plantilla.tex.
 \chapter{XVA y curvas de crédito}\label{cap:xva}
 
-Exposición, CVA/DVA/FVA y curvas de crédito por CDS; lo escribe el corte de XVA al cerrar, con \texttt{capitulos/\_plantilla.tex}.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap14-proposito}
 
-\todo[inline]{Pendiente: capítulo del corte de XVA (exposición esperada, CVA/DVA/FVA, curvas de crédito por CDS). Fuentes previstas, ya confirmadas en la bibliografía: \citet{gregory2015} y \citet{glasserman2003}. Escribirlo con \texttt{capitulos/\_plantilla.tex} y retirar este aviso.}
+Este capítulo documenta el módulo de XVA de QF Desk: lo que el código calcula para decir cuánto vale el riesgo de
+crédito y de fondeo de las operaciones con una contraparte, y cuánto cambia ese valor si se añade una operación
+antes de pactarla. Son cuatro cálculos encadenados.
+\begin{enumerate}
+  \item \emph{Curvas de crédito}: de cotizaciones de CDS sintéticas se obtiene, por \emph{bootstrap}, una
+        intensidad de incumplimiento constante por tramos para cada contraparte y para el propio desk, y de
+        ella las probabilidades de supervivencia y de incumplimiento (sección~\ref{sec:cap14-cds}).
+  \item \emph{Motor de exposición multimoneda}: simula, bajo la medida de riesgo neutral en \MXN, la tasa
+        corta de cada moneda y el tipo de cambio \USD/\MXN, revalúa en cada fecha todas las operaciones de la
+        contraparte con su calendario real y las compensa entre monedas
+        (secciones~\ref{sec:cap14-modelo}--\ref{sec:cap14-perfiles}).
+  \item \emph{CVA, DVA y FVA}: ajustes calculados sobre los perfiles de exposición descontados y las curvas de
+        crédito (sección~\ref{sec:cap14-xva}).
+  \item \emph{XVA incremental}: la diferencia de esos ajustes con y sin una operación candidata, sobre las
+        mismas trayectorias (sección~\ref{sec:cap14-incremental}).
+\end{enumerate}
+El cálculo es informativo: \textbf{no entra al valor presente ni a la contabilidad} (el aviso permanente de la
+pantalla XVA y de la respuesta de la API es «XVA informativo: no entra al PV ni a la contabilidad»). Reemplaza
+al calculador anterior (\texttt{CVACalculator}), que sigue en la biblioteca pero ya no alimenta ninguna cifra
+del desk; la sección~\ref{sec:cap14-validacion} documenta por qué (un sesgo medido). Las curvas y los
+instrumentos que se revalúan son los de los capítulos~\ref{cap:curvas}, \ref{cap:swaps-ois} y~\ref{cap:xccy};
+la convención de tiempo ($t=\text{días}/365$) y de signo es la del capítulo~\ref{cap:introduccion}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap14-notacion}
+
+Los símbolos comunes ($\DF{c}{T}$, $\Nom$, $\K$, $\Ncdf$, $\Spot$, $\E$, $\Q$, $\basis$) están en el
+apéndice~\ref{ap:simbolos}. Todos los tiempos son años calculados como días$/365$ desde la fecha de valuación
+$t_0$ (el \texttt{as\_of} del snapshot); los montos del XVA están en \MXN. Se usa el subíndice $c\in\{\mathrm M,\mathrm U\}$
+para la moneda de un factor (M = \MXN, curva \cTIIE; U = \USD, curva \cSOFR). Los símbolos propios son:
+\begin{itemize}
+  \item \emph{Crédito}. $R$: recuperación (adimensional, $0\le R<1$); $\mathrm{LGD}=1-R$. $s_j$: cotización
+        (spread anual, decimal) del CDS de plazo $T_j$. $h(t)$, $h_j$: intensidad de incumplimiento (tasa anual);
+        $v_j$: vértice (años) donde termina el tramo $j$. $S(t)$: probabilidad de supervivencia; $S_c(t)$ la de la
+        contraparte y $S_o(t)$ la propia (el desk). $d_k$: día (desde $t_0$) del pago $k$ de prima, $t_k=d_k/365$
+        y $\tau_k=(d_k-d_{k-1})/360$ su devengo. $\Pi_{\mathrm{prot}}$ y $\Ann_{\mathrm{cds}}$: pata de protección
+        y anualidad de riesgo (prima más prima devengada) por unidad de nominal.
+  \item \emph{Factores}. $a_c$, $\sigma_c$: reversión a la media y volatilidad de la moneda $c$;
+        $\sigma_X$: volatilidad del tipo de cambio; $\rho_{\mathrm{MU}}$, $\rho_{\mathrm{MX}}$, $\rho_{\mathrm{UX}}$:
+        correlaciones entre los brownianos $W_{\mathrm M}$, $W_{\mathrm U}$ (tasas) y $W_X$ (tipo de cambio).
+        $x_c(t)$: factor de la tasa corta, $r_c(t)=f_c(0,t)+x_c(t)$; $y_c(t)$: su varianza determinista de
+        Cheyette; $\mu_c$: deriva adicional (quanto); $m_c(t)=\E[x_c(t)]$ y $M_c(t)=\int_0^t m_c$.
+        $\tilde x_c=x_c-m_c$ y $J_c=\int\tilde x_c$. $I_c(t)=\int_0^t r_c$, y
+        $\mathcal B(t)=e^{I_{\mathrm M}(t)}$ es la cuenta bancaria \MXN\ simulada. $X_t$: tipo de cambio
+        (\MXN\ por \USD) que arranca en el spot $\Spot$. $q(t)=\DF{\cMXNcol}{t}/\DF{\cTIIE}{t}$ y
+        $\basis(t)=-\tfrac{d}{dt}\ln q(t)$: factor de base y base instantánea (deterministas).
+        $\beta_c(t,T)=(1-e^{-a_c(T-t)})/a_c$ (años) y $P_c(t,T)$: precio en $t$ del cupón cero de la moneda $c$.
+        $\Delta=1/365$: paso diario de la simulación; $\xi_c$, $\eta_c$, $\zeta$: integrales estocásticas
+        del paso (sección~\ref{sec:cap14-paso}).
+  \item \emph{Valuación}. Una operación es un conjunto de patas $\ell$ con nocional $n_\ell$ (en la moneda de la
+        pata), signos $\phi_\ell,\chi_\ell,\epsilon_\ell\in\{\pm1\}$ (parte flotante, cupón fijo o diferencial,
+        intercambio de nocionales), tasa fija o diferencial $\kappa_\ell$, periodos $i$ que empiezan en $\iota_i$ y pagan en
+        $e_i$ (días desde $t_0$) con devengo $\tau_i=(e_i-\iota_i)/360$, y factor ya compuesto $a_i$ del periodo en
+        curso. $F_i(d)$: factor compuesto del periodo $i$ en el día $d$; $D_\ell(d,e)$: factor de descuento de la
+        pata; $g_i(d)$: cociente de descuento con base. $V_k(d)$: valor de la operación $k$ y
+        $V(d)=\sum_kV_k(d)$ el del conjunto, en \MXN.
+  \item \emph{Perfiles y ajustes}. $t_i=d_i/365$: fechas de la malla de reporte ($d_0=0$, luego fechas
+        mensuales); $V^+=\max(V,0)$ y $V^-=\max(-V,0)$; $\mathrm{EPE}$, $\mathrm{ENE}$, $\mathrm{PFE}_\alpha$ sin
+        descontar y $\mathrm{EPE}^*$, $\mathrm{ENE}^*$ descontadas con $\mathcal B$; $s_f$: diferencial de fondeo
+        (tasa anual); $n$: número de trayectorias (el símbolo $N$ es el nocional); $\mathcal N$: conjunto de
+        compensación vigente de una contraparte y $\mathcal C$: operación candidata del XVA incremental.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap14-modelo}
+
+\begin{sloppypar}
+\subsection{Curvas de crédito por CDS}\label{sec:cap14-cds}
+
+Cada entidad (una contraparte o la entidad \texttt{propia}, que es el desk) guarda en la tabla de solo inserción
+\texttt{credit\_curves} una recuperación $R$ y de 1 a 12 cotizaciones $(T_j,s_j)$ con $0<T_1<\dots<T_J\le30$ años y
+$0<s_j\le0.5$; la vigente es la fila de mayor \texttt{id}
+(\codigo{desk/api/risk/credit_curves.py}{current}, validación en
+\codigo{desk/api/risk/credit_curves.py}{_validated_quotes}). Los datos sembrados son \emph{sintéticos}: plazos
+de 1, 2, 3, 5, 7 y 10 años, $R=40\%$ y diferenciales de 60--120~\pb\ (Banco Alfa), 150--300~\pb\ (Beta), 95--101~\pb\
+(Gamma) y 70--125~\pb\ (propia)
+(\codigo{desk/api/risk/credit_curves.py}{SEED}); su procedencia es siempre «Sintética (inventada para
+demostración)» (\codigo{desk/api/risk/credit_curves.py}{SOURCE}) y no son cotizaciones de mercado.
+
+\paragraph{Calendario de la prima.} Un CDS de plazo $T$ paga prima trimestral en los días
+\begin{equation}\label{eq:cap14-dias-prima}
+  d_k=\operatorname{round}\!\Bigl(\frac{365\,k}{4}\Bigr),\quad k=1,\dots,\lfloor 4T+10^{-9}\rfloor,\qquad
+  t_k=\frac{d_k}{365},\quad \tau_k=\frac{d_k-d_{k-1}}{360},\ d_0=0,
+\end{equation}
+con el redondeo del punto medio hacia arriba ($182.5\to183$) y, si $\operatorname{round}(365\,T)$ excede al último
+$d_k$, un pago corto final en ese día. Las fechas se cuentan desde $t_0$, sin fechas IMM ni ajuste por días
+hábiles. Está en \codigo{src/xva/piecewise_hazard_curve.cpp}{premiumDays}.
+
+\paragraph{Supervivencia.} Con vértices $0<v_1<\dots<v_J$, $v_0=0$, la intensidad es $h(u)=h_j$ para
+$u\in(v_{j-1},v_j]$ y $h_J$ después del último vértice (extrapolación plana), y
+\begin{equation}\label{eq:cap14-supervivencia}
+  S(t)=\exp\Bigl(-\int_0^t h(u)\,du\Bigr)=\exp\Bigl(-\sum_{j}h_j\,\bigl[\min(t,v_j)-v_{j-1}\bigr]^+\Bigr),\qquad S(t)=1\ \ (t\le0),
+\end{equation}
+implementada en \codigo{src/xva/piecewise_hazard_curve.cpp}{PiecewiseHazardCurve::survivalProbability} (la intensidad
+vigente en $t$, en \codigo{src/xva/piecewise_hazard_curve.cpp}{PiecewiseHazardCurve::hazardRate}); el constructor
+exige vértices estrictamente crecientes y $h_j\ge0$
+(\codigo{include/qf/xva/piecewise_hazard_curve.hpp}{PiecewiseHazardCurve}).
+
+\paragraph{Valor de un CDS.} Para el comprador de protección, con $\Delta S_k=S(t_{k-1})-S(t_k)$ ($t_0=0$) y
+$\bar P_k=\DF{\cTIIE}{\tfrac12(t_{k-1}+t_k)}$ (factor de descuento de la curva TIIE-F del snapshot al punto medio del
+periodo),
+\begin{equation}\label{eq:cap14-cds}
+\begin{aligned}
+  \Pi_{\mathrm{prot}} &= (1-R)\sum_k \Delta S_k\,\bar P_k,\\
+  \Ann_{\mathrm{cds}} &= \sum_k \tau_k\,S(t_k)\,\DF{\cTIIE}{t_k} + \frac12\sum_k \tau_k\,\Delta S_k\,\bar P_k,\\
+  V_{\mathrm{CDS}} &= \Nom\bigl[\Pi_{\mathrm{prot}} - s\,\Ann_{\mathrm{cds}}\bigr].
+\end{aligned}
+\end{equation}
+El incumplimiento se supone a mitad de periodo: la protección descuenta con el factor del punto medio y la prima
+devengada hasta el incumplimiento es la mitad de la del periodo
+(\codigo{src/xva/piecewise_hazard_curve.cpp}{cdsValue}). La estructura de la valuación por periodos a partir de
+probabilidades de incumplimiento es la de \citet{hull2000} y \citet{okane2008}.
+
+\begin{diferencia}
+  Un CDS de mercado paga la prima en fechas IMM con ajuste por días hábiles y se valúa con un modelo estándar
+  que integra la distribución del momento del incumplimiento \citep{okane2008}. Aquí los pagos caen en
+  $\operatorname{round}(365k/4)$ días desde la fecha de valuación, el plazo $T$ se mide como $365\,T$ días, el
+  incumplimiento se concentra a mitad de periodo y el descuento es siempre la curva TIIE-F del snapshot. La
+  Metodología declara estas simplificaciones y afirma que, contra una integración diaria, el diferencial par cambia
+  menos de $10^{-4}$ en términos relativos con las curvas sintéticas del desk (cifra de la Metodología; no se
+  reproduce en este capítulo).
+\end{diferencia}
+
+\paragraph{Bootstrap.} Las cotizaciones se ajustan en orden de plazo. Para la cotización $j$, el vértice es el último
+día de pago $v_j=d^{(j)}_{\mathrm{last}}/365$ (igual a $T_j$ cuando $365\,T_j$ es entero; terminar el tramo antes
+dejaría que un tramo posterior moviera el valor de este CDS) y la intensidad $h_j\ge0$ es la que cumple
+\begin{equation}\label{eq:cap14-bootstrap}
+  V_{\mathrm{CDS}}\bigl(T_j,\,s_j;\ h_1,\dots,h_{j-1},h_j\bigr)=0,
+\end{equation}
+con $h_1,\dots,h_{j-1}$ ya fijos. El valor del comprador crece con $h_j$, así que el código evalúa en
+$h_j=0$: si es positivo, la cotización implica una intensidad negativa y lanza el error
+«quote at $T$y implies a negative hazard rate» (el desk lo traduce a un 400 en español); si es cero, $h_j=0$; si es
+negativo, encierra la raíz en $[0,h^{\mathrm{hi}}]$ con $h^{\mathrm{hi}}=\max(10^{-3},\,2s_j/(1-R))$ duplicado hasta
+que el valor sea positivo (a lo más 60 veces) y la resuelve con el método de Brent (tolerancia $10^{-14}$, hasta 200
+iteraciones). Con una sola cotización plana la solución cae cerca de la «regla del triángulo»
+$h\approx s/(1-R)$ (dentro de $2\%$ en las pruebas). Está en
+\codigo{src/xva/piecewise_hazard_curve.cpp}{bootstrapCdsCurve}; el binding es
+\codigo{src/python_bindings/xva_bindings.cpp}{bootstrap_cds_curve} y el desk lo llama en
+\codigo{desk/api/risk/credit_curves.py}{build_curve} con la curva \texttt{TIIE-F} del snapshot
+(\codigo{desk/api/risk/credit_curves.py}{DISCOUNT_CURVE}).
+
+\paragraph{Probabilidades.} De la curva ajustada la API publica, en una malla anual de 1 a 10 años
+(\codigo{desk/api/risk/credit_curves.py}{_element}),
+\begin{equation}\label{eq:cap14-pd}
+  \mathrm{PD}(0,n)=1-S(n),\qquad \mathrm{PD}_{\mathrm{marg}}(n)=S(n-1)-S(n),\qquad n=1,\dots,10,
+\end{equation}
+y la vista de crédito de la exposición informa la intensidad media a 5 años $-\ln S(5)/5$
+(\codigo{desk/api/risk/xva.py}{average_hazard}). Si una contraparte no tiene curva, o su curva no se ajusta con el
+snapshot, el XVA usa su intensidad plana capturada en \texttt{counterparty\_credit} y, sin ella, el supuesto de $1\%$
+anual con recuperación $40\%$ (\codigo{desk/api/risk/xva.py}{credit_for},
+\codigo{desk/api/risk/credit.py}{ASSUMED_NOTE}); lo mismo para la curva \texttt{propia}
+(\codigo{desk/api/risk/xva.py}{own_credit}).
+
+\subsection{Medida y factores del modelo de exposición}\label{sec:cap14-factores}
+
+El motor simula tres fuentes de riesgo bajo la medida de riesgo neutral $\Q^{\mathrm M}$ con la cuenta bancaria
+$\mathcal B$ de \MXN\ como numerario. Cada moneda $c$ tiene una tasa corta de un factor en la forma de Markov de
+Hull--White (de Cheyette) \citep{hull1990,brigo2006,ritchken1995,andersen2010},
+\begin{equation}\label{eq:cap14-factor}
+\begin{gathered}
+  r_c(t)=f_c(0,t)+x_c(t),\qquad dx_c=\bigl(y_c(t)-a_c\,x_c+\mu_c\bigr)dt+\sigma_c\,dW_c,\quad x_c(0)=0,\\[2pt]
+  y_c(t)=\frac{\sigma_c^{2}\bigl(1-e^{-2a_ct}\bigr)}{2a_c},
+\end{gathered}
+\end{equation}
+donde $f_c(0,t)=-\partial_t\ln P_c(0,t)$ es la forward instantánea de la curva inicial (\cTIIE\ para M, \cSOFR\ para U).
+El término $y_c(t)$ hace que el modelo reproduzca la curva inicial (con $\mu_c=0$, $\E[e^{-I_c(t)}]=P_c(0,t)$) sin
+calcular ninguna derivada numérica. La deriva adicional es cero para \MXN\ y, para \USD, el ajuste quanto del cambio de medida de la
+cuenta en \USD\ a la de \MXN,
+\begin{equation}\label{eq:cap14-quanto}
+  \mu_{\mathrm M}=0,\qquad \mu_{\mathrm U}=-\rho_{\mathrm{UX}}\,\sigma_{\mathrm U}\,\sigma_X .
+\end{equation}
+El tipo de cambio es lognormal con la deriva que reproduce el forward de mercado con colateral en \USD,
+\begin{equation}\label{eq:cap14-fx}
+  d\ln X_t=\bigl(r_{\mathrm M}(t)+\basis(t)-r_{\mathrm U}(t)-\tfrac12\sigma_X^{2}\bigr)dt+\sigma_X\,dW_X,
+\end{equation}
+que arranca en el spot $\Spot$,
+con la base $\basis(t)=-\frac{d}{dt}\ln q(t)$ \emph{determinista}, $q(t)=\DF{\cMXNcol}{t}/\DF{\cTIIE}{t}$
+($q\equiv1$ si el snapshot no trae la curva MXN-USD). Con tasas deterministas $\E[X_T]=\Spot\,\DF{\cSOFR}{T}/\DF{\cMXNcol}{T}$,
+el forward con la curva MXN-USD del capítulo~\ref{cap:fx}. Los brownianos tienen correlaciones $\rho_{\mathrm{MU}}$,
+$\rho_{\mathrm{MX}}$, $\rho_{\mathrm{UX}}$; el motor exige $|\rho|<1$ y la matriz definida positiva
+(determinante mayor que $10^{-12}$) y lanza error en caso contrario, que el desk responde como un 400
+(\codigo{src/xva/exposure_engine.cpp}{validateModel}). Una volatilidad cero elimina ese factor en lugar de fallar.
+
+\begin{diferencia}
+  La clase \codigo{include/qf/models/hullwhite.hpp}{HullWhite} del capítulo~\ref{cap:hull-white} expresa el modelo con
+  $\hwtheta$, que obtiene por diferencias finitas, y simula con Euler; el motor de exposición \emph{no la instancia}.
+  Escribe el mismo modelo con $y_c(t)$ analítica y una transición gaussiana exacta
+  (sección~\ref{sec:cap14-paso}), de modo que no hay error de discretización ni derivada numérica. Esa es la causa
+  del sesgo del calculador anterior (sección~\ref{sec:cap14-validacion}). Además, el quanto aparece sólo como deriva
+  del factor \USD, ecuación~\eqref{eq:cap14-quanto}, y la base \MXN-\USD\ es determinista: no hay un segundo factor para
+  la base ni un ajuste de convexidad aparte.
+\end{diferencia}
+
+\subsection{Transición exacta y trayectorias}\label{sec:cap14-paso}
+
+Con $\tilde x_c=x_c-m_c$ ($m_c$ determinista) el proceso $\tilde x_c$ es un Ornstein--Uhlenbeck de media cero,
+$d\tilde x_c=-a_c\tilde x_c\,dt+\sigma_c\,dW_c$. Los momentos de $x_c$ bajo la medida de simulación son
+\begin{equation}\label{eq:cap14-momentos}
+\begin{aligned}
+  m_c(t)&=\frac{\sigma_c^{2}}{2a_c^{2}}\bigl(1-e^{-a_ct}\bigr)^{2}+\frac{\mu_c}{a_c}\bigl(1-e^{-a_ct}\bigr),\\
+  M_c(t)&=\int_0^t m_c=\frac{\sigma_c^{2}}{2a_c^{2}}\Bigl(t-\frac{2(1-e^{-a_ct})}{a_c}+\frac{1-e^{-2a_ct}}{2a_c}\Bigr)
+  +\frac{\mu_c}{a_c}\Bigl(t-\frac{1-e^{-a_ct}}{a_c}\Bigr),
+\end{aligned}
+\end{equation}
+en \codigo{src/xva/exposure_engine.cpp}{ouMoments} (junto con $y_c$). La simulación avanza por días ($\Delta=1/365$)
+con
+\begin{equation}\label{eq:cap14-transicion}
+  \tilde x_c(t+\Delta)=e^{-a_c\Delta}\,\tilde x_c(t)+\xi_c,\qquad
+  J_c(t+\Delta)=J_c(t)+\frac{1-e^{-a_c\Delta}}{a_c}\,\tilde x_c(t)+\eta_c,
+\end{equation}
+donde $J_c=\int\tilde x_c$ se actualiza \emph{antes} que $\tilde x_c$ y
+\[
+  \xi_c=\sigma_c\!\int_0^{\Delta}\!e^{-a_c(\Delta-u)}dW_c,\quad
+  \eta_c=\sigma_c\!\int_0^{\Delta}\!\frac{1-e^{-a_c(\Delta-u)}}{a_c}\,dW_c,\quad
+  \zeta=\sigma_X\!\int_0^{\Delta}\!dW_X .
+\]
+El vector $(\xi_{\mathrm M},\eta_{\mathrm M},\xi_{\mathrm U},\eta_{\mathrm U},\zeta)$ es gaussiano de media cero con
+covarianza constante
+\begin{equation}\label{eq:cap14-covarianza}
+  \operatorname{Cov}(Z_i,Z_j)=\rho_{g(i)g(j)}\,\sigma_i\sigma_j\int_0^{\Delta}k_i(u)\,k_j(u)\,du,\qquad
+  k\in\bigl\{e^{-au},\ (1-e^{-au})/a,\ 1\bigr\},
+\end{equation}
+con $g(i)$ el browniano que maneja a $Z_i$ y $\rho_{gg}=1$. La integral de los núcleos es analítica
+(\codigo{src/xva/exposure_engine.cpp}{kernelIntegral}); la matriz se arma en
+\codigo{src/xva/exposure_engine.cpp}{stepCovariance} y se factoriza una sola vez con una Cholesky que acepta
+pivotes cero (\codigo{src/xva/exposure_engine.cpp}{choleskySemidefinite}). Con ello la cuenta bancaria y el tipo de
+cambio son
+\begin{equation}\label{eq:cap14-cuenta}
+\begin{aligned}
+  I_c(t)&=-\ln P_c(0,t)+J_c(t)+M_c(t),\qquad \mathcal B(t)=e^{I_{\mathrm M}(t)},\\
+  \ln X_{t+\Delta}-\ln X_t&=\bigl[I_{\mathrm M}(t+\Delta)-I_{\mathrm M}(t)\bigr]-\bigl[I_{\mathrm U}(t+\Delta)-I_{\mathrm U}(t)\bigr]\\
+  &\quad+\ln q(t)-\ln q(t+\Delta)-\tfrac12\sigma_X^{2}\Delta+\zeta .
+\end{aligned}
+\end{equation}
+(la integral de la base sobre el paso es exactamente $\ln q(t)-\ln q(t+\Delta)$). Las tablas por día de $P_c(0,\cdot)$,
+$y_c$, $m_c$, $M_c$ y $q$ están en \codigo{src/xva/exposure_engine.cpp}{buildGrid} y
+\codigo{src/xva/exposure_engine.cpp}{fillCurrencyGrid}, y la trayectoria en
+\codigo{src/xva/exposure_engine.cpp}{simulatePath}. Cada trayectoria $p$ toma sus cinco normales diarias de un
+\texttt{std::mt19937\_64} sembrado con $(\text{semilla},p)$ \citep[cap.~3]{glasserman2003}: la trayectoria no depende
+de qué instrumentos se simulen ni de qué tan lejos llegue el horizonte (un horizonte mayor sólo añade normales), y
+por eso dos conjuntos simulados en la misma llamada, o en dos llamadas con la misma semilla, comparten trayectorias.
+
+\subsection{Bono afín y revaluación de las patas}\label{sec:cap14-patas}
+
+En el día $d$ (tiempo $t=d/365$), el precio del cupón cero de la moneda $c$ que vence en $T$ es
+\begin{equation}\label{eq:cap14-bono}
+  P_c(t,T)=\frac{P_c(0,T)}{P_c(0,t)}\exp\Bigl\{-\beta_c(t,T)\,x_c(t)-\tfrac12\beta_c(t,T)^{2}\,y_c(t)\Bigr\},
+\end{equation}
+en \codigo{src/xva/exposure_engine.cpp}{computeBonds} (la forma afín del cupón cero de Hull--White
+\citep[cap.~3]{brigo2006} escrita con el factor $x_c$ y su varianza $y_c$), evaluado sólo en las fechas que algún instrumento
+referencia. Para \USD\ se usa el mismo estado simulado $x_{\mathrm U}$ (el quanto sólo desplaza su ley).
+
+Toda operación es una lista de patas (\codigo{src/xva/exposure_engine.cpp}{makeLeg}). Una pata tiene una moneda de
+proyección $\pi$ (la tasa corta que compone el periodo en curso), una curva de descuento $D_\ell$, un nocional $n_\ell$
+y periodos $i=1,\dots,m$ con inicio $\iota_i$ y pago $e_i$ en días desde $t_0$; el devengo es $\tau_i=(e_i-\iota_i)/360$ (la
+base de la pata, \texttt{dayBase}). El factor compuesto del periodo $i$ en el día $d$ es
+\begin{equation}\label{eq:cap14-compuesto}
+  F_i(d)=\begin{cases}
+    a_i\,\exp\bigl\{I_\pi(d)-I_\pi(\max(\iota_i,0))\bigr\}, & \iota_i\le d \quad(\text{periodo en curso}),\\[2pt]
+    P_\pi(d,\,\iota_i), & \iota_i>d \quad(\text{periodo futuro}),
+  \end{cases}
+\end{equation}
+con $a_1$ el factor ya compuesto con las fijaciones que entrega el desk (capítulo~\ref{cap:swaps-ois}) y $a_i=1$ para
+$i>1$. La curva de descuento y el cociente de base son
+\begin{equation}\label{eq:cap14-descuento}
+\begin{gathered}
+  D_\ell(d,e)=\begin{cases}
+    P_{\mathrm M}(d,e) & \text{TIIE-F},\\
+    P_{\mathrm M}(d,e)\,q(e)/q(d) & \text{MXN-USD (colateral \USD)},\\
+    P_{\mathrm U}(d,e) & \text{SOFR},
+  \end{cases}\\[4pt]
+  g_i(d)=\begin{cases} q(e_i)/q(d) & \text{MXN-USD},\\ 1 & \text{en otro caso.}\end{cases}
+\end{gathered}
+\end{equation}
+El valor de la pata en el día $d$, en su moneda, suma los periodos aún impagos ($e_i>d$) y los intercambios de
+nocional:
+\begin{equation}\label{eq:cap14-pata}
+\begin{aligned}
+  V_\ell(d)&=\sum_{i:\,e_i>d}\Bigl[\phi_\ell\,n_\ell\,\bigl(F_i(d)-P_\pi(d,e_i)\bigr)\,g_i(d)+\chi_\ell\,n_\ell\,\kappa_\ell\,\tau_i\,D_\ell(d,e_i)\Bigr]\\
+  &\quad+\epsilon_\ell\,n_\ell\Bigl[-\,\mathbf 1_{\{\text{inicial vigente}\}}\,D_\ell(d,\iota_1)+\mathbf 1_{\{\text{final},\,e_m>d\}}\,D_\ell(d,e_m)\Bigr].
+\end{aligned}
+\end{equation}
+El primer término es el valor de recibir $n_\ell(\Pi_i-1)$ en $e_i$, con $\Pi_i$ el factor compuesto de la tasa
+overnight del periodo, descontado con una curva de descuento distinta de la de proyección por un cociente
+determinista: la tasa compuesta se reinvierte a la propia tasa, así que su valor esperado descontado con la curva
+de proyección es $F_i(d)$ menos el principal $P_\pi(d,e_i)$. Un flujo cuyo día es $\le d$ ya está pagado y no
+forma parte de $V(d)$ (en una fecha de pago el perfil es \emph{ex-pago}); la única excepción es $d=0$, donde entra
+el intercambio inicial con fecha $0$ (como el \texttt{npv} del desk). El intercambio inicial sólo es flujo si
+el swap empieza hoy o después. Se calcula en \codigo{src/xva/exposure_engine.cpp}{legValue}. El valor de una
+operación en \MXN\ multiplica por $X_d$ las patas en \USD, y el del conjunto es la suma (la compensación entre monedas):
+\begin{equation}\label{eq:cap14-conjunto}
+  V_k(d)=\sum_{\ell\in k}V_\ell(d)\cdot X_d^{\,\mathbf 1_{\{\ell\ \text{en USD}\}}},\qquad V(d)=\sum_k V_k(d),
+\end{equation}
+en \codigo{src/xva/exposure_engine.cpp}{setValue}. La tabla~\ref{tab:cap14-patas} da las patas de cada producto
+(\codigo{src/xva/exposure_engine.cpp}{compileSet}).
+\end{sloppypar}
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.1cm}>{\raggedright\arraybackslash}p{3.5cm}>{\raggedright\arraybackslash}p{1.9cm}>{\raggedright\arraybackslash}p{5.0cm}@{}}
+\toprule
+Producto & Proyección y descuento & Conversión & Signos y tasa \\
+\midrule
+IRS TIIE-F pagador (receptor) & M; TIIE-F (MXN-USD si el colateral es \USD) & ninguna & $\phi=+1\ (-1)$, $\chi=-\phi$, $\kappa=\K$ \\
+IRS SOFR pagador (receptor) & U; SOFR & $\times X_d$ & $\phi=+1\ (-1)$, $\chi=-\phi$, $\kappa=\K$ \\
+XCCY paga \USD, pata \MXN & M; MXN-USD (TIIE-F sin esa curva) & ninguna & $n=N_{\mathrm U}\cdot$\texttt{fx\_rate}, $\phi=\chi=\epsilon=+1$, $\kappa=$ diferencial \\
+XCCY paga \USD, pata \USD & U; SOFR & $\times X_d$ & $n=N_{\mathrm U}$, $\phi=\chi=\epsilon=-1$, $\kappa=0$ \\
+\bottomrule
+\end{tabular}
+\caption{Patas del motor de exposición. Si el XCCY paga \MXN\ los signos de ambas patas se invierten.}\label{tab:cap14-patas}
+\end{table}
+
+\begin{sloppypar}
+\paragraph{Arranque exacto.} En $d=0$ se tiene $x_c=0$, $y_c=0$ e $I_c=0$, de modo que $P_c(0,T)$ es el factor de la
+curva y $F_1=a_1$: $V(0)$ es la suma de los valores del desk (\texttt{OisSwap::npv}, \texttt{XccySwap::npv}) sin
+parámetro calibrado ni ajuste (\codigo{src/xva/exposure_engine.cpp}{ExposureEngine::tradeValuesAtZero}).
+
+\begin{diferencia}
+  El desk compone el periodo en curso con las fijaciones diarias publicadas (día hábil por día hábil, con el
+  fin de semana arrastrando la fijación anterior); el motor, para $d>0$, lo compone en continuo con la tasa
+  corta simulada, ecuación~\eqref{eq:cap14-compuesto}. La diferencia es de segundo orden y desaparece en $d=0$,
+  donde el factor es el del desk. La misma base determinista (cociente $q(e)/q(d)$ en lugar de un modelo de dos curvas)
+  se usa en la valuación de caps del capítulo~\ref{cap:hull-white}.
+\end{diferencia}
+
+\subsection{Perfiles de exposición}\label{sec:cap14-perfiles}
+
+El perfil se reporta en $d_0=0$ y en fechas mensuales: $\text{as\_of}+k$ meses (el mismo día del mes, o el último día
+si el mes no lo tiene) para $k=1,\dots,K$, con $K$ el primero cuya fecha es mayor o igual que el último vencimiento
+de las operaciones incluidas (\codigo{desk/api/risk/xva.py}{report_days},
+\codigo{desk/api/risk/credit.py}{_grid}); $t_i=d_i/365$. Con $n$ trayectorias y $V_p(t_i)$ el valor del conjunto en la
+trayectoria $p$,
+\begin{equation}\label{eq:cap14-perfiles}
+\begin{aligned}
+  \mathrm{EPE}(t_i)&=\tfrac1n\sum_p V_p^+(t_i),\qquad \mathrm{ENE}(t_i)=\tfrac1n\sum_p V_p^-(t_i),\\
+  \mathrm{EPE}^*(t_i)&=\tfrac1n\sum_p \frac{V_p^+(t_i)}{\mathcal B_p(t_i)},\qquad
+  \mathrm{ENE}^*(t_i)=\tfrac1n\sum_p \frac{V_p^-(t_i)}{\mathcal B_p(t_i)},
+\end{aligned}
+\end{equation}
+y $\mathrm{PFE}_\alpha(t_i)$ es el elemento de rango $\lceil\alpha n\rceil$ (acotado a $[1,n]$, tras redondear
+$\alpha n$ a $10^{-9}$) de los $V_p^+(t_i)$ ordenados de menor a mayor. Los perfiles \emph{sin descontar}
+(EPE, ENE, PFE) son los que la API publica y los que se comparan con límites; los \emph{descontados} ($\mathrm{EPE}^*$, $\mathrm{ENE}^*$) alimentan
+el XVA y usan siempre la cuenta bancaria \cTIIE\ simulada, aun cuando el colateral de la contraparte sea \USD.
+Todo se calcula en \codigo{src/xva/exposure_engine.cpp}{ExposureEngine::simulate}.
+
+\subsection{CVA, DVA y FVA}\label{sec:cap14-xva}
+
+Sean $S_c$ y $S_o$ las supervivencias de la contraparte y propia (ecuación~\eqref{eq:cap14-supervivencia}),
+$\mathrm{LGD}_c=1-R_c$, $\mathrm{LGD}_o=1-R_o$ y $\Delta S_{c,i}=S_c(t_{i-1})-S_c(t_i)$. Con las definiciones de
+\citet{gregory2015} y \citet{brigo2013} adaptadas a la malla de reporte,
+\begin{align}
+  \mathrm{CVA}&=\mathrm{LGD}_c\sum_{i\ge1}\mathrm{EPE}^*(t_i)\,\Delta S_{c,i}, \label{eq:cap14-cva}\\
+  \mathrm{DVA}&=\mathrm{LGD}_o\sum_{i\ge1}\mathrm{ENE}^*(t_i)\,\Delta S_{o,i}, \label{eq:cap14-dva}\\
+  \mathrm{FVA}&=s_f\sum_{i\ge1}\bigl[\mathrm{EPE}^*(t_i)-\mathrm{ENE}^*(t_i)\bigr]\,S_c(t_i)\,S_o(t_i)\,(t_i-t_{i-1}), \label{eq:cap14-fva}\\
+  \mathrm{Total}&=\mathrm{CVA}-\mathrm{DVA}+\mathrm{FVA}. \label{eq:cap14-total}
+\end{align}
+Signos: CVA y DVA son no negativos (el CVA es un costo, el DVA un beneficio que entra restando); como
+$\mathrm{EPE}^*-\mathrm{ENE}^*=\E[V/\mathcal B]$, el FVA es positivo (costo) cuando el valor esperado descontado del
+conjunto es positivo y negativo (beneficio) cuando es negativo; un total positivo es un costo. El incumplimiento se
+supone independiente de la exposición y de los factores: las intensidades son deterministas y el perfil se
+calcula sin condicionar a ningún incumplimiento. El error estándar del CVA sale de las sumas por trayectoria,
+\begin{equation}\label{eq:cap14-stderr}
+  \widehat{\mathrm{CVA}}_p=\mathrm{LGD}_c\sum_{i\ge1}\frac{V_p^+(t_i)}{\mathcal B_p(t_i)}\,\Delta S_{c,i},\qquad
+  \operatorname{se}(\mathrm{CVA})=\sqrt{\frac{1}{n(n-1)}\sum_{p}\bigl(\widehat{\mathrm{CVA}}_p-\overline{\mathrm{CVA}}\bigr)^{2}},
+\end{equation}
+\citep[cap.~1]{glasserman2003}; el DVA tiene el análogo (el binding lo expone como \texttt{dva\_stderr}, la API no lo
+publica) y el FVA no tiene error estándar. Se implementa en \codigo{src/xva/exposure_engine.cpp}{computeXva}
+(con \codigo{src/xva/exposure_engine.cpp}{standardError}); el resultado es
+\codigo{include/qf/xva/exposure_engine.hpp}{XvaResult} y el binding \codigo{src/python_bindings/xva_bindings.cpp}{compute_xva}.
+
+\begin{diferencia}
+  El CVA y el DVA bilaterales de \citet{brigo2013} y \citet{gregory2015} multiplican cada término por la
+  supervivencia de la otra parte (el CVA, por $S_o(t_i)$, y el DVA, por $S_c(t_i)$), porque el desk sólo puede
+  perder si sobrevive hasta $t_i$. Las ecuaciones~\eqref{eq:cap14-cva}--\eqref{eq:cap14-dva} no llevan ese factor (son
+  las integrales unilaterales sumadas, como \texttt{CVAResult} del calculador anterior), de modo que cada término
+  queda multiplicado de más por $1/S_o(t_i)$ en el CVA y por $1/S_c(t_i)$ en el DVA; sólo el FVA lleva el producto
+  $S_cS_o$. Además, la literatura separa el costo y
+  el beneficio de fondeo con diferenciales distintos y discute su traslape con el DVA; aquí hay un solo
+  diferencial $s_f$ sobre la exposición esperada \emph{neta} descontada.
+\end{diferencia}
+
+\subsection{XVA incremental}\label{sec:cap14-incremental}
+
+Sea $\mathcal N$ el conjunto de compensación vigente de una contraparte y $\mathcal C$ una operación candidata que no se
+guarda. Para cada componente $\bullet\in\{\mathrm{CVA},\mathrm{DVA},\mathrm{FVA},\mathrm{Total}\}$,
+\begin{equation}\label{eq:cap14-incremental}
+  \Delta\bullet(\mathcal C)=\bullet(\mathcal N\cup\{\mathcal C\})-\bullet(\mathcal N),\qquad
+  \Delta^{\mathrm{pb}}\bullet(\mathcal C)=10^{4}\,\frac{\Delta\bullet(\mathcal C)}{N_{\mathcal C}\cdot\Spot^{\mathbf 1_{\{\mathcal C\ \text{en USD}\}}}},
+\end{equation}
+con $N_{\mathcal C}$ el nocional de la candidata (el nocional en \USD\ se convierte con el spot). Los dos conjuntos se simulan
+en una sola llamada del motor (\texttt{simulate} con dos conjuntos), con la malla de reporte del conjunto ampliado, y
+por la independencia de las trayectorias respecto de los instrumentos (sección~\ref{sec:cap14-paso}) comparten
+las mismas: la diferencia no lleva ruido de Monte Carlo \emph{entre corridas}. De ahí tres propiedades que prueba
+el repositorio:
+\begin{enumerate}
+  \item \emph{Espejo exacto}: una candidata idéntica en términos y de sentido contrario a la \emph{única} operación del
+        conjunto lo deja con exposición cero, así que $\Delta\bullet=-\bullet(\mathcal N)$ con igualdad exacta de
+        flotantes (con varias operaciones por lado la suma de flotantes deja un residuo del orden de $10^{-10}$).
+  \item \emph{Coherencia con pactar}: guardar la candidata con \texttt{POST /api/trades} y pedir \texttt{GET /api/xva}
+        da el «después» (diferencia relativa $\le10^{-6}$).
+  \item \emph{Compensación}: $\mathrm{CVA}(A\cup B)\le\mathrm{CVA}(A)+\mathrm{CVA}(B)$ con las mismas trayectorias.
+\end{enumerate}
+El incremental \emph{no} es una asignación del XVA de la cartera a cada operación existente (no hay contribuciones
+marginales) y puede ser negativo. Se calcula en \codigo{desk/api/risk/xva.py}{incremental}.
+\end{sloppypar}
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap14-implementacion}
+
+\begin{sloppypar}
+\subsection{De la operación del desk al motor}\label{sec:cap14-traduccion}
+
+El motor es de C++ (\codigo{include/qf/xva/exposure_engine.hpp}{ExposureEngine}, con los datos de entrada
+\codigo{include/qf/xva/exposure_engine.hpp}{RateSwapSpec}, \codigo{include/qf/xva/exposure_engine.hpp}{XccySwapSpec}
+y \codigo{include/qf/xva/exposure_engine.hpp}{NettingSetSpec}, el mercado
+\codigo{include/qf/xva/exposure_engine.hpp}{ExposureMarket}, el modelo
+\codigo{include/qf/xva/exposure_engine.hpp}{ExposureModel}, la configuración
+\codigo{include/qf/xva/exposure_engine.hpp}{SimConfig} y el perfil
+\codigo{include/qf/xva/exposure_engine.hpp}{ExposureProfile}); Python no tiene fórmulas, sólo arma las entradas y
+da forma a la respuesta (\codigo{desk/api/risk/xva.py}{compute}). Para cada contraparte con operaciones vivas
+(\codigo{desk/api/risk/xva.py}{live_by_counterparty}):
+\begin{enumerate}
+  \item \emph{Qué entra.} Sólo \texttt{irs} y \texttt{xccy\_swap}
+        (\codigo{desk/api/risk/xva.py}{COVERED_PRODUCTS}); las demás operaciones aparecen en \texttt{excluded}
+        con un aviso en español («El XVA solo cubre swaps de tasa y cross currency swaps: … se excluye»), igual que
+        una operación que no se puede valuar. El valor en $t_0$ de cada incluida es el del desk,
+        \codigo{desk/api/valuation.py}{value_trade}, y el PV neto es su suma.
+  \item \emph{Términos.} Cada swap se describe con exactamente los términos que valúa el desk:
+        \codigo{desk/api/valuation.py}{aged_swap_terms} entrega notional, tasa fija, \texttt{start\_days}
+        ($\iota_1$, negativo si ya empezó), \texttt{pay\_days} ($e_i$, el calendario del capítulo~\ref{cap:swaps-ois}
+        menos los días transcurridos) y el factor acumulado $a_1$ del periodo en curso
+        (\codigo{desk/api/valuation.py}{accrued_factor}); el cross currency swap, con
+        \codigo{desk/api/xccy.py}{aged_xccy_terms}, añade los factores de ambas patas, el sentido y los intercambios
+        (el inicial sólo si el swap empieza en la fecha de valuación o después). Se transcriben a las especificaciones en
+        \codigo{desk/api/risk/xva.py}{_swap_spec} y \codigo{desk/api/risk/xva.py}{_xccy_spec}, y se reúnen en
+        \codigo{desk/api/risk/xva.py}{build_set}.
+  \item \emph{Colateral.} La moneda de colateral de la contraparte
+        (\codigo{desk/api/collateral.py}{currency_on}) sólo cambia la curva de descuento, como en la valuación: un
+        swap TIIE-F con colateral \USD\ (y curva MXN-USD en el snapshot) lleva \texttt{csa\_discount}; un swap SOFR siempre
+        descuenta con SOFR; el XCCY descuenta su pata \MXN\ con MXN-USD sea cual sea el colateral
+        (capítulo~\ref{cap:xccy}; la frase de la Metodología «cada operación se descuenta con la curva de su contraparte» solo
+        vale para el IRS TIIE-F, hallazgo H22). \textbf{No se modela margen ni colateral en la exposición.}
+  \item \emph{Motor.} \codigo{desk/api/risk/xva.py}{engine} construye el mercado con las curvas TIIE-F, SOFR y MXN-USD
+        del snapshot (las del capítulo~\ref{cap:curvas}) y el spot; el crédito sale de
+        \codigo{desk/api/risk/xva.py}{credit_for} y \codigo{desk/api/risk/xva.py}{own_credit}.
+\end{enumerate}
+La pestaña de exposición de crédito (\texttt{GET /api/credit/exposure},
+\codigo{desk/api/risk/credit.py}{exposure}) usa la misma corrida (\codigo{desk/api/risk/xva.py}{compute_detailed}), de
+modo que su EE, su PFE y su CVA son los de \texttt{GET /api/xva}. Las rutas son
+\codigo{desk/api/routes/xva.py}{xva_get}, \codigo{desk/api/routes/xva.py}{xva_incremental},
+\codigo{desk/api/routes/xva.py}{xva_params_get} y \codigo{desk/api/routes/xva.py}{xva_params_put}, y las de curvas de
+crédito, \codigo{desk/api/routes/risk_adv.py}{credit_curves_list} y
+\codigo{desk/api/routes/risk_adv.py}{credit_curves_put} (\codigo{desk/api/risk/credit_curves.py}{put_curve}
+valida, ajusta contra el snapshot, inserta y devuelve la curva).
+\end{sloppypar}
+
+\subsection{De dónde sale cada parámetro}\label{sec:cap14-parametros}
+
+La tabla~\ref{tab:cap14-parametros} dice la fuente de cada parámetro y cuáles son supuestos; el cuerpo de
+\texttt{GET /api/xva} lleva el bloque \texttt{assumptions} con los que se tomaron por omisión
+(\codigo{desk/api/risk/xva.py}{model_from_snapshot}).
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{6.0cm}>{\raggedright\arraybackslash}p{3.4cm}@{}}
+\toprule
+Parámetro & Fuente & ¿Supuesto? \\
+\midrule
+$a_{\mathrm M},\sigma_{\mathrm M},a_{\mathrm U},\sigma_{\mathrm U}$ & \texttt{hw} de TIIE-F y SOFR del snapshot (MX-DEMO: $0.05$, $0.01$; $0.03$, $0.008$); sin ellos $0.05$, $0.01$ y $0.03$, $0.008$ & sintéticos del snapshot; las omisiones, supuesto declarado \\
+$\sigma_X$ & volatilidad ATM a 1 año de la superficie USDMXN (\texttt{surface.vol(spot, 1)}; MX-DEMO: $0.13006$); sin superficie, la volatilidad diaria del factor USDMXN por $\sqrt{252}$; sin ambas, $0.12$ & sintética; la omisión, supuesto declarado \\
+$\rho_{\mathrm{MU}},\rho_{\mathrm{MX}},\rho_{\mathrm{UX}}$ & correlaciones de los cambios diarios de los factores TIIE-F, SOFR y USDMXN del snapshot (MX-DEMO: $0.35$, $0.30$, $-0.10$); sin ellas, $0$ & \textbf{aproximación declarada} (no son correlaciones de brownianos) \\
+Curvas, spot, calendario & snapshot (capítulos~\ref{cap:curvas}, \ref{cap:datos}) & datos sintéticos o mixtos según el snapshot \\
+Crédito de la contraparte & curva de CDS vigente; si falta, intensidad plana de \texttt{counterparty\_credit}; si falta, $1\%$ y $R=40\%$ & curva sintética; el último, supuesto declarado \\
+Crédito propio & curva \texttt{propia}; si falta, $1\%$ y $R=40\%$ & sintética; la omisión, supuesto declarado \\
+$s_f$ & \texttt{settings}: omisión $0.5\%$, editable en $[0,10\%]$ & \textbf{supuesto} (sin ajuste capturado) \\
+$n$, semilla, cuantil PFE & \texttt{settings}: $2000$ ($100$--$20000$), $42$, $0.95$ ($0.5$--$0.999$) & decisión de cómputo \\
+\bottomrule
+\end{tabular}
+\caption{Parámetros del XVA: fuente y estatus (\codigo{desk/api/risk/xva.py}{DEFAULTS},
+\codigo{desk/api/risk/xva.py}{HW_DEFAULTS}, \codigo{desk/api/risk/xva.py}{FX_VOL_DEFAULT}).}\label{tab:cap14-parametros}
+\end{table}
+Los parámetros editables se validan y guardan en \codigo{desk/api/risk/xva.py}{put_params} y se leen con
+\codigo{desk/api/risk/xva.py}{load_params}. Con los mismos datos y la misma semilla, dos peticiones devuelven
+exactamente lo mismo.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap14-ejemplo}
+
+Todos los valores se reproducen con \codigo{docs/tex/verificacion/cap14_xva.py}{main}, que llama al código del
+proyecto (\texttt{qfxva} y \texttt{desk.api.risk.xva}) sobre una base SQLite temporal con el snapshot MX-DEMO
+(\codigo{desk/api/seed_market.py}{seed_market}) y nunca lee la base real del desk. Los valores de Monte Carlo son
+reproducibles con las semillas indicadas (generador \texttt{std::mt19937\_64} de la biblioteca estándar de \texttt{libstdc++}:
+con otra implementación cambiarían dentro de su error estándar) y se imprimen con la tolerancia indicada. Las
+magnitudes marcadas «recálculo» se rehacen en el script con la biblioteca estándar siguiendo las ecuaciones del
+capítulo.
+
+\subsection{Bootstrap de un CDS}\label{sec:cap14-ej-cds}
+
+Curva de descuento plana a $7\%$ continuo, $R=40\%$ y cotizaciones de 1, 2, 3 y 5 años a $80$, $90$, $100$ y $110$~\pb.
+Para la primera, $\lfloor4T\rfloor=4$ pagos en los días $d=91,\,183,\,274,\,365$ (porque $365\cdot2/4=182.5$ redondea a
+$183$), con devengos $\tau=91/360,\,92/360,\,91/360,\,91/360$. El bootstrap, ecuación~\eqref{eq:cap14-bootstrap},
+da las intensidades por tramo (tolerancia absoluta $5\times10^{-11}$)
+\[
+  h_1=\verif{cap14-cds-lambda-1}{0.0134009514},\quad
+  h_2=\verif{cap14-cds-lambda-2}{0.0169000986},\quad
+  h_3=\verif{cap14-cds-lambda-3}{0.0205750257},\quad
+  h_4=\verif{cap14-cds-lambda-4}{0.0215758446},
+\]
+y la supervivencia a 5 años es $S(5)=\verif{cap14-cds-supervivencia-5a}{0.9102574888}$ (probabilidad de
+incumplimiento acumulada de $8.97\%$). Con $h_1$, las dos patas de la ecuación~\eqref{eq:cap14-cds} para el CDS de
+1 año valen por unidad de nominal (recálculo con la biblioteca estándar, tolerancias $5\times10^{-11}$ y
+$5\times10^{-10}$)
+\[
+  \Pi_{\mathrm{prot}}=\verif{cap14-cds-proteccion-1a}{0.0077142692},\qquad
+  \Ann_{\mathrm{cds}}=\verif{cap14-cds-anualidad-1a}{0.964283654},
+\]
+y $\Pi_{\mathrm{prot}}=0.0080\cdot\Ann_{\mathrm{cds}}$ (el script comprueba que la diferencia es menor que
+$10^{-12}$; el código reprecia además cada una de las cuatro cotizaciones de entrada a menos de $10^{-12}$ del nocional).
+Con una sola cotización plana de $100$~\pb\ a 5 años la intensidad es $\verif{cap14-cds-lambda-plana}{0.0167512596}$
+(tolerancia $5\times10^{-11}$), a $0.5\%$ de $s/(1-R)=0.0166667$. Con cotizaciones de 1 año a $200$~\pb\ y de 2 años a
+$100$~\pb\ el bootstrap lanza «quote at 2y implies a negative hazard rate».
+
+\subsection{Forma cerrada del CVA, DVA y FVA de un swap de un periodo}\label{sec:cap14-ej-cerrada}
+
+Un swap \MXN\ pagador de un solo periodo, $0\to730$ días, $\Nom=10^{8}$, $\K=8.5\%$, curva TIIE-F plana a $9\%$ continuo
+(y SOFR plana a $4\%$, spot $18.6$), $a_{\mathrm M}=0.05$, $\sigma_{\mathrm M}=0.01$, riesgo de crédito plano
+($\lambda_c=2\%$, $\lambda_o=1\%$, $\mathrm{LGD}=0.6$ ambas), $s_f=0.5\%$ y malla de reporte cada 10 días. Con
+descuento y proyección en \cTIIE, la ecuación~\eqref{eq:cap14-pata} da $V(t)=\Nom\,[\mathcal B(t)-(1+\K\tau)P_{\mathrm M}(t,T)]$
+con $\tau=730/360$, así que
+\begin{equation}\label{eq:cap14-cerrada}
+  \frac{V(t)}{\mathcal B(t)}=\Nom\bigl(1-\gamma\,Y_t\bigr),\qquad Y_t=\frac{P_{\mathrm M}(t,T)}{\mathcal B(t)},\quad \gamma=1+\K\tau,
+\end{equation}
+donde $Y_t$ es lognormal con media $P_{\mathrm M}(0,T)$ y varianza logarítmica
+$v(t)=\sigma_{\mathrm M}^{2}\int_0^{t}\beta_{\mathrm M}(s,T)^{2}ds$ (es el factor de descuento de un cupón cero
+deflactado por la cuenta bancaria). Con $F=\gamma\,P_{\mathrm M}(0,T)$, $d_1=(\ln F+\tfrac12 v)/\sqrt v$ y $d_2=d_1-\sqrt v$,
+\begin{equation}\label{eq:cap14-cerrada-perfiles}
+  \mathrm{EPE}^*(t)=\Nom\bigl[\Ncdf(-d_2)-F\,\Ncdf(-d_1)\bigr],\qquad
+  \mathrm{ENE}^*(t)=\Nom\bigl[F\,\Ncdf(d_1)-\Ncdf(d_2)\bigr],
+\end{equation}
+(son $\gamma$ veces una \emph{put} y una \emph{call} de Black sobre $Y_t$ con precio de ejercicio $1/\gamma$) y, antes del pago, $\mathrm{EPE}^*-\mathrm{ENE}^*=\Nom(1-F)$ es constante. Con $\tau=2.027778$, $\gamma=1.172361$,
+$P_{\mathrm M}(0,T)=0.835270$ y $F=0.979238$, el valor inicial es
+$V(0)=\Nom(1-F)=\verif{cap14-cf-valor-inicial}{2076168.687}$ (tolerancia $5\times10^{-4}$), y las
+ecuaciones~\eqref{eq:cap14-cva}--\eqref{eq:cap14-fva} evaluadas con las ecuaciones~\eqref{eq:cap14-cerrada-perfiles}
+sobre la misma malla dan (recálculo, tolerancia absoluta $5\times10^{-4}$)
+\[
+  \mathrm{CVA}=\verif{cap14-cf-cva}{49138.723},\qquad
+  \mathrm{DVA}=\verif{cap14-cf-dva}{481.265},\qquad
+  \mathrm{FVA}=\verif{cap14-cf-fva}{19874.984}.
+\]
+El motor, con $n=20000$ trayectorias y semilla $20261110$ (tolerancia absoluta $5\times10^{-2}$), da
+$\mathrm{CVA}=\verif{cap14-cf-motor-cva}{49165.7}$ con error estándar $\verif{cap14-cf-motor-cva-ee}{182.5}$,
+$\mathrm{DVA}=\verif{cap14-cf-motor-dva}{479.2}$ y $\mathrm{FVA}=\verif{cap14-cf-motor-fva}{19887.8}$: el CVA del
+motor difiere del exacto en $\verif{cap14-cf-motor-z}{0.148}$ errores estándar (tolerancia $5\times10^{-4}$), y
+$V(0)$ del motor es el exacto (diferencia menor que $10^{-6}\Nom$, comprobada en el script).
+
+\subsection{Límite sin volatilidad}\label{sec:cap14-ej-sinvol}
+
+Con $\sigma_{\mathrm M}=\sigma_{\mathrm U}=\sigma_X=0$ no hay aleatoriedad: $I_{\mathrm M}(t)=-\ln P_{\mathrm M}(0,t)$ y la
+ecuación~\eqref{eq:cap14-pata} da $V(d)=\frac{\phi\Nom}{P_{\mathrm M}(0,t)}\sum_{e_i>d}\bigl[P_{\mathrm M}(0,\iota_i)-(1+\K\tau_i)P_{\mathrm M}(0,e_i)\bigr]$,
+donde $\phi=+1$ es el signo del pagador, $-1$ el del receptor. Para un swap \emph{receptor} al $7.5\%$ de 13 periodos de 28 días ($\Nom=10^{8}$)
+sobre una curva plana a $7\%$ continuo, $V(0)=\verif{cap14-sinvol-valor-inicial}{562313.518}$ (igual al \texttt{npv} de \texttt{OisSwap}
+con diferencia menor que $10^{-6}\Nom$) y a los $140$ días, con cinco periodos pagados,
+$\mathrm{EPE}(140)=\max(V,0)=\verif{cap14-sinvol-epe}{350671.627}$ y $\mathrm{ENE}=0$ (tolerancia $5\times10^{-4}$); a
+los $364$ días el último flujo ya se pagó y el perfil es cero.
+
+\subsection{XVA de una contraparte con swap de tasa y cross currency swap}\label{sec:cap14-ej-desk}
+
+Banco Ejemplo (colateral \MXN) tiene un IRS TIIE-F \emph{pagador} de $200$ millones a $7.2\%$ pactado el 2026-08-10
+(26 periodos de 28 días; a la fecha de valuación 2026-11-10 lleva 92 días, con el periodo en curso compuesto con
+fijaciones de $7\%$) y un cross currency swap \emph{paga \USD} de $10$ millones de \USD\ a $18.2$ con diferencial de
+$5$~\pb\ e intercambios inicial y final, pactado el 2026-11-10. Su curva de crédito sintética es
+$90,100,110,125,135,150$~\pb\ a 1, 2, 3, 5, 7 y 10 años con $R=40\%$; la propia, $70,\dots,125$~\pb\ con $R=40\%$; $s_f=0.5\%$,
+$n=2000$, semilla $42$.
+
+\emph{Arranque exacto.} El motor valúa cada operación en $t_0$ con una diferencia menor que $10^{-6}$ del nocional
+respecto del desk: el IRS vale $\verif{cap14-desk-pv-irs}{-1627937.9773}$ y el XCCY
+$\verif{cap14-desk-pv-xccy}{515317.9126}$ \MXN, y el PV neto es $\verif{cap14-desk-pv-neto}{-1112620.0647}$ (tolerancia
+$5\times10^{-5}$).
+
+\emph{XVA} (tolerancia $5\times10^{-3}$ en \MXN). Con la malla mensual de 25 fechas,
+\[
+  \mathrm{CVA}=\verif{cap14-desk-cva}{91386.08}\ (\pm\verif{cap14-desk-cva-ee}{3125.94}),\quad
+  \mathrm{DVA}=\verif{cap14-desk-dva}{216723.02},\quad
+  \mathrm{FVA}=\verif{cap14-desk-fva}{-85043.91},
+\]
+\[
+  \mathrm{Total}=\mathrm{CVA}-\mathrm{DVA}+\mathrm{FVA}=\verif{cap14-desk-total}{-210380.85},\qquad
+  \max_i\mathrm{EPE}(t_i)=\verif{cap14-desk-epe-max}{7696645.47}.
+\]
+El total es negativo (un beneficio): el conjunto vale menos de cero, así que su exposición negativa es mayor que la
+positiva (DVA mayor que CVA) y el FVA es un beneficio. Cada cifra lleva su error estándar de Monte Carlo (el del CVA es $3.4\%$ del valor).
+
+\emph{Compensación.} Con las mismas trayectorias, el CVA del IRS solo es $\verif{cap14-sub-cva-irs}{2600.39}$ y el
+del XCCY solo $\verif{cap14-sub-cva-xccy}{98575.23}$, y el del conjunto $\verif{cap14-sub-cva-union}{91386.08}$ es menor
+que la suma: el ahorro por compensar es $\verif{cap14-sub-ahorro}{9789.54}$.
+
+\emph{Malla de reporte.} Con las mismas trayectorias y una malla \emph{diaria} en lugar de la mensual, el CVA sube a
+$\verif{cap14-malla-cva-diaria}{94347.53}$, es decir $\verif{cap14-malla-cambio}{3.2406}\,\%$ más (tolerancia $5\times10^{-5}$
+en el porcentaje): la malla mensual con el extremo derecho pierde la exposición del último intervalo, donde el
+XCCY aún tiene su intercambio final (límite de la sección~\ref{sec:cap14-limites}, hallazgo H21).
+
+\subsection{XVA incremental}\label{sec:cap14-ej-incremental}
+
+La candidata es un IRS TIIE-F de $150$ millones, 26 periodos, pactado el 2026-11-10 \emph{sin tasa fija}: nace a la par,
+con tasa $\verif{cap14-inc-tasa-par}{0.0670}$ y PV cero. Los cuatro incrementos de la
+ecuación~\eqref{eq:cap14-incremental} son (en \MXN, tolerancia $5\times10^{-3}$)
+\begin{center}\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Sentido de la candidata & $\Delta$CVA & $\Delta$DVA & $\Delta$FVA & $\Delta$Total \\
+\midrule
+Pagador & \verif{cap14-inc-cva}{-2374.06} & \verif{cap14-inc-dva}{-480.44} & \verif{cap14-inc-fva}{-897.19} & \verif{cap14-inc-total}{-2790.81} \\
+Receptor (solo $\Delta$CVA) & \verif{cap14-inc-cva-receptor}{2839.71} & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+y el incremental del total en puntos base del nocional es $\verif{cap14-inc-total-pb}{-0.1861}$~\pb\ (tolerancia $5\times10^{-5}$).
+Las dos candidatas tienen PV cero y el mismo nocional, y sin embargo el pagador reduce el CVA y el receptor lo
+aumenta: el signo del incremento depende de cómo se mueve la exposición de la candidata junto con la del conjunto, no de su
+PV. El «antes» coincide bit a bit con \texttt{GET /api/xva} (el script lo comprueba) y los incrementos son la
+diferencia exacta de flotantes entre el «después» y el «antes».
+
+\emph{Espejo exacto.} Banco Espejo sólo tiene un IRS pagador como el de arriba; con su CVA y su total
+$\verif{cap14-espejo-cva-antes}{2600.39}$ y $\verif{cap14-espejo-total-antes}{-18639.04}$, la candidata espejo (el mismo swap
+como receptor) deja el conjunto con exposición cero: CVA, DVA, FVA, EPE y PFE «después» valen $0$ y cada incremento
+es exactamente el negativo del «antes» (comparación de igualdad de flotantes en el script).
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap14-validacion}
+
+\begin{raggedright}
+\subsection{Pruebas del repositorio}\label{sec:cap14-pruebas}
+
+\paragraph{Curvas de crédito}
+(\codigo{tests/test_PiecewiseHazardCurve.cpp}{SurvivalAndHazardFollowPiecewiseConstantIntensity},
+\codigo{tests/test_PiecewiseHazardCurve.cpp}{BootstrapRepricesUpwardSlopingQuotes},
+\codigo{tests/test_PiecewiseHazardCurve.cpp}{BootstrapVerticesAreLastPremiumDates},
+\codigo{tests/test_PiecewiseHazardCurve.cpp}{SingleFlatQuoteGivesSpreadOverLgd},
+\codigo{tests/test_PiecewiseHazardCurve.cpp}{BootstrapRejectsQuotesImplyingNegativeHazard}): cada CDS de entrada se
+reprecia a $|V|\le10^{-8}\Nom$ en curvas con pendiente, de diferenciales altos y casi planas, con otra recuperación y con plazos
+que no son múltiplo de un trimestre; los vértices son los últimos días de pago; la supervivencia es decreciente en
+$(0,1]$; y las cotizaciones que implican intensidad negativa dan el error de la sección~\ref{sec:cap14-cds}.
+Del lado del desk, \codigo{desk/api/tests/test_credit_curves.py}{test_each_seeded_quote_reprices_to_zero_with_the_cpp_cds_value}
+y \codigo{desk/api/tests/test_credit_curves.py}{test_put_negative_intensity_is_400_on_quotes_and_does_not_insert}.
+
+\paragraph{Motor de exposición}
+(\codigo{tests/test_ExposureEngine.cpp}{TradeValuesAtZeroEqualDeskNpv},
+\codigo{tests/test_ExposureEngine.cpp}{NoStepAfterOneDayWithoutVolatility}): el arranque es exacto en swaps envejecidos,
+de inicio futuro, con descuento MXN-USD, en \USD\ y en XCCY (diferencia con el \texttt{npv} del desk menor que
+$10^{-6}$ del nocional), y con volatilidad cero el valor a un día difiere del inicial en no más que el devengo de un día.
+
+\paragraph{Martingalas.} Es la prueba que valida las derivas. Para una operación con flujos, el estadístico
+\begin{equation}\label{eq:cap14-martingala}
+  Z_D(t)=\frac{V(t)}{D(t)}+\sum_{t_f\in(0,t]}\frac{\mathrm{CF}(t_f)}{D(t_f)}
+\end{equation}
+(valor más flujos pagados, ambos deflactados) debe tener media $V(0)$ para el numerario $D$ adecuado: la cuenta
+bancaria \cTIIE\ $\mathcal B(t)$ para un swap \MXN\ con colateral \MXN, y la cuenta de colateral $\mathcal B(t)/q(t)$ para el
+swap \USD\ y el XCCY, porque sus flujos se descuentan con $P_{\mathrm M}(\cdot)\,q(\cdot)/q(t)$ y $X_t\,q(t)\,\mathcal B_{\mathrm U}(t)/\mathcal B(t)$
+es martingala con la deriva de la ecuación~\eqref{eq:cap14-fx}. Las pruebas exigen que la media difiera de
+$V(0)$ en menos de tres errores estándar a 1, 3 y 5 años, con semilla fija
+(\codigo{tests/test_ExposureEngine.cpp}{MartingaleMxnSwapTiieAccount},
+\codigo{tests/test_ExposureEngine.cpp}{MartingaleUsdSwapCollateralAccount},
+\codigo{tests/test_ExposureEngine.cpp}{MartingaleXccyCollateralAccount},
+\codigo{tests/test_ExposureEngine.cpp}{MartingaleCsaSwapAndAgedSwapCollateralAccount}). El estadístico lo calcula
+\codigo{src/xva/exposure_engine.cpp}{ExposureEngine::deflatedValueStats} (con
+\codigo{src/xva/exposure_engine.cpp}{paidFlowsDeflated}), que no está expuesto en Python. Con los parámetros de
+MX-DEMO el efecto del quanto es del orden de $10^{-4}$ y queda bajo el ruido, así que se añadieron dos pruebas con
+volatilidades y correlaciones altas y a plazo largo
+(\codigo{tests/test_ExposureEngine.cpp}{MartingaleHoldsWithHighVolatilityAndCorrelation},
+\codigo{tests/test_ExposureEngine.cpp}{MartingaleSeesBondConvexityAtExtremeVolatility}).
+\emph{Pruebas por mutación}: durante la implementación y la auditoría del corte se invirtió a mano el signo de la
+deriva quanto, el de la base, se quitó el término $-\tfrac12\sigma_X^2$, la convexidad $-\tfrac12\beta^2y$ del bono y
+el término $y(t)$ de la media de $x$; cada error hizo fallar al menos una de estas pruebas (la deriva quanto sólo la
+detecta la variante de volatilidad alta, y la convexidad del bono y la media de $x$ sólo la de volatilidad extrema;
+véase \codigo{docs/superpowers/qf-desk/corte9-xva/plan.md}{Mutaciones}). Las mutaciones no son una prueba
+automática del repositorio.
+
+\paragraph{Límite sin volatilidad, forma cerrada y propiedades.}
+\codigo{tests/test_ExposureEngine.cpp}{ZeroVolatilityLimitMatchesDeskOnForwardCurves} y
+\codigo{tests/test_ExposureEngine.cpp}{ZeroVolatilityLimitSingleInstruments} comparan el $\mathrm{EPE}(t)$ del motor
+con $\max(V,0)$ del desk envejecido con la curva forward implícita ($\le10^{-6}\Nom$);
+\codigo{tests/test_ExposureEngine.cpp}{CvaMatchesTheClosedFormOnFlatAndSlopedCurves} compara el CVA de un swap
+fresco a la par con la integral unidimensional exacta (tres errores estándar y $5\%$, curva plana y con pendiente);
+\codigo{tests/test_ExposureEngine.cpp}{NettingNeverCostsMoreThanTheSumOfTheParts} y
+\codigo{tests/test_ExposureEngine.cpp}{ExactMirrorOfAnOperationLeavesNoExposure} cubren la compensación y el espejo;
+\codigo{tests/test_ExposureEngine.cpp}{SameInputsGiveIdenticalResults},
+\codigo{tests/test_ExposureEngine.cpp}{AnExtraSetDoesNotChangeAnotherSetsProfile} y
+\codigo{tests/test_ExposureEngine.cpp}{DifferentSeedsGiveDifferentPaths} la reproducibilidad y la independencia de
+trayectorias; \codigo{tests/test_ExposureEngine.cpp}{OuMomentsSolveTheirDifferentialEquations} y
+\codigo{tests/test_ExposureEngine.cpp}{StepCovarianceMatchesNumericalQuadrature} comparan las
+ecuaciones~\eqref{eq:cap14-momentos} contra RK4 y la~\eqref{eq:cap14-covarianza} contra cuadratura de Simpson (las
+correlaciones $\rho_{\mathrm{MU}}$ y $\rho_{\mathrm{MX}}$ no afectan a ninguna martingala, sólo a la covarianza, y
+sólo esa prueba las valida). El XVA se prueba en
+\codigo{tests/test_ExposureEngine.cpp}{ReproducesTheDefinitionsOnAKnownProfile} (las ecuaciones~\eqref{eq:cap14-cva}--\eqref{eq:cap14-total}
+sobre un perfil conocido; se comprobó por mutación que falla con $S_c(t_{i-1})$ en el FVA, con $n$ en lugar de $n-1$ en el error
+estándar y con la LGD de la contraparte en el DVA), \codigo{tests/test_ExposureEngine.cpp}{ZeroHazardGivesExactlyZeroCvaAndDvaAndKeepsFva}
+y \codigo{tests/test_ExposureEngine.cpp}{StandardErrorShrinksWithPathsAndCoversTheSeedToSeedSpread}. Los bindings:
+\codigo{tests/test_xva_engine_py.py}{test_compute_xva_follows_the_definitions}.
+
+\paragraph{Desk.} \codigo{desk/api/tests/test_xva.py}{test_engine_value_at_zero_is_the_desk_pv_for_every_covered_trade},
+\codigo{desk/api/tests/test_xva.py}{test_engine_matches_the_desk_with_usd_collateral_and_the_mxn_usd_discount},
+\codigo{desk/api/tests/test_xva.py}{test_two_requests_give_identical_results} y
+\codigo{desk/api/tests/test_xva.py}{test_included_and_excluded_trades_are_listed_in_spanish}; el incremental:
+\codigo{desk/api/tests/test_xva_incremental.py}{test_mirror_of_the_only_trade_removes_all_the_xva_exactly},
+\codigo{desk/api/tests/test_xva_incremental.py}{test_saving_the_candidate_gives_the_after_state_and_the_before_is_the_previous_get}
+y \codigo{desk/api/tests/test_xva_incremental.py}{test_nothing_is_saved}. La auditoría del corte rehízo en
+papel la derivación del motor (documento del corte, fuera de este capítulo). El XVA \textbf{no} está contrastado con QuantLib:
+el capítulo~\ref{cap:validacion} compara otros siete productos y no incluye el motor de exposición ni el bootstrap de CDS.
+
+\end{raggedright}
+\begin{sloppypar}
+\subsection{El calculador anterior tiene un sesgo medido}\label{sec:cap14-sesgo}
+
+El diseño pedía comparar el CVA del motor nuevo con el de \texttt{CVACalculator} para un swap fresco a la par. La
+comparación contra la forma cerrada mostró que el sesgado es el \emph{calculador anterior}: su
+$\hwtheta$ deriva numéricamente el forward de una curva lineal por tramos y su esquema de Euler infla la varianza, de modo
+que la tasa corta media simulada queda por encima de la del modelo y con ella la exposición del pagador.
+La tabla~\ref{tab:cap14-sesgo} reproduce la medición (swap pagador de $10^{8}$ a 5 años con pagos cada 28 días,
+intensidad $2\%$, $\mathrm{LGD}=0.6$, $a=0.05$, $\sigma=0.01$, EPE sin descontar en las 65 fechas de pago; cada motor valúa el swap a su propia tasa par;
+el motor nuevo es la media de 10 motores de 500 trayectorias con su error estándar entre lotes, \texttt{CVACalculator} usa
+5000 trayectorias; el exacto es la integral unidimensional de la sección anterior sobre $x(t)\sim N(m,y)$, por trapecio, del swap del motor nuevo).
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Curva TIIE-F & Exacto & Motor nuevo (e.e.) & Sesgo nuevo & \texttt{CVACalculator} & Sesgo anterior \\
+\midrule
+Plana $7\%$ & \verif{cap14-legacy-plana-exacto}{55867.05} & \verif{cap14-legacy-plana-motor}{56091} ($\pm$\verif{cap14-legacy-plana-motor-ee}{626}) & \verif{cap14-legacy-plana-sesgo-motor}{0.40}\,\% & \verif{cap14-legacy-plana-viejo}{57840} & \verif{cap14-legacy-plana-sesgo}{3.53}\,\% \\
+Con pendiente & \verif{cap14-legacy-pend-exacto}{59594.96} & \verif{cap14-legacy-pend-motor}{59807} ($\pm$\verif{cap14-legacy-pend-motor-ee}{645}) & \verif{cap14-legacy-pend-sesgo-motor}{0.36}\,\% & \verif{cap14-legacy-pend-viejo}{63952} & \verif{cap14-legacy-pend-sesgo}{7.31}\,\% \\
+\bottomrule
+\end{tabular}
+\caption{CVA (\MXN) del swap fresco: forma cerrada, motor nuevo y \texttt{CVACalculator}. Tolerancias: $5\times10^{-3}$ en el
+exacto y en los sesgos, $0.5$ en las demás columnas.}\label{tab:cap14-sesgo}
+\end{table}
+La causa se mide directamente: con 20000 trayectorias de \codigo{include/qf/models/hullwhite.hpp}{HullWhite}
+(\texttt{simulate}, Euler en pasos de 1/252, semillas $1,\dots,20000$) sobre la curva con pendiente, la tasa corta media
+a 4.4 años es $\verif{cap14-legacy-tasa-simulada}{0.074379}$ frente a la del modelo,
+$f(0,t)+\tfrac{\sigma^{2}}{2a^{2}}(1-e^{-at})^{2}=\verif{cap14-legacy-tasa-modelo}{0.073230}$ (recálculo, tolerancia $5\times10^{-7}$): un
+exceso de $\verif{cap14-legacy-tasa-sesgo-pb}{11.49}$~\pb\ (tolerancia $5\times10^{-3}$; el error estándar de la
+media es de unos $1.3$~\pb). Lo documenta la Metodología («Motor anterior retirado»). Ojo con el alcance de la última columna: compara el CVA de dos
+swaps distintos, cada uno a su tasa par (el del calculador anterior devenga 28/365 y su pata flotante llega a 5.0 años contra pagos
+fijos hasta 4.986), con el CVA exacto del swap del motor nuevo; es una medida aproximada, y la evidencia limpia del sesgo del
+calculador anterior es la de la tasa corta media. El comparador de la prueba de
+humo (\codigo{tests/test_ExposureEngine.cpp}{CvaMatchesCvaCalculatorForAFreshAtParSwapOnAFlatCurve}) sólo se cumple en
+curva plana, y con margen delgado precisamente por este sesgo. \texttt{CVACalculator} no se corrigió (el desk dejó de usarlo).
+\end{sloppypar}
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap14-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \textbf{Sin margen ni colateral en la exposición.} La moneda de colateral de la contraparte sólo cambia la
+          curva de descuento. No hay umbral, monto mínimo de transferencia, periodo de riesgo de margen ni cierre de
+          posiciones: la exposición es la de un conjunto de compensación sin garantías. La respuesta de la API lo declara
+          («Exposición sin colateral ni margen»).
+    \item \textbf{Sin riesgo de correlación adversa (\emph{wrong-way}).} Las intensidades son deterministas y el incumplimiento es
+          independiente de los factores de mercado.
+    \item \textbf{Base de cross currency determinista.} El tipo de cambio deriva con la base implícita en la curva MXN-USD de hoy.
+          Un swap SOFR de una contraparte con colateral \MXN\ (flujos en \USD\ descontados con SOFR y convertidos al spot)
+          queda con un sesgo determinista del tamaño de la base, porque el tipo de cambio deriva con ella; se declara y no se prueba
+          como martingala. $\mathrm{EPE}^*$ y $\mathrm{ENE}^*$ se descuentan con la cuenta \cTIIE\ aunque el colateral sea \USD.
+    \item \textbf{Correlaciones aproximadas.} Las correlaciones del modelo son las de los cambios diarios de los factores del snapshot,
+          no las de los brownianos. Los $a_c$, $\sigma_c$ y $\sigma_X$ no se calibran a precios (vienen del snapshot sintético); un solo factor por
+          moneda y volatilidad del tipo de cambio constante, sin sonrisa.
+    \item \textbf{Curvas de crédito sintéticas.} No son datos de mercado: con datos reales se cargarían diferenciales de CDS o de bonos del
+          emisor. Una sola recuperación por entidad, intensidad plana después del último plazo (10 años en la siembra) y las
+          convenciones simplificadas del CDS de la sección~\ref{sec:cap14-cds} (fechas $\operatorname{round}(365k/4)$, plazo en $365\,T$
+          días, incumplimiento a mitad de periodo, descuento TIIE-F).
+    \item \textbf{Productos excluidos.} Opciones (FX y sobre acción), caps/floors, swaptions, bonos y forwards de FX no entran
+          al conjunto de compensación y se listan como excluidos; el PV neto y el XVA sólo cubren swaps de tasa y cross currency
+          swaps. Un solo conjunto de compensación por contraparte (se supone exigible), sin asignación del XVA de la cartera a
+          cada operación; sin KVA ni MVA.
+    \item \textbf{Periodo en curso en continuo.} Para $d>0$ el factor compuesto del periodo en curso usa la tasa corta simulada en
+          continuo, mientras el desk capitaliza día por día con fijaciones (diferencia de segundo orden).
+    \item \textbf{Malla de reporte mensual con el extremo derecho.} El CVA, el DVA y el FVA se integran sobre las fechas mensuales, con el perfil
+          descontado del extremo derecho de cada intervalo. Una operación cuyo último flujo cae antes de la primera fecha
+          mensual tiene CVA exactamente cero, y el intervalo donde vence una operación con intercambio final aporta exposición
+          cero. En el ejemplo de la sección~\ref{sec:cap14-ej-desk} la malla mensual da un CVA $3.1\%$ menor que la diaria, comparable con su error
+          estándar; no está declarado en la Metodología (hallazgo H21).
+    \item \textbf{Error de Monte Carlo.} Se informa el error estándar del CVA (con 2000 trayectorias por omisión, $3.4\%$ en el ejemplo);
+          no el del DVA ni el del FVA, y los cuantiles del PFE son ruidosos con pocas trayectorias. La reproducibilidad depende de
+          la biblioteca estándar usada (\texttt{std::normal\_distribution}).
+    \item \textbf{CVA y DVA unilaterales sumados} (sin $S_o$ en el CVA) y un solo diferencial de fondeo $s_f=0.5\%$ por omisión, sin
+          ajuste capturado.
+    \item \textbf{Informativo.} El XVA no entra al PV, a los escenarios ni a la contabilidad de coberturas, y no está contrastado con QuantLib.
+          La exposición supone el cierre al valor del conjunto en la fecha de incumplimiento, sin costos de reemplazo ni
+          periodo de cierre.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap14-referencias}
+
+Las definiciones de CVA, DVA y FVA y su lectura como integrales de la exposición esperada contra la probabilidad de
+incumplimiento siguen a \citet{gregory2015} y \citet{brigo2013}; el modelo de tasa corta de un factor y su forma de Markov, a
+\citet{hull1990}, \citet{ritchken1995} y \citet{andersen2010}; el precio afín del cupón cero y la dinámica de un factor, a \citet{brigo2006}; la
+simulación exacta de procesos gaussianos y el error estándar de Monte Carlo, a \citet{glasserman2003}; y la valuación del CDS por
+periodos y su bootstrap con intensidad constante por tramos, a \citet{hull2000} y \citet{okane2008}.
