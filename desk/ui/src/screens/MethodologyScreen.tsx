@@ -75,6 +75,7 @@ const PRODUCT_SECTIONS: Section[] = [
     title: 'Bono',
     items: [
       { label: 'Modelo', text: 'Flujos fijos descontados con la curva elegida.' },
+      { label: 'Cupón', text: 'Nominal × tasa / frecuencia por periodo, sin base de días; el cupón corrido corre lineal con el tiempo transcurrido desde el último cupón (t = días/365).' },
     ],
   },
   {
@@ -160,7 +161,7 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Convención de días',
-        text: 'Días naturales, t = días/365, devengo ACT/360, fijaciones diarias capitalizadas. Los calendarios de inhábiles solo rigen fijaciones y coberturas (ver Calendarios).',
+        text: 'Días naturales, t = días/365. El devengo ACT/360 y las fijaciones diarias capitalizadas rigen para los swaps (también el cross currency swap) y las opciones de tasa; el bono no devenga ACT/360: paga nominal × tasa / frecuencia por periodo y su cupón corrido corre lineal con el tiempo transcurrido desde el último cupón. Los calendarios de inhábiles solo rigen fijaciones y coberturas (ver Calendarios).',
       },
       {
         label: 'Fines de semana',

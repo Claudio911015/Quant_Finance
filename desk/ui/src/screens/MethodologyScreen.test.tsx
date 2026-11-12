@@ -88,10 +88,21 @@ describe('MethodologyScreen', () => {
     expect(row('DV01 por plazo')).toContain('casi neutro');
   });
 
+  it('limita el devengo ACT/360 a swaps y opciones de tasa y describe el cupón del bono (H13)', () => {
+    renderScreen();
+    expect(row('Convención de días')).toContain('rigen para los swaps (también el cross currency swap) y las opciones de tasa');
+    expect(row('Convención de días')).toContain('el bono no devenga ACT/360');
+    expect(row('Cupón')).toContain('Nominal × tasa / frecuencia');
+    expect(row('Cupón')).toContain('corre lineal');
+  });
+
   it('dice que un swap sin tasa fija nace a la par', () => {
     renderScreen();
     expect(row('Alta a la par')).toContain('nace a la par');
     expect(row('Alta a la par')).toContain('PV en la fecha de pacto es cero');
+    // H02/H15: la par solo se calcula en la fecha de inicio
+    expect(row('Alta a la par')).toContain('cross currency swap sin diferencial');
+    expect(row('Alta a la par')).toContain('una operación que ya empezó exige capturar la tasa o el diferencial pactados');
   });
 
   describe('contabilidad de coberturas', () => {
