@@ -8,12 +8,14 @@ Aplicación local para valuar y medir riesgo de una cartera demo (`MX-DEMO`, dat
 - Node 22 y npm 10.
 - CMake y compilador C++20.
 - GoogleTest (tests C++) y pybind11 (bindings `qfpy`).
+- QuantLib 1.42.1 para Python (pricers de exóticos FX).
 
 ## Instalación
 
 Desde la raíz del repo `Quant_Finance`:
 
 ```bash
+/home/claudio/anaconda3/bin/python -m pip install "QuantLib==1.42.1"
 cmake -S . -B build
 cmake --build build -j4
 cd desk/ui && npm ci && cd ../..
