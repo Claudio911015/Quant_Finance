@@ -1,5 +1,187 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
+% Capítulo 11 -- Operaciones: conciliación (T7). Estructura de _plantilla.tex.
 \chapter{Operaciones: conciliación}\label{cap:operaciones}
 
-Conciliación de operaciones y su descomposición.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap11-proposito}
+
+La pantalla de operaciones cierra el \emph{back office} de la mesa: saber qué se paga y qué se cobra y cuándo, registrar lo que el banco de verdad liquidó y, sobre todo, \textbf{conciliar el valor presente propio contra el del banco} explicando la diferencia. Este capítulo documenta cuatro piezas: el calendario de flujos del portafolio (\codigo{desk/api/ops_cashflows.py}{cashflows}), la confirmación de liquidaciones (\codigo{desk/api/ops_settlements.py}{confirm_settlement}), los números que entran en la confirmación imprimible y en FpML (\codigo{desk/api/ops_confirm.py}{confirmation}, \codigo{desk/api/fpml.py}{export_trade}) y la conciliación (\codigo{desk/api/ops_recon.py}{reconcile_trade}).
+
+No hay fórmulas de valuación nuevas: todo PV sale de \codigo{desk/api/valuation.py}{value_trade} y todo flujo liquidado de \codigo{desk/api/settlement.py}{settled_flows}, ambos descritos en el capítulo~\ref{cap:ciclo-vida}. La descomposición de una diferencia es una \emph{ayuda de diagnóstico}, no una prueba: indica qué movimiento explicaría la diferencia, no que lo haya causado. La valuación de cada producto está en los capítulos~\ref{cap:swaps-ois} a~\ref{cap:xccy}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap11-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. En este capítulo, para una operación y un snapshot con fecha de valuación $d$: $V^{\mathrm{p}}$ es el PV propio en \MXN (\texttt{pv\_mxn}); $V^{\mathrm{b}}_{\mathrm{csv}}$ el PV que trae el estado de cuenta del banco, en su moneda, y $V^{\mathrm{b}}$ ese mismo valor ya en \MXN; $\Delta = V^{\mathrm{p}} - V^{\mathrm{b}}$ la diferencia y $N^{\MXN}$ el nocional vigente en \MXN. $\epsilon$ es la tolerancia (fracción del nocional). Para la descomposición, $g(x)$ es el PV propio con el mercado desplazado en $x$ menos $V^{\mathrm{b}}$, $x^{*}$ su raíz, $h$ el paso de la pendiente y $\bar{x}$ la cota de búsqueda. $d^{-}$ y $d^{+}$ son los días hábiles (de lunes a viernes) anterior y posterior a $d$, y $\mathcal{V}$ el conjunto de PV propios que fija el rango de fecha. Un flujo del calendario tiene monto $a$ en su moneda, factor de descuento $\mathrm{df}$ y valor presente $\mathrm{pv} = a\,\mathrm{df}$.
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap11-modelo}
+
+\subsection{Calendario de flujos del portafolio}\label{sec:cap11-flujos}
+
+Para un snapshot con fecha $d$, \codigo{desk/api/ops_cashflows.py}{cashflows} une, para cada operación, los flujos \emph{liquidados} (de la fecha anterior al pacto hasta $d$ inclusive, con \codigo{desk/api/settlement.py}{settled_flows}) y los \emph{proyectados} (los que el pricer descuenta a $d$, solo si la operación está viva, con \codigo{desk/api/settlement.py}{projected_flows}); la lógica por operación es \codigo{desk/api/ops_cashflows.py}{_trade_rows}. Solo los swaps OIS, los cross currency swaps y los bonos proyectan flujos; forwards y opciones no. Cada fila lleva el signo de la empresa (positivo si cobra) y el monto en \MXN
+\begin{equation}\label{eq:cap11-monto-mxn}
+  a^{\MXN} =
+  \begin{cases}
+    C^{\MXN} \text{ del capítulo~\ref{cap:ciclo-vida}} & \text{flujo liquidado (FIX de su fecha de pago),}\\
+    a & \text{flujo proyectado en \MXN,}\\
+    a\,\Spot & \text{flujo proyectado en \USD, con el \emph{spot} del snapshot.}
+  \end{cases}
+\end{equation}
+Los flujos proyectados llevan además $\mathrm{df}$ y $\mathrm{pv}$ del mismo instrumento envejecido que \codigo{desk/api/valuation.py}{value_trade}, de modo que, para un swap OIS o un bono, la suma descontada de lo proyectado reproduce el PV de la operación:
+\begin{equation}\label{eq:cap11-suma-flujos}
+  \sum_{k\,\in\,\text{proyectados}} a_k\,\mathrm{df}_k = V \quad\text{(en la moneda de los flujos).}
+\end{equation}
+Las filas se filtran por ventana inclusiva de fechas, contraparte exacta y moneda, y se ordenan por (\texttt{date}, \texttt{trade\_id}, \texttt{kind}); los totales por fecha, contraparte y moneda suman \texttt{amount\_mxn} de las filas filtradas (\codigo{desk/api/ops_cashflows.py}{_grouped}). Una operación que no se puede derivar va a \texttt{errors} y no aporta filas. La exportación a CSV es \codigo{desk/api/ops_cashflows.py}{cashflows_csv}.
+
+\subsection{Confirmación de liquidaciones}\label{sec:cap11-confirmacion-liq}
+
+El banco rara vez liquida exactamente el monto derivado. \codigo{desk/api/ops_settlements.py}{confirm_settlement} registra el monto real $a_{\mathrm{conf}}$ de un flujo ya derivado (un \texttt{coupon} o un \texttt{settlement}) como un evento \texttt{transfer} con \texttt{kind} igual a \texttt{settlement\_confirmed} (\codigo{desk/api/ops_settlements.py}{CONFIRMED_KIND}); el evento guarda también el monto calculado en ese momento. La diferencia que se reporta es
+\begin{equation}\label{eq:cap11-dif-conf}
+  \delta_{\mathrm{conf}} = a_{\mathrm{conf}} - a_{\mathrm{der}},
+\end{equation}
+en la moneda del flujo, con $a_{\mathrm{der}}$ el monto derivado. Es solo registro: no cambia el PV ni el P\&L, porque el flujo derivado es el que cuenta (\codigo{desk/api/ops_settlements.py}{is_confirmation} identifica estos eventos y \codigo{desk/api/settlement.py}{settled_flows} los ignora). La confirmación es por pareja (fecha, moneda): las dos patas de un cross currency swap liquidan el mismo día y se confirman por separado (\codigo{desk/api/ops_cashflows.py}{confirmations}). Se rechaza (409) una fecha posterior al \texttt{as\_of}, una fecha sin flujo derivado, un flujo que no sea cupón o liquidación (intercambios de nocional, amortizaciones y transferencias de terminación no se confirman), una moneda distinta de la del flujo y un flujo ya confirmado. En el calendario, la fila de un flujo confirmado cambia su \texttt{status} a \texttt{confirmed} y añade el monto confirmado y $\delta_{\mathrm{conf}}$, pero su monto y los totales siguen siendo los derivados.
+
+\subsection{Confirmación imprimible y FpML: lo que afecta a los números}\label{sec:cap11-fpml}
+
+La confirmación (\codigo{desk/api/ops_confirm.py}{confirmation}) presenta los términos \emph{pactados} (los parámetros guardados, no los vigentes tras eventos), con un calendario de pagos previsto. Para un swap OIS, el calendario lista solo la pata fija, que es conocida de antemano: el pago $k$ vale $\mp\Nom\,\K\,(n_k - n_{k-1})/360$ (negativo si la empresa es \emph{payer}), con los $n_k$ del capítulo~\ref{cap:ciclo-vida}; el neto que liquida el banco depende de la pata variable y no es esa cifra (\codigo{desk/api/ops_confirm.py}{_irs}). Para un bono, el cupón es $\text{face}\times\text{tasa}/\text{frecuencia}$ en los días $\mathrm{round}(k/f\cdot 365)$ desde el inicio, y el último pago suma el principal (\codigo{desk/api/ops_confirm.py}{_bond}). El \emph{cross currency swap} no tiene plantilla de confirmación (responde 400).
+
+El intercambio FpML (\codigo{desk/api/fpml.py}{export_trade}, \codigo{desk/api/fpml.py}{import_trade}) cubre solo \texttt{irs}, \texttt{fx\_forward} y \texttt{fx\_option} (\codigo{desk/api/fpml.py}{FPML_PRODUCTS}). Lo que importa para los números es lo siguiente. En el swap, ambas piernas llevan fechas efectiva y de terminación sin ajuste (\texttt{businessDayConvention} igual a \texttt{NONE}), base ACT/360, el mismo nocional y una frecuencia de $28$ días en TIIE-F o un año en SOFR (\codigo{desk/api/fpml.py}{_frequency}); los números se escriben con \texttt{repr(float)} para que la ida y vuelta sea exacta. Al importar, la fecha de terminación debe caer en un número entero de periodos desde el inicio ($28$ días en TIIE-F, $365$ en SOFR): si no, se rechaza y se nombra la fecha representable más cercana, en lugar de moverla (\codigo{desk/api/fpml.py}{_swap_body}). En el forward de FX el monto en \MXN que se exporta es $N_{\mathrm{USD}}\times\K$ y es solo informativo: al importar, el precio pactado sale de \texttt{exchangeRate/rate} y el monto en \MXN se ignora. La exportación se rechaza (409) si la operación tiene eventos posteriores al pacto, pues el documento llevaría los términos pactados y no los vigentes. Los nombres de índice ISDA que usa el código (\texttt{MXN-TIIE-ON-OIS Compound} y \texttt{USD-SOFR-OIS Compound}) están por verificar contra las definiciones vigentes de ISDA \citep{isda2021}; el estándar es el de \citet{fpml2026}.
+
+\subsection{Conciliación del PV propio contra el del banco}\label{sec:cap11-conciliacion}
+
+\paragraph{Entrada y emparejamiento.} \codigo{desk/api/ops_recon.py}{create_run} recibe un snapshot, una contraparte, una tolerancia y un CSV con las columnas \texttt{trade\_id}, \texttt{bank\_pv} y \texttt{currency} (más \texttt{bank\_ref} opcional). El PV del banco se toma tal cual, con la convención de signo de la empresa; una cifra en \USD se convierte con el \emph{spot} del snapshot:
+\begin{equation}\label{eq:cap11-banco-mxn}
+  V^{\mathrm{b}} =
+  \begin{cases}
+    V^{\mathrm{b}}_{\mathrm{csv}} & \text{moneda \MXN,}\\
+    V^{\mathrm{b}}_{\mathrm{csv}}\,\Spot & \text{moneda \USD.}
+  \end{cases}
+\end{equation}
+Cada renglón se empareja con una operación por \texttt{trade\_id} o, si falta, por la referencia del banco registrada en la operación (\codigo{desk/api/ops_recon.py}{_pair}); una operación inexistente, de otra contraparte o una referencia no encontrada pasa a la lista \emph{solo banco}. Las operaciones vivas de la contraparte que el CSV no trae pasan a \emph{solo propia} (\codigo{desk/api/valuation.py}{is_live}). Repetir una operación en el CSV es un error 400. Las reglas del CSV (encabezado, números finitos de magnitud menor que $10^{13}$, a lo más \codigo{desk/api/ops_recon.py}{MAX_CSV_ROWS} renglones) están en \codigo{desk/api/ops_recon.py}{_read_csv} y \codigo{desk/api/ops_recon.py}{_parse_row}.
+
+\paragraph{Diferencia y tolerancia.} Para cada pareja, \codigo{desk/api/ops_recon.py}{reconcile_trade} calcula $V^{\mathrm{p}}$ con \codigo{desk/api/valuation.py}{value_trade} y
+\begin{equation}\label{eq:cap11-diferencia}
+  \Delta = V^{\mathrm{p}} - V^{\mathrm{b}}, \qquad
+  \delta = \frac{\Delta}{N^{\MXN}}, \qquad
+  N^{\MXN} =
+  \begin{cases}
+    |N_{\mathrm{vig}}| & \text{nocional en \MXN,}\\
+    |N_{\mathrm{vig}}|\,\Spot & \text{nocional en \USD,}
+  \end{cases}
+\end{equation}
+con $N_{\mathrm{vig}}$ el nocional de los términos vigentes en $d$ que reporta el producto (\codigo{desk/api/ops_recon.py}{_describe}; en la opción sobre acción es cantidad por \emph{spot}). La fila está \emph{conciliada} si $|\Delta| \le \epsilon N^{\MXN}$; por omisión $\epsilon = 10^{-4}$ (\codigo{desk/api/ops_recon.py}{DEFAULT_TOLERANCE}) y la petición acepta $0 \le \epsilon \le 0.1$ (\codigo{desk/api/ops_recon.py}{MAX_TOLERANCE}).
+
+\paragraph{Factor fecha.} Se valúa la misma operación un día hábil antes y uno después, con el mismo mercado y otra fecha de valuación (\codigo{desk/api/ops_recon.py}{context_at}: copia superficial del contexto con otro \texttt{as\_of}, de modo que solo cambia el tiempo). Los días hábiles son de lunes a viernes, \emph{sin feriados} (\codigo{desk/api/ops_recon.py}{business_day}). Sea $\mathcal{V}$ el conjunto formado por $V^{\mathrm{p}}$ y por el PV propio en $d^{-}$ y en $d^{+}$ \emph{solo si la operación está viva ese día}; un día vecino en que la operación aún no se pacta o ya venció vale cero por definición, no por mercado, y ensancharía el rango hasta cero. La diferencia se atribuye a la fecha si
+\begin{equation}\label{eq:cap11-fecha}
+  \min\mathcal{V} - \epsilon N^{\MXN} \;\le\; V^{\mathrm{b}} \;\le\; \max\mathcal{V} + \epsilon N^{\MXN}.
+\end{equation}
+Implementación: \codigo{desk/api/ops_recon.py}{_date_factor}.
+
+\paragraph{Factor curva y factor tipo de cambio.} Para los productos de tasas (\codigo{desk/api/ops_recon.py}{CURVE_PRODUCTS}: \texttt{irs}, \texttt{cap\_floor}, \texttt{swaption} y \texttt{bond}) se busca el desplazamiento paralelo $x$ (en \pb) de la curva del producto (\texttt{TIIE-F} si los términos no la traen) que iguala el PV propio al del banco; para forward y opción de FX (\codigo{desk/api/ops_recon.py}{FX_PRODUCTS}), el movimiento porcentual $x$ del \emph{spot}. En ambos casos $x^{*}$ es la raíz de
+\begin{equation}\label{eq:cap11-raiz}
+  g(x) = V^{\mathrm{p}}\bigl(\text{mercado desplazado en } x\bigr) - V^{\mathrm{b}}, \qquad g(0) = \Delta,
+\end{equation}
+donde el desplazamiento es \codigo{desk/api/market.py}{MarketContext.shifted}: suma $x\cdot 10^{-4}$ a la tasa cero de cada pilar de la curva (\codigo{src/termstructure/yieldcurve.cpp}{parallelBump}; capítulo~\ref{cap:curvas}) o multiplica el \emph{spot} por $1 + x/100$. La raíz se busca con Newton desde $x_0 = 0$, con la pendiente por diferencia finita hacia adelante sobre la valuación real:
+\begin{equation}\label{eq:cap11-newton}
+  x_{n+1} = x_n - \frac{g(x_n)}{\hat{g}_n}, \qquad
+  \hat{g}_n = \frac{g(x_n + h) - g(x_n)}{h},
+\end{equation}
+con $h = 1\,\mathrm{pb}$ y $\bar{x} = 1\,000\,\mathrm{pb}$ en el factor curva, y $h = 0.01\,\%$ y $\bar{x} = 50\,\%$ en el de tipo de cambio. La iteración termina con éxito cuando $|g(x_n)| \le 10^{-8}\max(N^{\MXN}, 1)$. Devuelve ``sin raíz'' (\texttt{None}) si la pendiente cumple $|\hat{g}_n| < 10^{-12}\max(N^{\MXN}, 1)$, si algún $x_n$ sale de $\pm\bar{x}$, si $g$ no es finita o lanza una excepción, o si pasan $20$ iteraciones sin converger (\codigo{desk/api/ops_recon.py}{_newton}). El \emph{spot} implícito es $\Spot\,(1 + x^{*}/100)$.
+
+\paragraph{Estado y bandera de términos.} Con los umbrales \codigo{desk/api/ops_recon.py}{EXPLAIN_CURVE_BP} $=10\,\mathrm{pb}$, \codigo{desk/api/ops_recon.py}{EXPLAIN_FX_PCT} $=1\,\%$, \codigo{desk/api/ops_recon.py}{TERMS_CURVE_BP} $=25\,\mathrm{pb}$ y \codigo{desk/api/ops_recon.py}{TERMS_FX_PCT} $=2\,\%$, y con $a \in \{0,1\}$ la indicadora de la ecuación~\eqref{eq:cap11-fecha},
+\begin{equation}\label{eq:cap11-estado}
+  \text{estado} =
+  \begin{cases}
+    \texttt{conciliada} & |\Delta| \le \epsilon N^{\MXN},\\
+    \texttt{explicable} & \text{si no, y } a = 1 \text{ o } |x^{*}_{\mathrm{pb}}| \le 10 \text{ o } |x^{*}_{\%}| \le 1,\\
+    \texttt{revisar} & \text{en otro caso,}
+  \end{cases}
+\end{equation}
+\begin{equation}\label{eq:cap11-terminos}
+  \begin{split}
+    \text{bandera de términos} \iff{}& \text{estado} = \texttt{revisar} \;\wedge\; \bigl(x^{*}_{\mathrm{pb}} \text{ no existe o } |x^{*}_{\mathrm{pb}}| > 25\bigr)\\
+    &\wedge\; \bigl(x^{*}_{\%} \text{ no existe o } |x^{*}_{\%}| > 2\bigr),
+  \end{split}
+\end{equation}
+donde $x^{*}_{\mathrm{pb}}$ y $x^{*}_{\%}$ son las raíces del factor curva y del factor de tipo de cambio, ``no existe'' significa que el producto no tiene ese factor o que Newton no halló raíz. Si la valuación lanza, la fila es \texttt{revisar} con el mensaje de error, sin descomposición y sin bandera. El resumen de la corrida cuenta filas por estado y suma PV propio, PV del banco y diferencia solo de las filas sin error (\codigo{desk/api/ops_recon.py}{_summary}). La corrida se guarda en tablas de solo inserción (\codigo{desk/api/ops_recon.py}{get_run}, \codigo{desk/api/ops_recon.py}{list_runs}) y se exporta a CSV con \codigo{desk/api/ops_recon.py}{run_csv}.
+
+\begin{diferencia}
+  El diseño del corte 5 hablaba de resolver el desplazamiento ``con el DV01 y una iteración de Newton''. El código no usa un DV01 fijo: cada iteración revalúa la operación con el mercado desplazado y estima la pendiente por diferencia finita sobre esa valuación real (ecuación~\eqref{eq:cap11-newton}). Con una diferencia que se explica por un solo movimiento de curva coincide con la teoría de sensibilidades de primer orden \citep{hull2018}; con diferencias grandes la pendiente cambia entre iteraciones y la raíz absorbe la convexidad.
+\end{diferencia}
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap11-implementacion}
+
+La \cref{tab:cap11-mapa} liga cada fórmula con la función que la calcula. Las rutas son relativas a la raíz del repositorio.
+
+\begin{table}[ht]
+  \centering\small
+  \caption{De la fórmula a la función.}\label{tab:cap11-mapa}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.70\textwidth}@{}}
+    \toprule
+    Fórmula & Función \\
+    \midrule
+    \eqref{eq:cap11-monto-mxn}, \eqref{eq:cap11-suma-flujos} & \codigo{desk/api/ops_cashflows.py}{_trade_rows}, \codigo{desk/api/ops_cashflows.py}{cashflows} \\
+    \eqref{eq:cap11-dif-conf} & \codigo{desk/api/ops_settlements.py}{confirm_settlement} \\
+    Calendario de la confirmación & \codigo{desk/api/ops_confirm.py}{confirmation} \\
+    FpML & \codigo{desk/api/fpml.py}{export_trade}, \codigo{desk/api/fpml.py}{import_trade} \\
+    \eqref{eq:cap11-banco-mxn} & \codigo{desk/api/ops_recon.py}{create_run} \\
+    \eqref{eq:cap11-diferencia} & \codigo{desk/api/ops_recon.py}{reconcile_trade}, \codigo{desk/api/ops_recon.py}{_describe} \\
+    \eqref{eq:cap11-fecha} & \codigo{desk/api/ops_recon.py}{_date_factor}, \codigo{desk/api/ops_recon.py}{business_day} \\
+    \eqref{eq:cap11-raiz}, \eqref{eq:cap11-newton} & \codigo{desk/api/ops_recon.py}{_newton}, \codigo{desk/api/market.py}{MarketContext.shifted} \\
+    \eqref{eq:cap11-estado}, \eqref{eq:cap11-terminos} & \codigo{desk/api/ops_recon.py}{reconcile_trade} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap11-ejemplo}
+
+Todos los ejemplos usan el snapshot \texttt{MX-DEMO} ($d = $ 2026-11-10, $\Spot = 18.6$) y los reproduce \codigo{docs/tex/verificacion/cap11_operaciones.py}{main} con el código del proyecto sobre bases temporales. La tolerancia es de media unidad del último dígito impreso ($0.005$~\MXN en montos).
+
+\paragraph{Ejemplo 1: el banco valúa con la curva 5~\pb\ arriba.} Swap TIIE-F \emph{payer}, $\Nom = 500\,000\,000$ \MXN, $\K = 6.80\,\%$, $26$ periodos de $28$ días, pacto e inicio el 2026-11-10 (vencimiento 2028-11-07). El PV propio es $V^{\mathrm{p}} = \verif{cap11-pv-propio}{-942898.48}$~\MXN. Para simular el estado de cuenta, el PV del banco se calcula valuando el mismo swap con la curva TIIE-F desplazada $+5\,\mathrm{pb}$: $V^{\mathrm{b}} = \verif{cap11-pv-banco}{-475013.01}$~\MXN. Por la ecuación~\eqref{eq:cap11-diferencia},
+\[
+  \Delta = V^{\mathrm{p}} - V^{\mathrm{b}} = \verif{cap11-dif-curva}{-467885.47}~\MXN,
+  \qquad
+  \epsilon N^{\MXN} = 10^{-4} \times 500\,000\,000 = \verif{cap11-tolerancia-abs}{50000.00}~\MXN.
+\]
+Como $|\Delta| > \epsilon N^{\MXN}$, no está conciliada. El rango de fecha no la explica: el día hábil anterior (2026-11-09) es anterior al pacto, la operación no está viva y no cuenta, y el posterior (ejemplo~2) da un rango que no contiene $V^{\mathrm{b}}$. Newton con la ecuación~\eqref{eq:cap11-newton} converge al desplazamiento $x^{*} = \verif{cap11-bp-implicito}{5.0000}\,\mathrm{pb}$, que es $\le 10\,\mathrm{pb}$: la fila es \texttt{explicable} y no lleva bandera de términos (tolerancia de $10^{-4}\,\mathrm{pb}$).
+
+\paragraph{Ejemplo 2: el banco valúa un día hábil después.} Con el mismo swap, el banco entrega su PV a la fecha siguiente, $V^{\mathrm{b}} = V^{\mathrm{p}}(d^{+}) = \verif{cap11-pv-dia-siguiente}{-937386.79}$~\MXN (el devengo del día usa la tasa a un día de la curva, porque no hay fijaciones cargadas). Con tolerancia $\epsilon = 0$ la diferencia es $\Delta = \verif{cap11-dif-fecha}{-5511.69}~\MXN$, y como $\mathcal{V} = \{V^{\mathrm{p}}, V^{\mathrm{p}}(d^{+})\}$ da el rango $[-942\,898.48,\ -937\,386.79]$, que contiene $V^{\mathrm{b}}$, la ecuación~\eqref{eq:cap11-fecha} la atribuye a la fecha y es \texttt{explicable}. Con la tolerancia por omisión, $|\Delta| = 5\,511.69 \le 50\,000$ y sale \texttt{conciliada}.
+
+\paragraph{Ejemplo 3: el banco valúa con el \emph{spot} medio por ciento arriba.} Forward de compra de $10\,000\,000$ \USD a $\K = 19.05$, vencimiento 2027-05-11 ($182$ días), nocional $N^{\MXN} = 10\,000\,000 \times 18.6 = 186\,000\,000$~\MXN. El banco valúa con $\Spot\,(1 + 0.5/100)$. Newton sobre el \emph{spot} converge a $x^{*} = 0.5\,\%$, dentro del $1\,\%$ explicable, y el \emph{spot} implícito es $\Spot\,(1 + x^{*}/100) = \verif{cap11-spot-implicito}{18.6930}$ \MXN por \USD (tolerancia $10^{-4}$).
+
+\paragraph{Ejemplo 4: el calendario reproduce el PV.} El swap del ejemplo~1 tiene $26$ flujos proyectados al 2026-11-10. La suma $\sum_k a_k\,\mathrm{df}_k$ de la ecuación~\eqref{eq:cap11-suma-flujos} sobre las $26$ filas del calendario es $\verif{cap11-suma-flujos-pv}{-942898.48}$~\MXN, el PV propio del ejemplo~1.
+
+\paragraph{Ejemplo 5: confirmación de un cupón.} Para el swap del capítulo~\ref{cap:ciclo-vida} (ejemplo~2: $\Nom = 100\,000\,000$~\MXN, cupón derivado del 2026-12-08 de $16\,930.14$~\MXN), el banco liquidó $17\,000.00$~\MXN. Al confirmarlo, la ecuación~\eqref{eq:cap11-dif-conf} da $\delta_{\mathrm{conf}} = 17\,000.00 - 16\,930.1435 = \verif{cap11-dif-confirmada}{69.8565}$~\MXN (tolerancia $5\times 10^{-5}$); el PV y el P\&L no cambian.
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap11-validacion}
+
+Este capítulo no tiene caso contra QuantLib: el PV propio sale de la valuación ya validada en el capítulo~\ref{cap:validacion}, y la conciliación, el calendario y la confirmación no son un modelo de valuación. Lo cubren las pruebas del backend:
+\begin{itemize}
+  \item {\sloppy Conciliación: \codigo{desk/api/tests/test_ops_recon.py}{test_exact_own_pv_is_conciliada_for_every_trade}, \codigo{desk/api/tests/test_ops_recon.py}{test_curve_shift_is_explicable_and_recovers_the_basis_points}, \codigo{desk/api/tests/test_ops_recon.py}{test_spot_shift_is_explicable_and_recovers_the_percentage}, \codigo{desk/api/tests/test_ops_recon.py}{test_pv_one_business_day_later_is_attributed_to_the_date}, \codigo{desk/api/tests/test_ops_recon.py}{test_a_day_when_the_trade_is_not_alive_does_not_widen_the_date_range}.\par}
+  \item {\sloppy Bandera de términos y casos límite: \codigo{desk/api/tests/test_ops_recon.py}{test_notional_times_one_and_a_half_is_revisar_with_terms_flag}, \codigo{desk/api/tests/test_ops_recon.py}{test_unreachable_bank_pv_leaves_the_factors_null_and_flags_the_terms}, \codigo{desk/api/tests/test_ops_recon.py}{test_usd_bank_pv_is_converted_with_the_snapshot_spot}, \codigo{desk/api/tests/test_ops_recon.py}{test_both_tables_are_insert_only}.\par}
+  \item {\sloppy Calendario de flujos: \codigo{desk/api/tests/test_ops_cashflows.py}{test_projected_flows_discount_back_to_the_pv_of_the_trade}, \codigo{desk/api/tests/test_ops_cashflows.py}{test_totals_add_up_to_the_rows_and_each_group_to_its_own_rows}, \codigo{desk/api/tests/test_ops_cashflows.py}{test_a_confirmed_coupon_shows_the_bank_amount_and_the_difference}.\par}
+  \item {\sloppy Confirmación de liquidaciones: \codigo{desk/api/tests/test_ops_settlements.py}{test_confirms_the_coupon_and_returns_the_difference_against_the_computed_amount}, \codigo{desk/api/tests/test_ops_settlements.py}{test_the_same_flow_cannot_be_confirmed_twice}, \codigo{desk/api/tests/test_ops_settlements.py}{test_a_confirmation_changes_neither_valuation_nor_pnl_nor_flows}.\par}
+  \item {\sloppy Confirmación imprimible y FpML: \codigo{desk/api/tests/test_ops_confirm.py}{test_irs_schedule_matches_payment_days_and_fixed_leg}, \codigo{desk/api/tests/test_ops_confirm.py}{test_confirmation_shows_agreed_terms_not_current_ones}, \codigo{desk/api/tests/test_ops_fpml.py}{test_round_trip_keeps_terms_dates_counterparty_and_pv}, \codigo{desk/api/tests/test_ops_fpml.py}{test_import_irs_rejects_a_termination_that_is_not_whole_periods}, \codigo{desk/api/tests/test_ops_fpml.py}{test_forward_strike_comes_from_rate_not_from_the_mxn_amount}.\par}
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap11-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \textbf{La conciliación es indicativa.} La descomposición mueve \emph{un solo factor a la vez}, en paralelo sobre la tasa cero (curva) o sobre el \emph{spot}, y no usa calendario de días inhábiles (el factor fecha son días de lunes a viernes sin feriados). Dice qué movimiento explicaría la diferencia, no que lo haya causado; si el PV del banco incluye ajustes de crédito, de fondeo o de liquidez, la diferencia los absorbe y puede atribuirlos a la curva. Esta función es el diagnóstico previo a una disputa de valuación \citep{bcbs2015}, no la disputa.
+    \item \textbf{La bandera de términos es ciega cerca de la par}: compara PV, y en una operación con PV casi cero un nocional distinto casi no lo cambia, así que el desplazamiento de curva que lo explica es pequeño y la fila queda \texttt{explicable}. Además, \texttt{xccy\_swap} y \texttt{equity\_option} no tienen factor de curva ni de tipo de cambio: su descomposición solo incluye la fecha (ver \texttt{HALLAZGOS.md}).
+    \item \textbf{FpML} cubre solo \texttt{irs}, \texttt{fx\_forward} y \texttt{fx\_option}, en una vista de confirmación con el subconjunto de elementos necesario para la ida y vuelta: no se valida contra el esquema XSD oficial, no se aceptan DTD ni entidades, no incluye prima de opciones ni ajustes de días hábiles, y un swap solo se importa si termina en periodos enteros (un año de $366$ días en SOFR se rechaza).
+    \item \textbf{La confirmación imprimible} no sustituye la confirmación ISDA ni el contrato marco y no lleva firma; muestra los términos pactados y, en un swap, solo la pata fija.
+    \item \textbf{Confirmación de liquidaciones}: solo cupones y liquidaciones, por fecha y moneda; los intercambios de nocional y las amortizaciones no se confirman, así que el neto de cupón y nocional al vencimiento de un cross currency swap no puede confirmarse como un solo pago.
+    \item \textbf{Fuera de alcance}: mensajería (SWIFT, MarkitWire), instrucciones de liquidación y cuentas, neteo de pagos, conciliación de colateral. El CSV admite a lo más $5\,000$ renglones.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap11-referencias}
+
+Los estándares internacionales de márgenes reconocen que la valuación de un derivado no cotizado puede ser compleja y quedar sujeta a disputa entre las partes, y piden procedimientos de resolución acordados de antemano \citep[apartado~3.15]{bcbs2015}; la conciliación de este capítulo es la herramienta de diagnóstico previa. El estándar de intercambio de operaciones es FpML \citep{fpml2026} y los índices ISDA se nombran según las definiciones de 2021 \citep{isda2021}. La relación entre un desplazamiento de curva y el cambio de PV es la sensibilidad de primer orden de \citet{hull2018}.
