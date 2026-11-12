@@ -1,5 +1,443 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Hull--White: bono, cap/floor y swaption}\label{cap:hull-white}
 
-Modelo de \citet{hull1990} de un factor: bono cupón cero, cap/floor y swaption por Jamshidian.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap05-proposito}
+
+Este capítulo documenta el modelo de tasa corta de \citet{hull1990} de un factor y los dos productos de
+opción sobre tasa que QF Desk valúa con él: el cap/floor y la swaption europea. El «bono» del título es el
+bono cupón cero del modelo (precio de descuento condicionado a la tasa corta), no el bono con cupón del
+capítulo~\ref{cap:bonos}.
+
+Hay que separar dos cosas que viven en archivos distintos. La clase del modelo,
+\codigo{include/qf/models/hullwhite.hpp}{HullWhite}, ofrece el precio del cupón cero, su valor condicionado a
+la tasa corta y una simulación; la consume el motor de XVA (capítulo~\ref{cap:xva}). El cap/floor y la
+swaption \emph{no instancian esa clase}: sus precios son fórmulas cerradas de opción sobre bono cupón cero
+que solo necesitan la curva de descuento y los parámetros $\hwa$ y $\hwsig$, y están escritas de forma
+independiente en \codigo{src/instruments/capfloor.cpp}{hwBondOption} y en
+\codigo{src/instruments/swaption.cpp}{hwZCBOption}. Ambas leen la curva de descuento ya construida
+(capítulo~\ref{cap:curvas}); el ciclo de vida de las operaciones envejecidas se trata en el
+capítulo~\ref{cap:ciclo-vida} y la comparación con QuantLib en el capítulo~\ref{cap:validacion}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap05-notacion}
+
+Los símbolos comunes ($\DF{c}{T}$, $\Nom$, $\K$, $\Ncdf$, $\hwa$, $\hwsig$, $\hwtheta$) están en el
+apéndice~\ref{ap:simbolos}. En este capítulo $c$ es la curva con la que se calculan los factores de descuento
+(la de la operación), y los tiempos son años calculados como días$/365$ desde la fecha de valuación. Los
+símbolos propios son:
+\begin{itemize}
+  \item $r(t)$: tasa corta instantánea (tasa anual, composición continua).
+  \item $f(0,t)$: tasa forward instantánea de la curva inicial (tasa anual, composición continua).
+  \item $B(\tau) = (1-e^{-\hwa\tau})/\hwa$ (años).
+  \item $\delta_i = t_i - t_{i-1}$: longitud en años del periodo calendario del caplet $i$ (o $\delta=1/f$ en
+        calendario regular de frecuencia $f$); $\tau_i$: fracción de devengo del mismo periodo (años).
+  \item $P_i = \DF{c}{t_i}$: factor de descuento al fin del caplet $i$; $P_0:=1$ si $t_0<10^{-12}$.
+  \item $X$: precio de ejercicio del bono cupón cero de una opción sobre bono (adimensional).
+  \item $\sigma_p$, $h$: desviación estándar de $\ln P(T_s,T_e)$ y argumento de la fórmula de opción sobre bono
+        (adimensionales).
+  \item $T_e$: expiración de la swaption; $T_j=T_e+j\delta$ ($j=1,\dots,n$): fechas de pago del swap subyacente.
+  \item $c_j$: flujo $j$ del bono de tasa fija que replica la pata fija del swap (moneda del nocional).
+  \item $V_e = \mathrm{Var}[r(T_e)]$ (tasa anual al cuadrado); $x=r(T_e)-f(0,T_e)$ y su raíz $x^*$
+        (tasa anual); $F_j=\DF{c}{T_j}/\DF{c}{T_e}$ (adimensional).
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap05-modelo}
+
+\subsection{Dinámica y precio del cupón cero}\label{sec:cap05-cupon-cero}
+
+La tasa corta sigue, bajo la medida de riesgo neutral $\Q$,
+\begin{equation}\label{eq:cap05-dinamica}
+  dr(t) = \bigl[\hwtheta - \hwa\, r(t)\bigr]\,dt + \hwsig\, dW(t),\qquad \hwa>0,\ \hwsig>0,
+\end{equation}
+y la clase \codigo{include/qf/models/hullwhite.hpp}{HullWhite} rechaza $\hwa\le0$ o $\hwsig\le0$ con una
+excepción. «Ajustado a la curva inicial» significa aquí algo muy directo: el precio del cupón cero a
+tiempo cero es el de la curva,
+\begin{equation}\label{eq:cap05-ajuste}
+  P_{\mathrm{HW}}(0,T) = \DF{c}{T},
+\end{equation}
+con la tasa cero de la curva como $\zr{c}{T}$ en composición continua. Se implementa en
+\codigo{src/models/hullwhite.cpp}{HullWhite::bondPrice} y
+\codigo{src/models/hullwhite.cpp}{HullWhite::zeroRate}, que delegan en la curva (lanzan error si $T\le0$).
+
+Dado el valor $r_t$ de la tasa corta en $t>0$, el precio de un cupón cero que vence en $T>t$ es
+\begin{equation}\label{eq:cap05-cupon-condicional}
+  P(t,T\mid r_t) = \exp\bigl\{\ln A(t,T) - B(T-t)\,r_t\bigr\},
+\end{equation}
+\begin{equation}\label{eq:cap05-lnA}
+  \ln A(t,T) = \ln\frac{\DF{c}{T}}{\DF{c}{t}} + B(T-t)\,f(0,t)
+  - \frac{\hwsig^{2}}{4\hwa}\,B(T-t)^{2}\bigl(1-e^{-2\hwa t}\bigr).
+\end{equation}
+La implementación es \codigo{src/models/hullwhite.cpp}{HullWhite::conditionalBondPrice}. Dos detalles de
+cómo se evalúa: $f(0,t)$ se toma como la tasa forward continua de la curva sobre $[t,t+10^{-5}]$ (con
+$t$ sustituido por $10^{-5}$ si es menor), no como derivada analítica; y si $t<10^{-6}$ la función devuelve
+directamente $\DF{c}{T}$ e ignora $r_t$. Lanza error si $T\le t$.
+
+\subsection{Simulación de la tasa corta}\label{sec:cap05-simulacion}
+
+La deriva $\hwtheta$ se obtiene numéricamente de la curva:
+\begin{equation}\label{eq:cap05-theta}
+  \theta(t) \approx \frac{\partial f(0,t)}{\partial t} + \hwa\, f(0,t)
+  + \frac{\hwsig^{2}}{2\hwa}\bigl(1-e^{-2\hwa t}\bigr),
+\end{equation}
+con $\partial f/\partial t$ como la diferencia de dos tasas forward continuas de la curva, sobre las ventanas
+de $10^{-5}$ años anterior y posterior a $t$, dividida entre $10^{-5}$ (cero si $t\le10^{-5}$), y $f(0,t)$ como
+la forward sobre $[t,t+10^{-4}]$; es la función privada \codigo{src/models/hullwhite.cpp}{HullWhite::theta}. La trayectoria
+sale de un esquema de Euler en pasos $\Delta=T/\text{pasos}$,
+\begin{equation}\label{eq:cap05-euler}
+  r_{k+1} = r_k + \bigl(\theta(t_k)-\hwa\, r_k\bigr)\Delta + \hwsig\sqrt{\Delta}\,Z_k,\qquad r_0=\zr{c}{10^{-4}},
+\end{equation}
+con $Z_k\sim N(0,1)$ de \texttt{std::normal\_distribution} sobre \texttt{std::mt19937\_64} sembrado con
+\texttt{seed} (por omisión 42); es \codigo{src/models/hullwhite.cpp}{HullWhite::simulate}. Esta simulación
+solo la usa el motor de XVA.
+
+\begin{diferencia}
+  En \citet{hull1990} (y en \citealp[cap.~3]{brigo2006}) $\hwtheta$
+  se obtiene de forma analítica y el modelo reproduce la curva inicial exactamente. Aquí la curva se
+  reproduce por construcción solo en el precio del cupón cero (ecuación~\eqref{eq:cap05-ajuste}), mientras
+  que $\hwtheta$ es una aproximación por diferencias finitas y el esquema de Euler~\eqref{eq:cap05-euler} no
+  garantiza que el valor esperado de las trayectorias descontadas reproduzca la curva. El cap/floor y la
+  swaption no usan $\hwtheta$ ni la simulación.
+\end{diferencia}
+
+\subsection{Opción europea sobre un bono cupón cero}\label{sec:cap05-opcion-bono}
+
+Sea una opción que vence en $T_s$ sobre un cupón cero que vence en $T_e>T_s$ con precio de ejercicio $X$,
+$P_s=\DF{c}{T_s}$ y $P_e=\DF{c}{T_e}$. Con
+\begin{equation}\label{eq:cap05-sigma-p}
+  \sigma_p = \hwsig\,B(T_e-T_s)\sqrt{\frac{1-e^{-2\hwa T_s}}{2\hwa}},\qquad
+  h = \frac{1}{\sigma_p}\ln\frac{P_e}{X\,P_s} + \frac{\sigma_p}{2},
+\end{equation}
+la \emph{put} y la \emph{call} sobre el cupón cero valen, por unidad de nominal,
+\begin{align}
+  \mathrm{ZBP} &= X\,P_s\,\Ncdf(\sigma_p - h) - P_e\,\Ncdf(-h), \label{eq:cap05-zbp}\\
+  \mathrm{ZBC} &= P_e\,\Ncdf(h) - X\,P_s\,\Ncdf(h-\sigma_p). \label{eq:cap05-zbc}
+\end{align}
+Si $T_s<10^{-10}$ (solo en el cap/floor) o $\sigma_p<10^{-12}$, el código devuelve el valor intrínseco
+$\max(XP_s-P_e,0)$ para la put y $\max(P_e-XP_s,0)$ para la call. Las fórmulas son las de
+\citet{hull1990} y \citet{jamshidian1989}; el caso de cap/floor se escribe en
+\codigo{src/instruments/capfloor.cpp}{hwBondOption} (con $\sigma_p$ calculado ahí mismo) y el de la
+swaption en \codigo{src/instruments/swaption.cpp}{hwSigmaP} y
+\codigo{src/instruments/swaption.cpp}{hwZCBOption}.
+
+\subsection{Cap y floor}\label{sec:cap05-capfloor}
+
+Un cap (floor) es la suma de $n$ caplets (floorlets). El calendario sale de uno de dos constructores de
+\codigo{include/qf/instruments/capfloor.hpp}{CapFloor}: el regular, con $n=\operatorname{round}(T\,f)$,
+$t_i=i/f$ y $\delta=1/f$, y el de calendario explícito $t_0<t_1<\dots<t_n$ con $t_0\ge0$ (el que usa el
+envejecimiento, sección~\ref{sec:cap05-envejecimiento}). En ambos la fracción de devengo del periodo es
+\[
+  \tau_i = \texttt{periodFraction}(1/\delta_i,\ \mathrm{dcc}),
+  \qquad
+  \tau_i = \delta_i\cdot\tfrac{365}{360}\ \text{si dcc = ACT/360},\quad
+  \tau_i=\delta_i\ \text{si dcc = ACT/365},
+\]
+definida en \codigo{src/math/daycount.cpp}{periodFraction}; el desk siempre usa ACT/360. Con
+\begin{equation}\label{eq:cap05-caplet-parametros}
+  X_i = \frac{1}{1+\K\tau_i},\qquad
+  \sigma_{p,i} = \hwsig\,B(\delta_i)\sqrt{\frac{1-e^{-2\hwa t_{i-1}}}{2\hwa}},\qquad
+  h_i = \frac{1}{\sigma_{p,i}}\ln\frac{P_i}{X_iP_{i-1}} + \frac{\sigma_{p,i}}{2},
+\end{equation}
+el caplet y el floorlet son
+\begin{align}
+  \mathrm{Caplet}_i &= \Nom(1+\K\tau_i)\bigl[X_iP_{i-1}\Ncdf(\sigma_{p,i}-h_i) - P_i\Ncdf(-h_i)\bigr], \label{eq:cap05-caplet}\\
+  \mathrm{Floorlet}_i &= \Nom(1+\K\tau_i)\bigl[P_i\Ncdf(h_i) - X_iP_{i-1}\Ncdf(h_i-\sigma_{p,i})\bigr], \label{eq:cap05-floorlet}
+\end{align}
+es decir, $\Nom(1+\K\tau_i)$ por la \emph{put} (\emph{call}) sobre el cupón cero $[t_{i-1},t_i]$ con precio de
+ejercicio $X_i$ (ecuaciones~\eqref{eq:cap05-zbp} y~\eqref{eq:cap05-zbc}). El valor del cap o del floor es la
+suma
+\begin{equation}\label{eq:cap05-cap}
+  \mathrm{Cap}=\sum_{i=1}^{n}\mathrm{Caplet}_i,\qquad \mathrm{Floor}=\sum_{i=1}^{n}\mathrm{Floorlet}_i.
+\end{equation}
+Se calcula en \codigo{src/instruments/capfloor.cpp}{CapFloor::caplets} (valor de cada caplet y su fecha de
+pago) y \codigo{src/instruments/capfloor.cpp}{CapFloor::price} (la suma). El factor $\Nom(1+\K\tau_i)$
+convierte el pago de una opción sobre tasa en una opción sobre bono: cuando $\sigma_p\to0$,
+\[
+  \Nom(1+\K\tau_i)\max(X_iP_{i-1}-P_i,0) = \Nom\,\tau_i\,P_i\max(L_i-\K,0),\qquad
+  L_i = \frac{1}{\tau_i}\Bigl(\frac{P_{i-1}}{P_i}-1\Bigr),
+\]
+donde $L_i$ es la tasa simple del periodo \emph{implícita en la curva} con devengo $\tau_i$ (ACT/360), y no
+con la longitud calendario $\delta_i$, que solo entra en $\sigma_{p,i}$. Del mismo modo
+$\mathrm{Cap}-\mathrm{Floor}=\Nom\sum_i\tau_iP_i(L_i-\K)$, el valor de un swap pagador a tasa $\K$ (paga la fija, recibe la
+flotante) sobre la misma curva (paridad cap-floor); la cubre la prueba del repositorio que usa
+la función auxiliar \codigo{tests/test_capfloor.cpp}{irsNPV}.
+
+Cuando el primer caplet empieza hoy ($t_0<10^{-12}$ en el calendario regular, $t_0=0$ de la primera
+frontera), $P_0=1$ y $\sigma_{p,1}=0$: el caplet vale su intrínseco calculado con la forward de la curva, no
+con una fijación.
+
+\paragraph{Doble curva.} Cuando el producto proyecta con una curva $p$ y descuenta con otra $d$ (cap/floor de
+TIIE-F con colateral en USD), cada caplet se valúa en la curva de proyección y se traslada a la de descuento
+con el cociente de factores en su fecha de pago:
+\begin{equation}\label{eq:cap05-doble-curva}
+  \mathrm{Cap}^{(p,d)}=\sum_{i=1}^{n}\mathrm{Caplet}_i^{(p)}\cdot\frac{\DF{d}{t_i}}{\DF{p}{t_i}} .
+\end{equation}
+Es una base determinista, no un modelo de Hull--White de dos curvas, y lo implementa
+\codigo{src/instruments/capfloor.cpp}{CapFloor::priceDualCurve}; coincide con $\mathrm{Cap}$ si $d=p$.
+
+\begin{diferencia}
+  El mercado cotiza caps con volatilidades de \citet{black1976} (una por plazo y strike) y no con un modelo de
+  tasa corta; aquí $\hwa$ y $\hwsig$ son los mismos para todos los strikes y plazos de una curva, de modo que
+  el precio no reproduce una superficie de volatilidades cotizada ni la sonrisa. La fórmula como tal es la de
+  una opción sobre cupón cero de \citet{hull1990}, cuyo desarrollo para caps se encuentra en
+  \citet{brigo2006}.
+\end{diferencia}
+
+\subsection{Swaption europea por Jamshidian}\label{sec:cap05-swaption}
+
+La swaption que da derecho a entrar en un swap pagador (receptor) a tasa fija $\K$ expira en $T_e$ y el swap
+subyacente tiene $n=\operatorname{round}(\text{plazo}\cdot f)$ pagos en $T_j=T_e+j\delta$, con $\delta=1/f$
+y fracción de devengo $\tau=\texttt{periodFraction}(f,\mathrm{dcc})$ (ACT/360 en el desk: $\tau=365/(360f)$).
+El código valúa la pata fija como un bono con flujos
+\begin{equation}\label{eq:cap05-flujos}
+  c_j = \Nom\,\K\,\tau\quad(j<n),\qquad c_n=\Nom(1+\K\tau),
+\end{equation}
+y la pata flotante a la par, de modo que el valor del swap pagador en $T_e$ es
+$\Nom-\sum_jc_jP(T_e,T_j)$: no hay diferencial sobre la tasa flotante y el cupón flotante de cada periodo
+se fija al inicio del periodo, con una sola curva. Con $x=r(T_e)-f(0,T_e)$, $V_e=\frac{\hwsig^2}{2\hwa}(1-e^{-2\hwa
+T_e})$, $B_j=B(j\delta)$ y $F_j=\DF{c}{T_j}/\DF{c}{T_e}$, la ecuación~\eqref{eq:cap05-cupon-condicional}
+evaluada en $T_e$ se simplifica porque los términos en $f(0,T_e)$ se cancelan:
+\begin{equation}\label{eq:cap05-cupon-x}
+  P_{\mathrm{HW}}(T_e,T_j\mid x) = F_j\exp\bigl(-B_j\,x-\tfrac12V_eB_j^{2}\bigr).
+\end{equation}
+La tasa crítica $x^*$ es la raíz de la ecuación del valor del swap,
+\begin{equation}\label{eq:cap05-critica}
+  \sum_{j=1}^{n}c_j\,F_j\exp\bigl(-B_jx^*-\tfrac12V_eB_j^{2}\bigr)=\Nom,
+\end{equation}
+cuyo lado izquierdo decrece estrictamente en $x^*$ (de $+\infty$ a $0$ cuando $x^*$ crece), así que la raíz
+existe y es única. El código la busca por bisección: parte de $[-w,w]$ con
+$w=\max(10\sqrt{V_e},10^{-2})$, duplica cada extremo hasta encerrar la raíz (a lo más 60 veces; si no, lanza
+\texttt{std::runtime\_error}) y hace hasta 200 bisecciones o hasta que el intervalo mida menos de $10^{-14}$.
+Los precios de ejercicio son
+\begin{equation}\label{eq:cap05-strikes}
+  X_j = F_j\exp\bigl(-B_jx^*-\tfrac12V_eB_j^{2}\bigr),
+\end{equation}
+y, como todos los $P(T_e,T_j\mid x)$ decrecen en $x$, el pago $(\Nom-\sum_jc_jP(T_e,T_j))^+$ es la suma de
+puts $\sum_jc_j(X_j-P(T_e,T_j))^+$ \citep{jamshidian1989}, de modo que
+\begin{equation}\label{eq:cap05-swaption}
+  \mathrm{Swaption}_{\text{pagador}}=\sum_{j=1}^{n}c_j\,\mathrm{ZBP}_j,\qquad
+  \mathrm{Swaption}_{\text{receptor}}=\sum_{j=1}^{n}c_j\,\mathrm{ZBC}_j,
+\end{equation}
+donde cada $\mathrm{ZBP}_j$ ($\mathrm{ZBC}_j$) es la ecuación~\eqref{eq:cap05-zbp} (\eqref{eq:cap05-zbc}) con
+$T_s=T_e$, $T_e\to T_j$, $X=X_j$ y $\sigma_{p,j}=\hwsig\,B_j\sqrt{(1-e^{-2\hwa T_e})/(2\hwa)}$. Todo ello es
+\codigo{src/instruments/swaption.cpp}{Swaption::price}; las raíces se resuelven con la lambda interna de esa
+función y los $\sigma_{p,j}$ y las opciones con las funciones auxiliares citadas en la
+sección~\ref{sec:cap05-opcion-bono}. Lanza error si el plazo del swap no cubre al menos medio periodo
+($n<1$).
+
+\paragraph{Doble curva.} La swaption con curvas de proyección $p$ y de descuento $d$ traslada el precio
+sobre $p$ con la razón de anualidades del swap subyacente,
+\begin{equation}\label{eq:cap05-swaption-doble}
+  \mathrm{Swaption}^{(p,d)}=\mathrm{Swaption}^{(p)}\cdot\frac{\Ann_d}{\Ann_p},\qquad
+  \Ann_c=\sum_{k=1}^{n}\tau\,\DF{c}{T_e+k\delta},
+\end{equation}
+en \codigo{src/instruments/swaption.cpp}{Swaption::priceDualCurve}; también es una base determinista y no un
+modelo de dos curvas. En ambos productos, el binding Python que los expone es
+\codigo{src/python_bindings/qfpy.cpp}{price_dual}.
+
+\begin{diferencia}
+  Frente a la presentación original de \citet{jamshidian1989}, el código no resuelve la ecuación en la
+  tasa corta $r$ sino en la desviación $x=r-f(0,T_e)$; es equivalente porque el término $B_jf(0,T_e)$ se
+  cancela. Además, su pata flotante se valúa a la par con la misma curva y la fracción de devengo
+  $\tau=365/(360f)$ multiplica a $\K$, mientras que la rejilla temporal usa $\delta=1/f$: con
+  $f=365/\text{días}$ del periodo (28 para TIIE-F, 365 para SOFR) resulta $\tau=\text{días}/360$ y
+  $\delta=\text{días}/365$, las fracciones ACT/360 y días$/365$ del periodo.
+\end{diferencia}
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap05-implementacion}
+
+\subsection{Parámetros del desk}\label{sec:cap05-parametros}
+
+Los parámetros $\hwa$ y $\hwsig$ no se calibran: viven en el snapshot de mercado, en el campo \texttt{hw} de
+cada curva. La siembra del snapshot sintético \texttt{MX-DEMO} está en
+\codigo{desk/api/seed_market.py}{demo_data}, y el snapshot con datos vivos hereda los mismos valores y los
+rotula como «Sintéticos (heredados de MX-DEMO)» en \codigo{desk/api/live_market.py}{build_live_data}.
+\begin{table}[ht]
+\centering
+\begin{tabular}{lrrrrl}
+\toprule
+Curva & Días del periodo & $f=365/$días & $\hwa$ (año$^{-1}$) & $\hwsig$ (tasa$/\sqrt{\text{año}}$) & Moneda \\
+\midrule
+TIIE-F & 28  & 13.0357 & 0.05 & 0.010 & \MXN \\
+SOFR   & 365 & 1       & 0.03 & 0.008 & \USD \\
+\bottomrule
+\end{tabular}
+\caption{Parámetros de Hull--White del snapshot \texttt{MX-DEMO}.}\label{tab:cap05-parametros}
+\end{table}
+
+\subsection{De los términos de la operación al instrumento}\label{sec:cap05-pricers}
+
+Los pricers de producto están en \codigo{desk/api/pricing/rates.py}{PRODUCTS}; solo validan, arman el objeto
+de \texttt{qfpy} y leen su resultado.
+\begin{itemize}
+  \item El cap/floor se arma en \codigo{desk/api/pricing/rates.py}{_cap_floor_instrument} con vencimiento
+        $\text{periodos}\cdot\text{días}/365$ años, frecuencia $365/\text{días}$, $\hwa$ y $\hwsig$ de
+        \texttt{mkt.hw} y dcc ACT/360. Así $n=\operatorname{round}(Tf)=\text{periodos}$, $\delta=\text{días}/365$
+        y $\tau=\text{días}/360$.
+  \item La swaption se arma en \codigo{desk/api/pricing/rates.py}{_swaption_instrument} con expiración y plazo
+        del swap en años, la misma frecuencia y ACT/360; \codigo{desk/api/pricing/rates.py}{_swaption_validate}
+        exige que el plazo cubra al menos medio periodo de pago.
+  \item El valor se obtiene en \codigo{desk/api/pricing/rates.py}{_cap_floor_pv} y
+        \codigo{desk/api/pricing/rates.py}{_swaption_pv}: si la curva de descuento (que depende del colateral,
+        capítulo~\ref{cap:curvas}) es distinta de la de la operación se usa \texttt{price\_dual}; si no,
+        \texttt{pv} sobre el entorno con la curva de la operación como predeterminada, que invoca
+        \codigo{src/instruments/capfloor.cpp}{CapFloor::calculatePV}.
+  \item El PV está en la moneda de la curva (\MXN\ o \USD); el pricer lo multiplica por el spot para
+        \texttt{pv\_mxn} y el DV01 es $\PV(\text{base})-\PV(+1~\pb)$ con un choque paralelo a la curva de la
+        operación (capítulo~\ref{cap:riesgo}).
+\end{itemize}
+
+\subsection{Envejecimiento}\label{sec:cap05-envejecimiento}
+
+Con una fecha de valuación posterior al inicio de la operación, el cap/floor se arma con calendario
+explícito en \codigo{desk/api/aging.py}{aged_cap_floor}. Sean $e$ los días transcurridos entre
+\texttt{start\_date} y la fecha de valuación, $p$ los días del periodo (28 o 365) y $m$ el número de periodos.
+El caplet $k$ ($k=1,\dots,m$) empieza en el día $(k-1)p$ y entra en el valor si ese inicio es posterior o igual
+a $e$:
+\begin{equation}\label{eq:cap05-envejecido}
+  k_0=\max\bigl(1,\ \lceil e/p\rceil+1\bigr),\qquad
+  t^{(k)}=\frac{k\,p-e}{365}\ \ \text{para } k=k_0-1,\dots,m,\qquad
+  \mathrm{Cap}_{\text{envejecido}}=\sum_{k=k_0}^{m}\mathrm{Caplet}_k,
+\end{equation}
+donde los $t^{(k)}$ son las fronteras que recibe el constructor de calendario explícito. Un caplet cuyo inicio
+coincide con la fecha de valuación entra con su valor intrínseco (frontera $0$); el caplet ya fijado, con inicio
+anterior, sale del valor y no tiene liquidación derivada (así lo declara la Metodología de la aplicación y
+lo comprueba la prueba \codigo{desk/api/tests/test_aging_exact.py}{test_cap_still_has_no_settlement}). Si ya
+fijaron todos los caplets, \codigo{desk/api/aging.py}{cap_floor_pv_mxn} devuelve 0; con colateral en USD
+proyecta con la curva de la operación y descuenta con \texttt{price\_dual}.
+
+La swaption no usa \texttt{aging.py}: se envejece acortando la expiración a los días que faltan, sin cambiar
+el plazo del swap, en \codigo{desk/api/valuation.py}{shortened}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap05-ejemplo}
+
+Todos los valores se reproducen con \codigo{docs/tex/verificacion/cap05_hull_white.py}{caplet},
+\codigo{docs/tex/verificacion/cap05_hull_white.py}{swaption} y
+\codigo{docs/tex/verificacion/cap05_hull_white.py}{cap_envejecido}. Las magnitudes marcadas como
+«recálculo» no las expone \texttt{qfpy}: el script las recalcula con la biblioteca estándar siguiendo las
+ecuaciones de este capítulo y exige además que ese recálculo complete reproduzca el precio de \texttt{qfpy}
+con tolerancia absoluta $10^{-6}$.
+
+\subsection{Caplet de TIIE-F}
+
+Curva plana a $7\%$ continuo, $\Nom=10^{8}$ \MXN, $\K=7\%$, $\hwa=0.05$, $\hwsig=0.01$, dcc ACT/360 y un caplet
+entre los días 336 y 364 (periodo 13 de 28 días): $t_0=336/365$, $t_1=364/365$, $\delta=28/365=0.0767123$,
+$\tau=28/360=0.0777778$. Entonces $P_0=e^{-0.07t_0}=0.9375939$, $P_1=0.9325727$,
+$X=1/(1+0.07\tau)=0.9945850$, $B(\delta)=0.0765654$,
+\[
+  \sigma_p = 0.01\cdot0.0765654\sqrt{\frac{1-e^{-2\cdot0.05\,t_0}}{2\cdot0.05}}
+  = \verif{cap05-caplet-sigma-p}{0.0007180219}\quad(\text{recálculo, tolerancia }10^{-9}),
+\]
+$h=0.0836629$, $\Ncdf(\sigma_p-h)=0.466948$ y $\Ncdf(-h)=0.466662$. La ecuación~\eqref{eq:cap05-caplet} da
+\[
+  \mathrm{Caplet} = \Nom(1+\K\tau)\bigl[XP_0\Ncdf(\sigma_p-h)-P_1\Ncdf(-h)\bigr]
+  = \verif{cap05-caplet-valor}{24147.1047}\ \MXN,
+\]
+con tolerancia absoluta $10^{-4}$. Si el descuento se hace con una curva plana a $6\%$ y la proyección sigue
+en $7\%$, la ecuación~\eqref{eq:cap05-doble-curva} multiplica por $\DF{d}{t_1}/\DF{p}{t_1}=e^{0.01\,t_1}=1.0100225$ y da
+\[
+  \mathrm{Caplet}^{(p,d)}=\verif{cap05-caplet-doble-curva}{24389.1190}\ \MXN
+\]
+(tolerancia absoluta $10^{-4}$).
+
+\subsection{Swaption pagadora 1 año contra 2 años}
+
+Curva plana a $5\%$ continuo, $\Nom=10^{6}$, $\K=5\%$, expiración $T_e=1$, plazo 2 años, frecuencia anual
+($n=2$, $\delta=1$, $\tau=365/360$), $\hwa=0.03$, $\hwsig=0.008$ (los parámetros de SOFR del
+cuadro~\ref{tab:cap05-parametros}). Entonces $c_1=50\,694.4444$, $c_2=1\,050\,694.4444$,
+$\DF{c}{T_e}=0.9512294$, $\DF{c}{T_1}=0.9048374$, $\DF{c}{T_2}=0.8607080$, $V_e=6.2118\times10^{-5}$,
+$B_1=0.9851489$, $B_2=1.9411822$. La ecuación~\eqref{eq:cap05-critica} tiene la raíz
+\[
+  x^* = \verif{cap05-swaption-x}{-0.0006246404}\quad(\text{recálculo, tolerancia }10^{-9}),
+\]
+que da los strikes $X_1=0.9517863$, $X_2=0.9058292$, las desviaciones $\sigma_{p,1}=0.0077644$,
+$\sigma_{p,2}=0.0152994$, $h_1=-0.0714897$, $h_2=-0.0639547$, las puts $\mathrm{ZBP}_1=0.0030764$ y
+$\mathrm{ZBP}_2=0.0057414$ y, por la ecuación~\eqref{eq:cap05-swaption},
+$c_1\mathrm{ZBP}_1+c_2\mathrm{ZBP}_2=155.9567+6032.4659$, es decir
+\[
+  \mathrm{Swaption}_{\text{pagador}}=\verif{cap05-swaption-pagador}{6188.4226}
+\]
+con tolerancia absoluta $10^{-4}$ (el cálculo de \texttt{qfpy}). La swaption receptora vale $5170.3174$ y su
+diferencia con la pagadora debe ser el valor del swap adelantado,
+$\Nom[\DF{c}{T_e}-\DF{c}{T_2}-\K\tau(\DF{c}{T_1}+\DF{c}{T_2})]$:
+\[
+  \mathrm{Swaption}_{\text{pagador}}-\mathrm{Swaption}_{\text{receptor}}=\verif{cap05-swaption-paridad}{1018.1052}
+\]
+(tolerancia absoluta $10^{-4}$, calculada con \texttt{qfpy}; la fórmula del swap adelantado da el mismo valor).
+
+\subsection{Cap de TIIE-F envejecido}
+
+Cap de 13 periodos de 28 días ($m=13$), $\Nom=10^{8}$, $\K=7\%$, $\hwa=0.05$, $\hwsig=0.01$, curva plana a $7\%$,
+iniciado el 2026-01-02 y valuado 100 días después ($e=100$). Por la ecuación~\eqref{eq:cap05-envejecido},
+$k_0=\lceil100/28\rceil+1=5$: entran los 9 caplets $k=5,\dots,13$ (el $k=4$ empezó el día 84, antes de la
+fecha de valuación), con fronteras desde $12/365$ hasta $264/365$ años. El cap completo, sin envejecer, vale
+\verif{cap05-cap-completo}{201484.5441} \MXN\ y el envejecido, valuado por
+\codigo{desk/api/aging.py}{cap_floor_pv_mxn},
+\[
+  \mathrm{Cap}_{\text{envejecido}}=\verif{cap05-cap-envejecido}{120915.9109}\ \MXN
+\]
+(ambos con tolerancia absoluta $10^{-4}$); el script comprueba además que el envejecido es la suma de los
+nueve caplets calculados con la ecuación~\eqref{eq:cap05-caplet}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap05-validacion}
+
+\begin{itemize}
+  \item Pruebas de C++ del cap/floor (paridad cap-floor en curva plana e inclinada, monotonía en $\hwsig$,
+        strike y plazo, calendario explícito igual al regular, doble curva igual a la suma de caplets por el
+        cociente de factores): \codigo{tests/test_capfloor.cpp}{irsNPV}.
+  \item Pruebas de C++ de la swaption: paridad pagador-receptor, monotonía, doble curva igual al precio por la
+        razón de anualidades y, sobre todo, una referencia independiente de la descomposición de Jamshidian que
+        integra numéricamente la esperanza del pago bajo la medida forward
+        (\codigo{tests/test_swaption.cpp}{quadraturePrice}); tras la corrección de \texttt{Swaption::price}
+        (commit \texttt{2f5b733}: factor $A$ completo y búsqueda de la raíz con ensanche del intervalo) ambas
+        coinciden a $2\times10^{-13}$ del nominal.
+  \item Bindings: calendario explícito, doble curva de cap y de swaption en
+        \codigo{tests/test_aged_bond_cap_py.py}{AgedCapFloorTests.test_price_dual_cap_is_caplets_times_the_discount_ratio}
+        y
+        \codigo{tests/test_aged_bond_cap_py.py}{AgedCapFloorTests.test_price_dual_swaption_is_the_price_times_the_annuity_ratio}.
+  \item Backend: el caplet fijado sale del valor
+        (\codigo{desk/api/tests/test_aging_exact.py}{test_cap_aged_30_days_values_only_the_caplets_that_have_not_fixed}),
+        el que fija hoy entra con su intrínseco
+        (\codigo{desk/api/tests/test_aging_exact.py}{test_cap_whose_caplet_fixes_on_the_snapshot_date_keeps_it_at_intrinsic_value})
+        y los signos del DV01 de cap y swaption
+        (\codigo{desk/api/tests/test_price_rates.py}{test_cap_dv01_negative_floor_positive}).
+  \item Contra QuantLib (capítulo~\ref{cap:validacion}): \codigo{desk/validation/ql_hw.py}{price_cap_floor} y
+        \codigo{desk/validation/ql_hw.py}{price_swaption} valúan los mismos casos con
+        \texttt{AnalyticCapFloorEngine} y \texttt{JamshidianSwaptionEngine} sobre un \texttt{HullWhite}
+        ajustado a la misma curva. En el reporte \codigo{desk/validation/report.json}{swaption-03} los 8 casos
+        de cada producto caen dentro de la tolerancia de $5\times10^{-4}$ del nocional y la mayor diferencia
+        relativa al nocional es $2.8\times10^{-16}$ en cap/floor y $3.0\times10^{-9}$ en swaptions.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap05-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item $\hwa$ y $\hwsig$ son datos sintéticos del snapshot (cuadro~\ref{tab:cap05-parametros}), no se
+          calibran a precios de caps o swaptions y son iguales para todos los strikes y plazos de una curva:
+          el modelo no tiene sonrisa ni sesgo y los precios no reproducen cotizaciones de mercado.
+    \item Modelo de un factor y una curva. La doble curva es una base determinista (cociente de factores en el
+          cap/floor, razón de anualidades en la swaption), no un Hull--White de dos curvas.
+    \item Sin ajuste de fechas por días inhábiles: los periodos son $k\cdot$días del periodo desde el inicio, el
+          pago ocurre al final del caplet y no hay rezago de fijación ni de pago.
+    \item La pata flotante de la swaption se valúa a la par, sin diferencial, con la misma curva; la swaption
+          es europea y no hay ejercicio automático ni liquidación (fuera de alcance según la Metodología).
+    \item El primer caplet de un cap no envejecido vale su intrínseco calculado con la forward de la curva:
+          ningún caplet usa una fijación publicada. Al envejecer, el caplet ya fijado sale del PV y no se
+          liquida (Metodología, «Bono y cap/floor envejecidos»).
+    \item $\hwtheta$ se aproxima con diferencias finitas y la simulación es un esquema de Euler sin garantía de
+          reproducir la curva; solo importa para XVA, no para los precios de este capítulo.
+    \item $\hwa>0$, $\hwsig>0$, nocional y strike positivos; el constructor lanza excepción en caso contrario.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap05-referencias}
+
+El modelo y el precio del cupón cero siguen a \citet{hull1990}; la descomposición de la swaption en opciones
+sobre cupón cero, a \citet{jamshidian1989}; \citet{brigo2006} reúne ambos desarrollos y el tratamiento de caps y
+swaptions con Hull--White; \citet{black1976} se cita solo para contrastar la cotización de mercado de los caps.
