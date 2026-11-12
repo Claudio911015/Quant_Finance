@@ -258,6 +258,10 @@ class ExposureEngineBindings(unittest.TestCase):
         self.assertAlmostEqual(from_python.cva, from_native.cva, delta=1e-9 * max(1.0, abs(from_native.cva)))
         self.assertAlmostEqual(from_python.dva, from_native.dva, delta=1e-9 * max(1.0, abs(from_native.dva)))
 
+    def test_has_xad_flag_is_a_bool(self):
+        """qfxva says whether qf was built with XAD (QF_WITH_XAD); the sensitivities route reads it."""
+        self.assertIsInstance(qfxva.HAS_XAD, bool)
+
 
 if __name__ == "__main__":
     unittest.main()

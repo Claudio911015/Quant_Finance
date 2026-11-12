@@ -57,6 +57,12 @@ target_compile_features(qf PUBLIC cxx_std_17)
 find_package(Threads REQUIRED)
 target_link_libraries(qf PRIVATE Threads::Threads)
 
+# Sensibilidades del XVA por AAD (XAD); la definición es PUBLIC para que qfxva y las pruebas la vean
+if(QF_WITH_XAD)
+    target_link_libraries(qf PUBLIC XAD::xad)
+    target_compile_definitions(qf PUBLIC QF_WITH_XAD=1)
+endif()
+
 # Optional Python bindings via pybind11
 find_package(pybind11 QUIET)
 if(pybind11_FOUND)

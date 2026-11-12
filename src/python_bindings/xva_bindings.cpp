@@ -29,6 +29,13 @@ public:
 PYBIND11_MODULE(qfxva, m) {
     m.doc() = "qf::xva — CVA calculator Python bindings";
 
+    // True si qf se compiló con XAD (QF_WITH_XAD): xva_sensitivities solo calcula en ese caso.
+#ifdef QF_WITH_XAD
+    m.attr("HAS_XAD") = true;
+#else
+    m.attr("HAS_XAD") = false;
+#endif
+
     // ── ICreditCurve (abstract base — subclassable from Python) ──────────
     py::class_<ICreditCurve, PyICreditCurve>(m, "ICreditCurve")
         .def(py::init<>())
@@ -187,7 +194,13 @@ PYBIND11_MODULE(qfxva, m) {
         .def("simulate", &ExposureEngine::simulate, py::arg("sets"), py::call_guard<py::gil_scoped_release>(),
              "Simulate every netting set on the same paths. Returns one ExposureProfile per set (MXN).")
         .def("trade_values_at_zero", &ExposureEngine::tradeValuesAtZero, py::arg("netting_set"),
-             "Value in MXN at t = 0 of each trade (swaps first, then cross currency swaps).");
+             "Value in MXN at t = 0 of each trade (swaps first, then cross currency swaps).")
+        .def("xva_sensitivities", &ExposureEngine::xvaSensitivities,
+             py::arg("netting_set"), py::arg("counterparty"), py::arg("counterparty_lgd"),
+             py::arg("own"), py::arg("own_lgd"), py::arg("funding_spread"),
+             py::call_guard<py::gil_scoped_release>(),
+             "CVA, DVA and FVA of a netting set and their derivatives with respect to every input, by "
+             "adjoint differentiation (XAD). Raises RuntimeError when qf was built with QF_WITH_XAD=OFF.");
 
     py::class_<XvaResult>(m, "XvaResult")
         .def_readonly("cva",        &XvaResult::cva)
@@ -196,6 +209,26 @@ PYBIND11_MODULE(qfxva, m) {
         .def_readonly("dva_stderr", &XvaResult::dvaStdErr)
         .def_readonly("fva",        &XvaResult::fva)
         .def_readonly("total",      &XvaResult::total);
+
+    py::class_<XvaGreeks>(m, "XvaGreeks")
+        .def_readonly("tiie",                &XvaGreeks::tiie)
+        .def_readonly("sofr",                &XvaGreeks::sofr)
+        .def_readonly("mxn_usd",             &XvaGreeks::mxnUsd)
+        .def_readonly("spot",                &XvaGreeks::spot)
+        .def_readonly("fx_vol",              &XvaGreeks::fxVol)
+        .def_readonly("sigma_mxn",           &XvaGreeks::sigmaMxn)
+        .def_readonly("a_mxn",               &XvaGreeks::aMxn)
+        .def_readonly("sigma_usd",           &XvaGreeks::sigmaUsd)
+        .def_readonly("a_usd",               &XvaGreeks::aUsd)
+        .def_readonly("counterparty_hazard", &XvaGreeks::counterpartyHazard)
+        .def_readonly("own_hazard",          &XvaGreeks::ownHazard)
+        .def_readonly("funding_spread",      &XvaGreeks::fundingSpread);
+
+    py::class_<XvaSensitivities>(m, "XvaSensitivities")
+        .def_readonly("value", &XvaSensitivities::value)
+        .def_readonly("cva",   &XvaSensitivities::cva)
+        .def_readonly("dva",   &XvaSensitivities::dva)
+        .def_readonly("fva",   &XvaSensitivities::fva);
 
     // A curve written in Python reacquires the GIL by itself inside its override (PYBIND11_OVERRIDE).
     m.def("compute_xva", &computeXva,

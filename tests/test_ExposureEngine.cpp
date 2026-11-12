@@ -1073,3 +1073,12 @@ TEST(ExposureEngine, CvaMatchesTheClosedFormOnFlatAndSlopedCurves) {
         EXPECT_LT(std::abs(engine.mean - exact), 0.05 * exact);
     }
 }
+
+#ifndef QF_WITH_XAD
+TEST(ExposureEngine, XvaSensitivitiesWithoutXadThrowsLogicError) {
+    // Sin XAD el método existe (el binding y la API lo llaman) pero avisa en vez de devolver ceros.
+    const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(10, schedule(0, 30, 3)));
+    const FlatHazardRate hazard(0.02);
+    EXPECT_THROW(engine.xvaSensitivities(setOf({s3()}), hazard, 0.6, hazard, 0.6, 0.005), std::logic_error);
+}
+#endif

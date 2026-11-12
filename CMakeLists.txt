@@ -14,6 +14,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ── Build options ─────────────────────────────────────────────────────────────
 option(QF_BUILD_TESTS    "Build unit tests"  ON)
 option(QF_BUILD_EXAMPLES "Build examples"    ON)
+option(QF_WITH_XAD "Sensibilidades del XVA por AAD con XAD (AGPL-3.0)" ON)
+
+# ── XAD (diferenciación automática) ───────────────────────────────────────────
+# Antes de las banderas de advertencia de abajo, para que no se apliquen al código de XAD.
+# v2.2.0 fijada por hash: v2.1.0 degrada la cinta por trayectoria (resetTo / clearDerivativesAfter).
+if(QF_WITH_XAD)
+    include(FetchContent)
+    set(XAD_WARNINGS_PARANOID OFF CACHE BOOL "" FORCE)
+    set(XAD_USE_STRONG_INLINE ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(xad
+        GIT_REPOSITORY https://github.com/auto-differentiation/xad.git
+        GIT_TAG        aaf4e9cad59cf1bfe9728b491f95f011db687f18   # v2.2.0
+        SYSTEM)
+    FetchContent_MakeAvailable(xad)
+endif()
 
 # ── Compiler warnings ─────────────────────────────────────────────────────────
 if(MSVC)

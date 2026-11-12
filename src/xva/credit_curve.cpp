@@ -17,4 +17,6 @@ double FlatHazardRate::survivalProbability(double t) const
     return std::exp(-lambda_ * t);
 }
 
+double FlatHazardRate::hazardRate() const { return lambda_; }
+
 } // namespace qf::xva

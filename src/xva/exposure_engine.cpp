@@ -962,4 +962,10 @@ XvaResult computeXva(const ExposureProfile& profile, const ICreditCurve& counter
     return out;
 }
 
+// Provisional: la rama con XAD llega en la tarea siguiente; hasta entonces lanza en ambas configuraciones.
+XvaSensitivities ExposureEngine::xvaSensitivities(const NettingSetSpec&, const ICreditCurve&, double,
+                                                  const ICreditCurve&, double, double) const {
+    throw std::logic_error("ExposureEngine::xvaSensitivities: qf se compiló sin XAD (QF_WITH_XAD=OFF)");
+}
+
 } // namespace qf::xva

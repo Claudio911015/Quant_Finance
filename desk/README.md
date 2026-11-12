@@ -102,6 +102,15 @@ Ejemplo de cron (respaldo diario a las 02:30):
 
 Quedan fuera hasta tener un cliente piloto, cuyos requisitos mandan: usuarios, roles y aprobación de dos personas; empresas separadas; contenedores; licencia y términos de uso; importación de archivos de PiP, Valmer o Bloomberg; curvas reales de TIIE-F (siguen sintéticas); y la carga automática programada de fijaciones (hoy se piden con el botón o con `POST /api/fixings/fetch`).
 
+## XAD y su licencia
+
+Las sensibilidades del XVA se calculan por diferenciación adjunta con [XAD](https://github.com/auto-differentiation/xad) (Xcelerit Computing Ltd.), que CMake descarga con `FetchContent` y compila junto con `qf` (opción `QF_WITH_XAD`, activa por omisión).
+
+- **Licencia.** XAD es software libre bajo la **GNU AGPL-3.0 (o posterior)**. Xcelerit la ofrece además con licencia comercial aparte para uso en producción sin las obligaciones de la AGPL.
+- **Implicación.** Quien use el servicio a través de la red tiene derecho al código fuente completo de la aplicación, salvo que exista una licencia comercial de XAD. El repositorio es hoy público, así que no hay conflicto inmediato. Si QF Desk se ofrece a un cliente sin publicar su código, hace falta la licencia comercial: es una decisión de negocio pendiente de Claudio.
+- **Versión fijada.** v2.2.0, commit `aaf4e9cad59cf1bfe9728b491f95f011db687f18`, publicada el 2026-11-11. Es una versión recién publicada: revisar su estabilidad al actualizarla. v2.1.0 no sirve, porque `resetTo` y `clearDerivativesAfter` degradan la cinta por trayectoria (el tiempo por trayectoria crece con el número de trayectorias).
+- **Apagarla.** `cmake -S . -B build -DQF_WITH_XAD=OFF`: todo compila sin XAD, `qfxva.HAS_XAD` vale `False` y la ruta de sensibilidades del XVA responde 501.
+
 ## Tests
 
 Desde la raíz del repo:

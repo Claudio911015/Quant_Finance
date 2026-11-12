@@ -19,6 +19,8 @@ public:
     /// @param lambda  Hazard rate in decimal (e.g. 0.02 = 200 bps CDS spread / LGD).
     explicit FlatHazardRate(double lambda);
     double survivalProbability(double t) const override;
+    /// @return  Intensidad de riesgo constante λ (decimal).
+    double hazardRate() const;
 private:
     double lambda_;
 };

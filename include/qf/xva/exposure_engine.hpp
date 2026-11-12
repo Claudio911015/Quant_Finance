@@ -100,6 +100,8 @@ enum class Deflator {
     CollateralAccount   ///< B(t) · P_TIIE(0,t) / P_MXN-USD(0,t).
 };
 
+struct XvaSensitivities;   // definida tras XvaResult
+
 /// @brief Motor de exposición multimoneda (simulación y revaluación sobre las mismas trayectorias).
 class ExposureEngine {
 public:
@@ -126,6 +128,21 @@ public:
     std::vector<DeflatedStat> deflatedValueStats(const NettingSetSpec& set, const std::vector<int>& days,
                                                  Deflator deflator) const;
 
+    /// @brief CVA, DVA y FVA de `set` y sus derivadas respecto de todos los insumos, por AAD (XAD) con una cinta
+    /// por trayectoria, sobre las mismas trayectorias, malla (reportDays) y semilla que simulate().
+    /// @param set              Conjunto de compensación.
+    /// @param counterparty     PiecewiseHazardCurve o FlatHazardRate de la contraparte.
+    /// @param counterpartyLgd  LGD de la contraparte.
+    /// @param own              Curva propia (mismos tipos admitidos).
+    /// @param ownLgd           LGD propia.
+    /// @param fundingSpread    Diferencial de fondeo, decimal.
+    /// @return                 Valores y derivadas.
+    /// @throws std::invalid_argument  curvas de tasa no Linear, curva de crédito de otro tipo, o lo que lance computeXva.
+    /// @throws std::logic_error       si se compiló con QF_WITH_XAD=OFF.
+    XvaSensitivities xvaSensitivities(const NettingSetSpec& set, const ICreditCurve& counterparty,
+                                      double counterpartyLgd, const ICreditCurve& own, double ownLgd,
+                                      double fundingSpread) const;
+
 private:
     ExposureMarket market_;
     ExposureModel model_;
@@ -140,6 +157,26 @@ struct XvaResult {
     double dvaStdErr;
     double fva;
     double total;   ///< cva − dva + fva.
+};
+
+/// @brief Derivadas de una medida (CVA, DVA o FVA, en MXN) respecto de cada insumo, por unidad del insumo
+/// (tasas cero, volatilidades, reversiones, intensidades y diferencial en decimal; spot en MXN por USD).
+struct XvaGreeks {
+    std::vector<double> tiie;                 ///< ∂/∂ tasa cero de cada pilar de TIIE-F (orden de maturities()).
+    std::vector<double> sofr;                 ///< ∂/∂ tasa cero de cada pilar de SOFR.
+    std::vector<double> mxnUsd;               ///< ∂/∂ tasa cero de cada pilar de MXN-USD; vacío sin esa curva.
+    double spot = 0.0;                        ///< ∂/∂ USDMXN spot.
+    double fxVol = 0.0, sigmaMxn = 0.0, aMxn = 0.0, sigmaUsd = 0.0, aUsd = 0.0;
+    std::vector<double> counterpartyHazard;   ///< ∂/∂ intensidad de cada tramo de la contraparte.
+    std::vector<double> ownHazard;            ///< ∂/∂ intensidad de cada tramo propio.
+    double fundingSpread = 0.0;               ///< ∂/∂ diferencial de fondeo.
+};
+
+/// @brief Sensibilidades de primer orden del XVA de un conjunto por diferenciación adjunta.
+struct XvaSensitivities {
+    XvaResult value;     ///< CVA, DVA, FVA y total de las mismas trayectorias (media de las sumas por trayectoria;
+                         ///< coincide con computeXva hasta redondeo, |Δ| ≤ 1e-12 relativo; stdErr como computeXva).
+    XvaGreeks cva, dva, fva;
 };
 
 /// @brief Calcula CVA, DVA y FVA a partir del perfil descontado.
