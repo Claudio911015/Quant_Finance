@@ -435,7 +435,8 @@ def test_fair_value_hedge_of_a_fixed_loan_books_everything_to_profit_or_loss(cli
         assert p["hedge_type"] == "fair_value" and p["oci"] == 0 and p["d_oci"] == 0 and p["recycled"] == 0
         assert abs(p["ineffectiveness"]) <= 1e-6 * 300e6
         assert p["item_adjustment"] != 0 and p["settled_period"] != 0
-        assert abs(p["identity_residual"]) <= 1e-6
+        # H10: en valor razonable la identidad valía cero por construcción (no detectaba nada): el campo ya no existe
+        assert "identity_residual" not in p
         e = p["entries"]
         assert {hedges.ACC_DERIVATIVE, hedges.ACC_ITEM_ADJ, hedges.ACC_CASH, hedges.ACC_FV_RESULT} == _accounts(e)
         assert _balanced(e)

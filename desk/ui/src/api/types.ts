@@ -394,7 +394,8 @@ export interface HedgePeriod {
   item_adjustment: number;
   fv_result: number;
   instrument_pnl: number;
-  identity_residual: number;
+  /** Control aritmético de flujo de efectivo; no existe en valor razonable (era cero por construcción). */
+  identity_residual?: number;
   entries: JournalEntry[];
   warnings: Warning[];
 }

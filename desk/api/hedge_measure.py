@@ -147,7 +147,6 @@ def measure(
         item_adjustment = -d_hypo_cum
         ineffectiveness = d_inst_cum + item_adjustment
         fv_result = d_inst_cum + item_adjustment + settled_period
-        identity_residual = (d_inst_cum + settled_period) - (ineffectiveness - item_adjustment + settled_period)
 
     result = {
         "prev_snapshot": prev["snapshot"],
@@ -174,9 +173,11 @@ def measure(
         "item_adjustment": item_adjustment,
         "fv_result": fv_result,
         "instrument_pnl": d_inst_cum + settled_period,
-        "identity_residual": identity_residual,
         "warnings": settlement.merge_warnings(v_inst["warnings"], v_hypo["warnings"], flow_warnings, hypo_warnings),
     }
+    if rel["hedge_type"] == "cash_flow":
+        # Solo flujo de efectivo: en valor razonable la identidad valía cero por construcción y no se guarda (H10)
+        result["identity_residual"] = identity_residual
     balances = {  # saldo con signo (+ = cargo) de las cuentas de balance al cierre
         hedges.ACC_DERIVATIVE: inst_cum,
         hedges.ACC_OCI: -oci,
