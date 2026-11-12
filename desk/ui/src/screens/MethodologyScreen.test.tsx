@@ -222,15 +222,24 @@ describe('MethodologyScreen', () => {
       expect(riskRow('Historia sintética de MX-DEMO')).toContain('20261110');
       expect(riskRow('CVA informativo')).toContain('no entra al PV');
       expect(riskRow('Coherencia con la valuación')).toContain('PV del desk');
-      expect(riskRow('Alcance del crédito')).toContain('t = 0');
-      expect(riskRow('Exposición y CVA')).toContain('máximo entre el PV de la contraparte y cero');
+      expect(riskRow('Crédito y XVA')).toContain('sección XVA');
+      expect(riskRow('Crédito y XVA')).not.toContain('500 trayectorias');
     });
 
-    it('lista los escenarios históricos con sus choques y excluye DVA del alcance', () => {
+    it('ya no tiene las filas de crédito del escalón: el XVA las reemplaza', () => {
+      renderScreen();
+      const labels = Array.from(document.querySelectorAll('dt')).map((dt) => dt.textContent);
+      expect(labels).not.toContain('Exposición y CVA');
+      expect(labels).not.toContain('Supuestos de crédito');
+      expect(labels).not.toContain('Alcance del crédito');
+    });
+
+    it('lista los escenarios históricos con sus choques y deja fuera de alcance el VaR completo', () => {
       renderScreen();
       expect(riskRow('Escenarios históricos')).toContain('Marzo 2020');
       expect(riskRow('Escenarios históricos')).toContain('+35 %');
-      expect(riskRow('Fuera de alcance')).toContain('DVA');
+      expect(riskRow('Fuera de alcance')).toContain('VaR por revaluación completa');
+      expect(riskRow('Fuera de alcance')).not.toContain('DVA');
     });
 
     it('"Límites de este corte" ya no dice "Sin XVA": el CVA informativo existe', () => {
@@ -242,6 +251,74 @@ describe('MethodologyScreen', () => {
     });
   });
   // --- fin corte 6 ---
+  // corte 9: sección XVA
+  describe('XVA (corte 9)', () => {
+    function xvaRow(label: string): string {
+      const section = document.getElementById('meth-xva')!.closest('section')!;
+      const term = Array.from(section.querySelectorAll('dt')).find((dt) => dt.textContent === label);
+      return term?.nextElementSibling?.textContent ?? '';
+    }
+
+    it('tiene el encabezado XVA con sus filas', () => {
+      renderScreen();
+      expect(screen.getByRole('heading', { name: 'XVA' })).toBeTruthy();
+      for (const label of [
+        'Modelo y medida',
+        'Parámetros del XVA',
+        'Definiciones',
+        'XVA incremental',
+        'Curvas de crédito',
+        'Límites del XVA',
+      ]) {
+        expect(xvaRow(label), label).not.toBe('');
+      }
+    });
+
+    it('declara el modelo, la medida y la deriva quanto', () => {
+      renderScreen();
+      expect(xvaRow('Modelo y medida')).toContain('Hull-White');
+      expect(xvaRow('Modelo y medida')).toContain('riesgo neutral MXN');
+      expect(xvaRow('Modelo y medida')).toContain('quanto');
+      expect(xvaRow('Modelo y medida')).toContain('semilla fijas');
+    });
+
+    it('distingue parámetros de datos de los supuestos', () => {
+      renderScreen();
+      expect(xvaRow('Parámetros del XVA')).toContain('Supuestos');
+      expect(xvaRow('Parámetros del XVA')).toContain('Correlaciones');
+    });
+
+    it('define CVA, DVA y FVA y el perfil que se compara con límites', () => {
+      renderScreen();
+      expect(xvaRow('Definiciones')).toContain('CVA');
+      expect(xvaRow('Definiciones')).toContain('DVA');
+      expect(xvaRow('Definiciones')).toContain('FVA');
+      expect(xvaRow('Definiciones')).toContain('sin descontar');
+    });
+
+    it('explica el incremental como diferencia con y sin la operación', () => {
+      renderScreen();
+      expect(xvaRow('XVA incremental')).toContain('con y sin');
+      expect(xvaRow('XVA incremental')).toContain('mismas trayectorias');
+    });
+
+    it('declara que las curvas de crédito son sintéticas y su método', () => {
+      renderScreen();
+      expect(xvaRow('Curvas de crédito')).toContain('Sintéticas');
+      expect(xvaRow('Curvas de crédito')).toContain('no son datos de mercado');
+      expect(xvaRow('Curvas de crédito')).toContain('Bootstrap');
+      expect(xvaRow('Curvas de crédito')).toContain('CDS');
+    });
+
+    it('declara los límites: wrong-way, base determinista, productos excluidos y error de MC', () => {
+      renderScreen();
+      expect(xvaRow('Límites del XVA')).toContain('wrong-way');
+      expect(xvaRow('Límites del XVA')).toContain('Base de cross currency determinista');
+      expect(xvaRow('Límites del XVA')).toContain('opciones');
+      expect(xvaRow('Límites del XVA')).toContain('error estándar del CVA');
+    });
+  });
+  // fin corte 9
   // corte 7
   describe('validación contra QuantLib', () => {
     it('da las tolerancias y la regla de curvas idénticas', () => {

@@ -380,16 +380,8 @@ const RISK_ADV_SECTIONS: Section[] = [
         text: 'Por contraparte, PV positivo neto; por curva, DV01; por USDMXN, delta en MXN por 1 %; del portafolio, VaR paramétrico a 1 día y 99 %. Alerta desde 80 %, exceso por encima de 100 %. Se cambian con eventos, no se editan. La bitácora registra un exceso por límite y fecha de valuación.',
       },
       {
-        label: 'Exposición y CVA',
-        text: 'Simulación Hull-White de 500 trayectorias con semilla fija sobre una rejilla mensual hasta el último vencimiento. EE = exposición esperada; PFE = percentil 95 % de la exposición positiva, nunca menor que la EE; CVA = (1 − recuperación) × Σ EE × probabilidad de incumplimiento en cada intervalo. En t = 0, EE y PFE son el máximo entre el PV de la contraparte y cero, con la valuación del desk.',
-      },
-      {
-        label: 'Supuestos de crédito',
-        text: 'Curva de riesgo plana por contraparte. Por omisión 1 % anual y recuperación 40 %, rotulados como supuesto. Cada cambio se guarda como fila nueva.',
-      },
-      {
-        label: 'Alcance del crédito',
-        text: 'Solo swaps de tasa; forwards, opciones FX y caps/floors se excluyen con aviso. Un conjunto de compensación por contraparte y curva: los puntos mensuales no compensan entre monedas (suman los conjuntos, una cota superior), mientras que el punto de t = 0 sí, porque es el valor de hoy de la contraparte; con swaps en dos monedas el primer punto mensual puede quedar por encima del de t = 0. Sin colateral.',
+        label: 'Crédito y XVA',
+        text: 'El CVA, el DVA y el FVA viven ahora en la sección XVA, con simulación multimoneda, curvas de crédito sintéticas por contraparte y la del propio desk. El escalón, la curva plana y el CVA por curva de la versión anterior quedan retirados.',
       },
       {
         label: 'Coherencia con la valuación',
@@ -405,19 +397,57 @@ const RISK_ADV_SECTIONS: Section[] = [
       },
       {
         label: 'Fuera de alcance',
-        text: 'VaR por revaluación completa y Monte Carlo del portafolio; DVA, FVA y colateral; pruebas de respaldo del VaR; flujo de aprobación de límites; curvas de crédito con plazo.',
+        text: 'VaR por revaluación completa y Monte Carlo del portafolio; colateral y margen en la exposición del XVA; pruebas de respaldo del VaR; flujo de aprobación de límites.',
       },
     ],
   },
 ];
 // --- fin corte 6 ---
 
+// --- corte 9: XVA y curvas de crédito sintéticas ---
+const XVA_SECTIONS: Section[] = [
+  {
+    id: 'xva',
+    title: 'XVA',
+    items: [
+      {
+        label: 'Modelo y medida',
+        text: 'Hull-White de un factor por moneda sobre TIIE-F y SOFR, en forma de Cheyette: r = f(0,t) + x. USDMXN lognormal. Medida riesgo neutral MXN: la tasa USD lleva la deriva quanto −ρ·σ_USD·σ_X, y el tipo de cambio deriva con TIIE-F más la base MXN-USD menos SOFR, así que su forward es el de mercado con colateral USD. La base MXN-USD es determinista. Cada operación se descuenta con la curva de su contraparte. Malla diaria, trayectorias y semilla fijas.',
+      },
+      {
+        label: 'Parámetros del XVA',
+        text: 'a y σ de cada factor, tomados del snapshot. Volatilidad USDMXN: la ATM a 1 año de la superficie o, si no hay superficie, la volatilidad diaria de los factores × √252. Correlaciones de los cambios diarios de los factores, usadas como aproximación de las de los brownianos. Lo que falta se toma por omisión y se lista en Supuestos. Fondeo y parámetros de simulación son editables.',
+      },
+      {
+        label: 'Definiciones',
+        text: 'CVA = LGD · Σ EPE* · ΔS_c; DVA con ENE* y la curva propia; FVA = s_f · Σ (EPE* − ENE*) · S_c · S_o · Δt. EPE* y ENE* se descuentan con la cuenta bancaria TIIE-F simulada para todas las contrapartes. El perfil que se muestra y se compara con límites es el sin descontar. Total = CVA − DVA + FVA.',
+      },
+      {
+        label: 'XVA incremental',
+        text: 'Es la diferencia del XVA con y sin la operación, calculada sobre las mismas trayectorias, para que el ruido de Monte Carlo no contamine la diferencia.',
+      },
+      {
+        label: 'Curvas de crédito',
+        text: 'Sintéticas: no son datos de mercado. Bootstrap tramo a tramo de CDS con prima trimestral ACT/360, recuperación dada y descuento con TIIE-F; intensidad constante por tramos. Con datos reales se cargarían diferenciales de CDS o de bonos del emisor. Si una contraparte no tiene curva, se usa un respaldo plano, con aviso de supuesto.',
+      },
+      {
+        label: 'Límites del XVA',
+        text: 'Sin margen ni colateral en la exposición. Sin riesgo de correlación adversa (wrong-way). Base de cross currency determinista: un swap SOFR de una contraparte con colateral MXN queda con un sesgo determinista del tamaño de la base, porque el tipo de cambio deriva con esa base. EPE* se descuenta con la cuenta TIIE-F aunque el colateral sea USD. El periodo en curso se compone en continuo con la tasa simulada, mientras el desk capitaliza diario: diferencia de segundo orden. Excluidos: opciones, caps/floors, swaptions, bonos y forwards FX. El error de Monte Carlo se informa como error estándar del CVA. Fuera de alcance: KVA, MVA, contribuciones marginales por operación, XVA en PV o contabilidad.',
+      },
+    ],
+  },
+];
+// --- fin corte 9 ---
+
 const LIMITS: { label: string; text: string }[] = [
   {
     label: 'Datos',
     text: 'Mixtos en MKT-LIVE: curva SOFR aproximada, spot y volatilidades de SOFR y USDMXN de fuentes reales; el resto sintético. Ver Fuentes de datos.',
   },
-  { label: 'Alcance', text: 'CVA informativo solo de swaps de tasa; sin DVA, FVA ni colateral. Un solo usuario.' },
+  {
+    label: 'Alcance',
+    text: 'CVA informativo y XVA (sección XVA) de swaps de tasa y cross currency; sin margen ni colateral en la exposición. Un solo usuario.',
+  },
   {
     label: 'Fechas',
     text: 'Días naturales; t = días/365; SOFR en periodos de 365 días; fechas de pago sin ajuste por inhábiles.',
@@ -539,6 +569,11 @@ export function MethodologyScreen() {
         <SectionBlock key={s.id} section={s} />
       ))}
       {/* --- fin corte 6 --- */}
+      {/* corte 9 */}
+      {XVA_SECTIONS.map((s) => (
+        <SectionBlock key={s.id} section={s} />
+      ))}
+      {/* fin corte 9 */}
       {/* corte 7 */}
       <h2 className="meth-group">Validación independiente</h2>
       {VALIDATION_SECTIONS.map((s) => (
