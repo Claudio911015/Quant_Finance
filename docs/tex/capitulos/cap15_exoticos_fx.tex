@@ -1,6 +1,575 @@
-%% Capítulo marcador DEFINITIVO para este corte: lo escribe el corte de exóticos de FX al cerrar, con _plantilla.tex.
 \chapter{Exóticos de FX}\label{cap:exoticos-fx}
 
-Opciones exóticas de FX (barrera, digitales y afines); lo escribe el corte de exóticos de FX al cerrar, con \texttt{capitulos/\_plantilla.tex}.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap15-proposito}
 
-\todo[inline]{Pendiente: capítulo del corte de exóticos de FX. Escribirlo con \texttt{capitulos/\_plantilla.tex} y retirar este aviso.}
+Este capítulo documenta dos productos que el desk solo \emph{precia} (no los registra como operaciones): el
+\emph{no touch} y el \emph{double no touch} sobre USDMXN. El primero paga un monto fijo en pesos al vencimiento si el
+tipo de cambio nunca tocó una barrera (arriba o abajo del spot); el segundo, si nunca salió de un corredor
+$(L,U)$. La barrera es \emph{americana y continua}: se vigila durante toda la vida del producto, no solo en una
+fecha. Los dos se valúan con un único motor de Monte Carlo sobre las trayectorias de QuantLib 1.42.1, con
+volatilidad plana o con la volatilidad local de Dupire que QuantLib deriva de la superficie del snapshot, y se
+contrastan con las fórmulas cerradas de los motores analíticos de QuantLib. A diferencia del resto del desk, el
+código no pasa por \texttt{qfpy}: la regla vigente desde este corte es que la matemática vive en QuantLib o en
+\texttt{qfpy} y no en Python propio (la excepción declarada es la probabilidad de cruce de la
+sección~\ref{sec:cap15-puente}). El módulo es
+\codigo{desk/api/pricing/fx_exotics.py}{PRODUCTS}; la ruta es
+\codigo{desk/api/routes/price.py}{price} (\texttt{POST /api/price/fx\_no\_touch} y
+\texttt{POST /api/price/fx\_double\_no\_touch}).
+
+El pago es siempre en \MXN{}, el descuento usa la curva \texttt{TIIE-F} del snapshot
+(capítulo~\ref{cap:curvas}) y la tasa foránea es \texttt{SOFR}. Como la opción de FX del capítulo~\ref{cap:fx}, el
+tipo de cambio es USDMXN en pesos por dólar. Estos productos \emph{no} entran al portafolio, ni al ciclo de vida,
+ni al riesgo, ni al XVA (capítulos~\ref{cap:ciclo-vida}, \ref{cap:riesgo} y~\ref{cap:xva}): el registro de la ruta
+de precios es aparte del de las operaciones (sección~\ref{sec:cap15-implementacion}).
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap15-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. En este capítulo, $X_t$ es el USDMXN del modelo, que
+arranca en el spot $\Spot$; $d$ son los días al vencimiento y $T=d/365$ el plazo en años (días naturales, sin calendario); $s\in\{+1,-1\}$
+es el lado (compra $+1$, venta $-1$) y $M$ el monto que paga el producto, en \MXN{} (\texttt{payout\_mxn}). Las barreras son
+$H$ (no touch) o $L<U$ (double no touch); $\eta=+1$ si la barrera del no touch está arriba del spot y $\eta=-1$ si está abajo.
+$u$ es la probabilidad, bajo la medida de riesgo neutral del peso, de que el producto pague (de \emph{no tocar}), de modo que
+$\PV=s\,M\,\DF{d}{T}\,u$; $\hat u$ su estimador de Monte Carlo y $\mathrm{se}$ su error estándar. $r_d=\zr{d}{T}$ y
+$r_f=\zr{f}{T}$ son las tasas cero continuas de \texttt{TIIE-F} (subíndice $d$, doméstica) y \texttt{SOFR} (subíndice $f$,
+foránea) a $T$; $f_c(t)=-\partial_t\ln\DF{c}{t}$ es la tasa forward instantánea de la curva $c$; $\vol$ es la volatilidad
+plana y $\sigma_{\mathrm{loc}}(t,K)$ la volatilidad local; $\mu=r_d-r_f-\tfrac12\vol^2$ la deriva del logaritmo del
+tipo de cambio con tasas constantes y $\varsigma=\vol\sqrt T$ la desviación a $T$. La malla del Monte Carlo tiene $m$ pasos de
+tamaño $h=T/m$, nodos $t_i=i\,h$ y $X_i$ es el valor de una trayectoria en $t_i$ ($i=0,\dots,m$); $Z_i$ son normales estándar
+independientes, $n$ el número de trayectorias, $p_i^{b}$ la probabilidad de cruzar la barrera $b$ durante el paso $i$ y
+$\psi$ el valor (probabilidad condicional de no tocar) de una trayectoria. $\ell=\ln(U/L)$ es el ancho logarítmico del corredor
+y $W=\ell/\varsigma$ ese ancho en desviaciones. $\Delta_X$ es la delta y $\mathcal V$ la vega por reprecio (sección~\ref{sec:cap15-griegas}).
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap15-modelo}
+
+\subsection{Productos, pago y valor}\label{sec:cap15-productos}
+
+Con la barrera vigilada de forma continua en $[0,T]$, los pagos al vencimiento son
+\begin{equation}\label{eq:cap15-pago}
+  \begin{aligned}
+    \text{no touch, barrera arriba }(\eta=+1):\quad & M\,\mathbf 1\Bigl\{\textstyle\max_{0\le t\le T}X_t<H\Bigr\},\\
+    \text{no touch, barrera abajo }(\eta=-1):\quad & M\,\mathbf 1\Bigl\{\textstyle\min_{0\le t\le T}X_t>H\Bigr\},\\
+    \text{double no touch:}\quad & M\,\mathbf 1\Bigl\{L<\textstyle\min_{0\le t\le T}X_t,\ \max_{0\le t\le T}X_t<U\Bigr\},
+  \end{aligned}
+\end{equation}
+sin \emph{rebate} (no hay pago al tocar) y siempre en \MXN{}. El valor presente de la posición es
+\begin{equation}\label{eq:cap15-valor}
+  \begin{aligned}
+  \PV &= s\,M\,\DF{d}{T}\,u,\\
+  u &=\Q\bigl(\text{el tipo de cambio no toca la barrera en }[0,T]\bigr),
+  \end{aligned}
+\end{equation}
+con $\DF{d}{T}$ el factor de descuento de \texttt{TIIE-F} a $T=d/365$ días y $s=+1$ si se compra (se recibe el pago). El
+producto solo se valúa si el spot está en el lado vivo: $X_0<H$ con $\eta=+1$, $X_0>H$ con $\eta=-1$ y $L<X_0<U$; en otro
+caso la ruta responde 400 («El spot 18.6000 ya tocó la barrera…»). La validación de entradas es
+\codigo{desk/api/pricing/fx_exotics.py}{_common} (lado, monto en $(0,10^{13}]$, $d\in[1,18250]$, \texttt{model} en
+\texttt{smile}/\texttt{flat} con \texttt{smile} por omisión, \texttt{method} en \texttt{mc}/\texttt{analytic} con \texttt{mc} por
+omisión, y 400 si se pide \texttt{analytic} con \texttt{smile}),
+\codigo{desk/api/pricing/fx_exotics.py}{_nt_validate} (barrera en $(0,10^{6}]$ y \texttt{barrier\_type} en \texttt{up}/\texttt{down}) y
+\codigo{desk/api/pricing/fx_exotics.py}{_dnt_validate} ($0<L<U\le10^{6}$); el signo y el lado vivo de cada
+barrera los fija \codigo{desk/api/pricing/fx_exotics.py}{_sides}, y la comprobación del spot, \codigo{desk/api/pricing/fx_exotics.py}{_price}. El
+valor~\eqref{eq:cap15-valor} lo arma \codigo{desk/api/pricing/fx_exotics.py}{_value}.
+
+\subsection{Del mercado del desk a QuantLib}\label{sec:cap15-mercado}
+
+\paragraph{Curvas.} Cada curva $c\in\{\texttt{TIIE-F},\texttt{SOFR}\}$ se reconstruye con la \emph{misma} función que el
+arnés de validación del capítulo~\ref{cap:validacion}, \codigo{desk/validation/ql_curves.py}{build_curve}: con los $K$ pilares $(d_k)$ del
+snapshot (\texttt{mkt.pillars}), $\tau_k=d_k/365$, se toman los factores de descuento \emph{del desk} $\DF{c}{\tau_k}$ y las
+tasas cero continuas
+\begin{equation}\label{eq:cap15-cero}
+  z_k=-\frac{\ln \DF{c}{\tau_k}}{\tau_k},\qquad
+  \DF{c}{t}=e^{-z_c(t)\,t},
+\end{equation}
+(la primera es \codigo{desk/validation/ql_curves.py}{_zero}),
+donde $z_c(t)$ es la interpolación \emph{lineal} (en $t=\text{días}/365$) de los nodos $(0,z_1),(\tau_1,z_1),\dots,(\tau_K,z_K),(100,z_K)$
+(un \texttt{ZeroCurve} de QuantLib, composición continua, Actual/365, extrapolación plana; $100$ años $=36500$ días,
+\codigo{desk/validation/common.py}{FAR_DAYS}). Es la interpolación del desk (capítulo~\ref{cap:curvas}), de modo que QuantLib
+reproduce $\DF{c}{t}$ del desk a $10^{-9}$ en los pilares, entre ellos, a un día y a 30 años. La construcción es
+\codigo{desk/api/pricing/fx_exotics.py}{_build} (función interna \texttt{curve}). La curva doméstica es \texttt{mkt.mxn\_discount},
+que en la ruta de precios es siempre \texttt{TIIE-F}: estos productos no usan \texttt{MXN-USD} ni los puntos forward
+cotizados, así que el forward del modelo es
+\begin{equation}\label{eq:cap15-forward}
+  X(t)=\Spot\,\frac{\DF{f}{t}}{\DF{d}{t}}\qquad(\text{paridad cubierta con \texttt{SOFR} y \texttt{TIIE-F}}).
+\end{equation}
+La fecha de valuación de QuantLib se fija en la del snapshot (\texttt{Settings.evaluationDate}).
+
+\paragraph{Proceso.} Con las tasas forward instantáneas $f_d(t)$ y $f_f(t)$ de las curvas, el tipo de cambio sigue el
+proceso de Garman--Kohlhagen \citep{garman1983} (el de las opciones de FX del capítulo~\ref{cap:fx}):
+\begin{equation}\label{eq:cap15-proceso}
+  dX_t=\bigl(f_d(t)-f_f(t)\bigr)X_t\,dt+\sigma(t,X_t)\,X_t\,dW_t,
+\end{equation}
+con $\sigma(t,X_t)=\vol$ constante en el modelo \emph{plano} (\texttt{GarmanKohlagenProcess}) y $\sigma(t,X_t)=\sigma_{\mathrm{loc}}(t,X_t)$
+en el modelo \emph{con sonrisa} (\texttt{GeneralizedBlackScholesProcess} con una superficie de volatilidad local). La moneda doméstica
+es el peso, y $\vol$ es la volatilidad del par.
+
+\subsection{Volatilidad plana y volatilidad local de Dupire}\label{sec:cap15-vol}
+
+\paragraph{Plana.} $\vol=\vol(\Spot,T)$ de la ecuación~\eqref{eq:cap04-vol} del capítulo~\ref{cap:fx}, leída con \texttt{qfpy} en el
+\emph{spot sin chocar} y en el plazo del producto (no en el strike de la barrera); en el reprecio de vega se le suma $0.01$.
+
+\paragraph{Con sonrisa.} La superficie del snapshot (rejilla de volatilidades en plazo y strike, \texttt{mkt.surface.to\_grid()}) se
+carga en una \texttt{BlackVarianceSurface} de QuantLib interpolada \emph{bicúbicamente} en strike y plazo, con extrapolación
+constante en strike (fuera de $[17.0,20.5]$ en MX-DEMO) y varianza total lineal en el plazo después del último nodo (volatilidad
+plana). Es otra interpolación que la de \texttt{qfpy} (lineal en strike, varianza total lineal en el plazo): coinciden en los nodos
+de la rejilla y difieren fuera de ellos. Sea $w(y,t)=\sigma_{\mathrm{imp}}^2\,t$ la varianza total de esa superficie, $F(t)=\Spot\,\DF{f}{t}/\DF{d}{t}$
+el forward y $y=\ln(K/F(t))$. La volatilidad local de Dupire que calcula \texttt{LocalVolSurface} de QuantLib
+(\citealt{gatheral2006}, en la forma de varianza total; la derivada en $t$ se toma a $y$ constante y todas con diferencias finitas) es
+\begin{equation}\label{eq:cap15-dupire}
+  \sigma_{\mathrm{loc}}^2(t,K)=\frac{\partial_t w}{1-\dfrac{y}{w}\,\partial_y w+\dfrac14\Bigl(-\dfrac14-\dfrac1w+\dfrac{y^2}{w^2}\Bigr)(\partial_y w)^2+\dfrac12\,\partial_{yy}w}.
+\end{equation}
+\texttt{NoExceptLocalVolSurface} es la misma clase, que donde la varianza local sale negativa devuelve la volatilidad plana $\vol$ en vez
+de lanzar excepción. Calcularla al vuelo en cada nodo de cada trayectoria es lento (según las mediciones del plan del corte, la tabla es unas $15$ veces más rápida
+y evita que un precio con griegas pase de $\approx1$ s a $\approx4$ s), así que el código la \emph{tabula} una vez por precio y la entrega a QuantLib como
+\texttt{FixedLocalVolSurface}:
+\begin{equation}\label{eq:cap15-tabla}
+  \begin{aligned}
+  \hat\sigma[k,i]&=\sigma_{\mathrm{loc}}(\tilde t_i,K_k),\qquad K_k=\Spot\,e^{\xi_k\varsigma},\ \ \xi_k=-5+\tfrac{k}{4},\ k=0,\dots,40,\\
+  \tilde t_0&=10^{-3}h,\qquad \tilde t_i=i\,h\ (i\ge1),
+  \end{aligned}
+\end{equation}
+con interpolación lineal en strike, extrapolación constante y lineal en el tiempo (QuantLib solo la consulta en los nodos $t_i$ de la
+malla, ver abajo). Las constantes son $41$ strikes (\texttt{LV\_STRIKES}) y $m=10$ pasos (\texttt{STEPS}). La malla de strikes cubre
+$\pm5$ desviaciones $\varsigma$ del spot (con la $\vol$ plana, con el choque de vega incluido). Todo está en
+\codigo{desk/api/pricing/fx_exotics.py}{_build}; el spot de la malla es el de la petición (el spot chocado en el reprecio de delta).
+
+\begin{diferencia}
+  El modelo plano usa $\vol(\Spot,T)$ de \texttt{qfpy} (interpolación del capítulo~\ref{cap:fx}) y el modelo con sonrisa la superficie
+  bicúbica de QuantLib. A $T=0.3$ años y $K=18.25$ la primera da \verif{cap15-vol-qfpy-fuera-nodo}{0.121415881} y la segunda
+  \verif{cap15-vol-bicubica-fuera-nodo}{0.120860706} (en los nodos de la rejilla las dos dan la misma volatilidad). Por eso la diferencia
+  «con sonrisa menos plano» mezcla el efecto de la sonrisa con el de dos interpolaciones distintas y con el error de discretización
+  de Euler de la sección~\ref{sec:cap15-trayectorias}. Se tolera: la Metodología declara que la volatilidad plana es «la de la superficie
+  en spot y vencimiento» y que la sonrisa es la volatilidad local derivada de ella.
+\end{diferencia}
+
+\subsection{Números aleatorios y trayectorias}\label{sec:cap15-trayectorias}
+
+Las normales son $Z_i=\Phi^{-1}(U_i)$ con $U_i=(\text{entero de 32 bits}+\tfrac12)/2^{32}$ del generador Mersenne Twister MT19937 de QuantLib
+(\texttt{UniformRandomGenerator}) sembrado con $42$ (\texttt{SEED}), una secuencia de $m$ normales por trayectoria
+(\texttt{GaussianRandomSequenceGenerator}, sin antitéticas ni puente browniano de construcción). Con los mismos números, la
+trayectoria de \texttt{GaussianPathGenerator} cumple, para $i=0,\dots,m-1$,
+\begin{equation}\label{eq:cap15-paso}
+  X_{i+1}=X_i\exp\Bigl\{\bigl(\bar f_d-\bar f_f-\tfrac12\sigma_i^2\bigr)h+\sigma_i\sqrt h\,Z_i\Bigr\},\qquad
+  \sigma_i=\begin{cases}\vol &\text{modelo plano},\\ \hat\sigma(t_i,X_i)&\text{con sonrisa},\end{cases}
+\end{equation}
+donde $\hat\sigma(t_i,X_i)$ es la tabla~\eqref{eq:cap15-tabla} interpolada linealmente en strike en el nodo \emph{izquierdo} $X_i$, y las tasas son
+$\bar f_c=\ln(\DF{c}{t_i}/\DF{c}{t_{i+1}})/h$ (forward de la curva en el paso) en el modelo plano --- donde el paso es la
+transición lognormal \emph{exacta} --- y $\bar f_c=-\ln(\DF{c}{t_i+10^{-4}}/\DF{c}{t_i})/10^{-4}$ (forward instantáneo, horizonte de $10^{-4}$ años) en el
+modelo con sonrisa, donde QuantLib avanza el logaritmo por Euler. La ecuación~\eqref{eq:cap15-paso} se comprobó reproduciendo una trayectoria
+de cada modelo con las mismas normales: coincide con \texttt{GaussianPathGenerator} a menos de $10^{-9}$
+(\texttt{verificacion/cap15\_exoticos\_fx.py}). El Monte Carlo toma $n=20\,000$ trayectorias (\texttt{PATHS}) y la gráfica $2\,000$
+(\texttt{CHART\_PATHS}), todas con la misma semilla: el resultado es reproducible. Las trayectorias las genera
+\codigo{desk/api/pricing/fx_exotics.py}{_mc}.
+
+\subsection{Probabilidad de cruzar la barrera entre nodos: el puente browniano}\label{sec:cap15-puente}
+
+La barrera es continua, pero solo se conocen los nodos $X_0,\dots,X_m$. Condicionado a los dos extremos $X_i,X_{i+1}$ de un paso,
+$\ln X$ es un puente browniano (la deriva se cancela), y con volatilidad $\sigma_i$ constante en el paso la probabilidad de que
+toque la barrera $b$ entre $t_i$ y $t_{i+1}$, si ambos extremos están del mismo lado de $b$, es
+\begin{equation}\label{eq:cap15-puente}
+  p_i^{b}=\exp\Bigl(-\frac{2\,\ln(X_i/b)\,\ln(X_{i+1}/b)}{\sigma_i^2\,h}\Bigr)
+\end{equation}
+(\citealt{beaglehole1997}; \citealt{glasserman2003}, cap.~6, que es la referencia que cita el comentario del código, y cap.~3 para el
+puente). Si los extremos quedan a lados opuestos de $b$ el producto de logaritmos es negativo y la fórmula da $p_i^{b}>1$: la trayectoria
+cruzó en un nodo. Como $\sigma_i$ es la del nodo izquierdo, en el modelo con sonrisa esto es coherente con la discretización de
+Euler~\eqref{eq:cap15-paso}. Los factores de supervivencia de los pasos son independientes dado el camino, y el valor de una trayectoria es
+\begin{equation}\label{eq:cap15-pi}
+  \psi_{\mathrm{NT}}=\prod_{i=0}^{m-1}\max\bigl\{1-p_i^{H},\,0\bigr\},\qquad
+  \psi_{\mathrm{DNT}}=\prod_{i=0}^{m-1}\max\bigl\{1-p_i^{L}-p_i^{U},\,0\bigr\}.
+\end{equation}
+En el no touch, el valor $\max\{\cdot,0\}$ es $0$ si algún nodo cruzó (la fórmula da $p>1$) y el estimador $\psi$ es la probabilidad condicional de no tocar dados
+los nodos: sin sesgo para la barrera continua cuando los nodos tienen su ley exacta, como en el modelo plano. En el double no
+touch, $1-p_i^{L}-p_i^{U}$ es una \emph{cota} de la supervivencia exacta del paso, que vale $1-p_i^{L}-p_i^{U}+P(\text{tocar ambas})$ con
+$P(\text{tocar ambas})\ge0$; la cota subvalúa siempre y se recorta en cero cuando $p_i^{L}+p_i^{U}\ge1$ (corredor estrecho frente a $\sigma_i\sqrt h$),
+aunque la supervivencia exacta sea positiva. La corrección exacta serían las imágenes dobles de la serie
+\begin{equation}\label{eq:cap15-puente-exacto}
+  q_i=\sum_{k=-\infty}^{\infty}\Bigl\{e^{-2k\ell(\ln\frac{X_{i+1}}{X_i}+k\ell)/(\sigma_i^2h)}-e^{-2(\ln\frac{X_i}{L}+k\ell)(\ln\frac{X_{i+1}}{L}+k\ell)/(\sigma_i^2h)}\Bigr\},\qquad
+  \ell=\ln(U/L),
+\end{equation}
+cuyos términos $k=0$ del primer sumando y $k=0$, $k=-1$ del segundo son $1$, $-p_i^{L}$ y $-p_i^{U}$. El código \emph{no} la usa (usa solo esos tres términos, ecuación~\eqref{eq:cap15-pi}); se
+emplea en la sección~\ref{sec:cap15-validacion} como diagnóstico del sesgo. Por lo mismo, el double no touch nunca vale más que cada no touch con las
+mismas barreras trayectoria a trayectoria: con la misma semilla y la misma malla las trayectorias son las mismas y cada factor de
+$\psi_{\mathrm{DNT}}$ es a lo más el de $\psi_{\mathrm{NT}}$. La fórmula está en \codigo{desk/api/pricing/fx_exotics.py}{_mc}, en
+una línea.
+
+\begin{diferencia}
+  \emph{Vigilancia continua frente a discreta.} Un Monte Carlo que solo mira los nodos subvalúa la probabilidad de tocar y
+  \emph{sobrevalúa} el no touch \citep{beaglehole1997}; con barrera discreta la corrección clásica desplaza la barrera en
+  $e^{\pm\beta\sigma\sqrt h}$ con $\beta\approx0.5826$ \citep{broadie1997}. El código no usa ninguna de las dos aproximaciones: pondera cada trayectoria
+  por su probabilidad de no cruzar entre nodos~\eqref{eq:cap15-pi} y por tanto valúa la barrera \emph{continua} que pide el producto. El
+  comentario del módulo declara el límite de la herramienta: QuantLib 1.42 (Python) no expone la probabilidad de cruce ni tiene Monte
+  Carlo de doble barrera; \texttt{MCBarrierEngine} rechaza el pago en efectivo (\texttt{non-plain payoff given}), pero sí valúa
+  una \emph{réplica exacta} del no touch de una barrera con un diferencial de dos puts \emph{up-and-out} con strikes $b$ y $b+\epsilon$
+  (paga $\epsilon$ en toda la zona viva), motor que ya aplica la corrección de puente. Con ese motor, el no touch superior a 19.5 a
+  91 días (valor por unidad de pago, 20\,000 trayectorias, 10 pasos, $\epsilon=0.1$) sale \verif{cap15-replica-mcbarrier}{0.5233} frente a 0.5255 analítico
+  (tolerancia $10^{-4}$; la auditoría midió 0.2203 contra 0.2179 en otro caso). \emph{Se eligió un solo motor para los dos productos} (decisión del corte): hace al double no touch y al no
+  touch comparables trayectoria a trayectoria, da menos código y menor varianza; el costo es que la fórmula del puente es matemática
+  propia y no de QuantLib.
+\end{diferencia}
+
+\subsection{Estimador, error estándar y semilla}\label{sec:cap15-estimador}
+
+Con $n$ trayectorias,
+\begin{equation}\label{eq:cap15-estimador}
+  \begin{aligned}
+  \hat u&=\frac1n\sum_{j=1}^{n}\psi^{(j)},\qquad
+  \mathrm{se}(\hat u)=\sqrt{\frac{1}{n(n-1)}\sum_{j=1}^{n}\bigl(\psi^{(j)}-\hat u\bigr)^2},\\
+  \hat\PV&=s\,M\,\DF{d}{T}\,\hat u,\qquad \mathrm{se}(\hat\PV)=M\,\DF{d}{T}\,\mathrm{se}(\hat u).
+  \end{aligned}
+\end{equation}
+La respuesta trae \texttt{std\_error} $=\mathrm{se}(\hat\PV)$ (sin signo, en \MXN{}), \texttt{no\_touch\_probability} $=\hat u$
+y \texttt{price\_pct} $=100\,\DF{d}{T}\,\hat u=100\,|\hat\PV|/M$. Con \texttt{method=analytic} se devuelve $\PV$ de la
+sección~\ref{sec:cap15-analitico} con \texttt{std\_error} $=0$ y \texttt{paths} $=0$. El estimador es
+\codigo{desk/api/pricing/fx_exotics.py}{_mc} (devuelve $\hat u$ y $\mathrm{se}(\hat u)$ sin descontar) y el descuento y el signo los aplica
+\codigo{desk/api/pricing/fx_exotics.py}{_value}. Los $\psi^{(j)}$ de un no touch y de un double no touch con las mismas barreras
+usan las mismas normales, de modo que las diferencias entre productos o entre modelos con la misma semilla tienen ruido
+mucho menor que el error estándar de cada precio.
+
+\subsection{Referencias analíticas de QuantLib}\label{sec:cap15-analitico}
+
+La referencia (\texttt{analytic\_flat\_pv}) y el método \texttt{analytic} usan los motores cerrados de QuantLib con el proceso
+\emph{plano}, que ignoran la forma de las curvas salvo por sus tasas cero a $T$:
+\codigo{desk/api/pricing/fx_exotics.py}{_analytic}. El no touch es una opción binaria con barrera,
+\texttt{BarrierOption} \texttt{UpOut} con \texttt{CashOrNothingPayoff(Put, $H$, 1)} (o \texttt{DownOut} con
+\texttt{Call}), ejercicio \texttt{AmericanExercise(hoy, hoy+$d$, payoffAtExpiry=True)} --- pago al vencimiento --- y
+\texttt{AnalyticBinaryBarrierEngine}; el double no touch es una \texttt{DoubleBarrierOption} \texttt{KnockOut} con barreras $L$, $U$,
+\emph{rebate} cero, \texttt{CashOrNothingPayoff(Call, $L$, 1)} y ejercicio europeo con
+\texttt{AnalyticDoubleBarrierBinaryEngine}. Con $b=\ln(H/\Spot)$ o $a=\ln(\Spot/H)$, $\mu=r_d-r_f-\tfrac12\vol^2$ y
+$\varsigma=\vol\sqrt T$, el valor por unidad de pago, dividido entre $\DF{d}{T}$, es (reflexión con deriva; las expresiones de las binarias con
+barrera son las de Reiner y Rubinstein, 1991, \emph{Risk}, artículo sin DOI que no se incluye en la bibliografía, tal como las recoge \citealt{haug2007})
+\begin{align}
+  u_{\uparrow}&=\Ncdf\!\Bigl(\frac{b-\mu T}{\varsigma}\Bigr)-e^{2\mu b/\vol^2}\,\Ncdf\!\Bigl(\frac{-b-\mu T}{\varsigma}\Bigr),\label{eq:cap15-nt-arriba}\\
+  u_{\downarrow}&=\Ncdf\!\Bigl(\frac{a+\mu T}{\varsigma}\Bigr)-e^{-2\mu a/\vol^2}\,\Ncdf\!\Bigl(\frac{-a+\mu T}{\varsigma}\Bigr).\label{eq:cap15-nt-abajo}
+\end{align}
+Para el corredor, con $x_0=\ln\Spot$, $\ell=\ln(U/L)$ (notación) y la serie de imágenes de \citet{kunitomo1992} (para binarias de doble barrera también
+\citealt{hui1996}), sumando sobre $k\in\mathbb Z$,
+\begin{equation}\label{eq:cap15-dnt-serie}
+  \begin{aligned}
+  u_{\mathrm{DNT}}=\sum_{k=-\infty}^{\infty}\Bigl\{&e^{-2k\mu\ell/\vol^2}\Bigl[\Ncdf\!\Bigl(\tfrac{\ln U-x_0+2k\ell-\mu T}{\varsigma}\Bigr)-\Ncdf\!\Bigl(\tfrac{\ln L-x_0+2k\ell-\mu T}{\varsigma}\Bigr)\Bigr]\\
+  -&e^{2\mu(\ln L-x_0-k\ell)/\vol^2}\Bigl[\Ncdf\!\Bigl(\tfrac{\ln U-2\ln L+x_0+2k\ell-\mu T}{\varsigma}\Bigr)-\Ncdf\!\Bigl(\tfrac{x_0-\ln L+2k\ell-\mu T}{\varsigma}\Bigr)\Bigr]\Bigr\}.
+  \end{aligned}
+\end{equation}
+Las ecuaciones~\eqref{eq:cap15-nt-arriba}--\eqref{eq:cap15-dnt-serie} se escribieron a mano y coinciden con los motores de QuantLib a
+$10^{-10}$ en la probabilidad (con $r_d,r_f$ las tasas cero de QuantLib a $T$ y $\vol$ la plana; el script lo comprueba en los tres casos del ejemplo). QuantLib usa su
+propia suma para la serie del double no touch, y \emph{esa} suma no converge con corredores anchos (límites, sección~\ref{sec:cap15-limites}); la
+serie~\eqref{eq:cap15-dnt-serie} sí converge, y es la que se usó para la comprobación. La referencia analítica usa tasas
+constantes (las ceros a $T$) y el Monte Carlo las tasas forward de la curva en cada paso: con curvas no planas son dos modelos distintos, y
+la diferencia entre ellos no se midió aparte (las pruebas del repositorio comparan ambos con las curvas de MX-DEMO y el resultado cae dentro de tres errores estándar).
+
+\subsection{Delta y vega por reprecio}\label{sec:cap15-griegas}
+
+Los motores analíticos de barrera binaria no dan griegas (\texttt{delta not provided}, comprobado por el corte) y el Monte Carlo propio
+tampoco; el código reprecia con el mismo método, el mismo modelo y la misma semilla:
+\begin{equation}\label{eq:cap15-griegas}
+  \Delta_X=\frac{\hat\PV(1.01\,\Spot)-\hat\PV(\Spot)}{0.01\,\Spot},\qquad
+  \mathcal V=\hat\PV(\vol+0.01)-\hat\PV(\vol),
+\end{equation}
+en \MXN{} por peso de spot y por punto de volatilidad (no se divide la vega entre $0.01$). El choque de spot cambia solo el valor inicial del
+proceso (y el centro de la malla de strikes); las curvas, la volatilidad plana ($\vol(\Spot,T)$ con el $\Spot$ sin chocar) y la superficie no
+cambian, es decir, la delta es a volatilidad fija en strike. El choque de vega suma $0.01$ a la $\vol$ plana, o a \emph{todas} las
+volatilidades de la rejilla antes de calcular Dupire (que cambia también la malla de strikes de la tabla, proporcional a $\varsigma$, y la
+volatilidad de respaldo). Ambas son diferencias unilaterales con trayectorias comunes. Están en
+\codigo{desk/api/pricing/fx_exotics.py}{_result}. Como la delta es un cociente de diferencias de Monte Carlo con la misma semilla, tiene mucho menos ruido que
+dos precios independientes. El signo de $s$ las invierte (\emph{sell} $=-$\emph{buy} exactamente).
+
+\subsection{Gráfica}\label{sec:cap15-grafica}
+
+\texttt{details.chart} trae $21$ puntos (\texttt{CHART\_POINTS}) con \texttt{strike} nulo, \texttt{barriers} (la barrera o las dos) y
+\texttt{pnl}, el valor \emph{signado} en \MXN{} con $n=2\,000$ trayectorias y sin griegas, en los spots
+\begin{equation}\label{eq:cap15-grafica}
+  \begin{aligned}
+  x_k&=a+\frac{k}{20}\,(c-a),\quad k=0,\dots,20,\\
+  (a,c)&=\begin{cases}(L,U)&\text{double no touch},\\
+  \bigl(\min\{H,\Spot^2/H\},\ \max\{H,\Spot^2/H\}\bigr)&\text{no touch},\end{cases}
+  \end{aligned}
+\end{equation}
+es decir, de barrera a barrera (double) o de la barrera a su espejo geométrico respecto al spot, $\Spot^2/H$ (no touch): el spot queda siempre dentro y, en
+logaritmo, al centro. El valor en la barrera es exactamente $0$. Está en \codigo{desk/api/pricing/fx_exotics.py}{_price}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap15-implementacion}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}p{5.2cm}p{7.6cm}@{}}
+\toprule
+Fórmula o paso & Función \\
+\midrule
+Validación de entradas & \codigo{desk/api/pricing/fx_exotics.py}{_common}, \codigo{desk/api/pricing/fx_exotics.py}{_nt_validate}, \codigo{desk/api/pricing/fx_exotics.py}{_dnt_validate} \\
+Lado vivo de cada barrera & \codigo{desk/api/pricing/fx_exotics.py}{_sides} \\
+Curvas~\eqref{eq:cap15-cero} & \codigo{desk/validation/ql_curves.py}{build_curve}, \codigo{desk/api/pricing/fx_exotics.py}{_build} \\
+Proceso, Dupire y tabla~\eqref{eq:cap15-proceso}--\eqref{eq:cap15-tabla} & \codigo{desk/api/pricing/fx_exotics.py}{_build} \\
+Trayectorias, puente y estimador~\eqref{eq:cap15-paso}--\eqref{eq:cap15-estimador} & \codigo{desk/api/pricing/fx_exotics.py}{_mc} \\
+Referencias analíticas~\eqref{eq:cap15-nt-arriba}--\eqref{eq:cap15-dnt-serie} & \codigo{desk/api/pricing/fx_exotics.py}{_analytic} \\
+Valor signado y descontado~\eqref{eq:cap15-valor} & \codigo{desk/api/pricing/fx_exotics.py}{_value} \\
+Delta y vega~\eqref{eq:cap15-griegas}, respuesta & \codigo{desk/api/pricing/fx_exotics.py}{_result} \\
+Spot en el lado vivo, gráfica, candado & \codigo{desk/api/pricing/fx_exotics.py}{_price} \\
+Registro de la ruta de precios & \codigo{desk/api/pricing/__init__.py}{PRICERS}, \codigo{desk/api/pricing/__init__.py}{PRODUCT_LABEL} \\
+\bottomrule
+\end{tabular}
+\caption{De la fórmula a la función.}\label{tab:cap15-mapa}
+\end{table}
+
+\paragraph{Orden de una petición.} \codigo{desk/api/routes/price.py}{price} toma el producto de la ruta (404 si no existe), valida el
+cuerpo con \codigo{desk/api/pricing/base.py}{Product} (la tupla \texttt{Product(name, validate, price, None, None)}), carga el
+contexto de mercado del \texttt{snapshot} (\codigo{desk/api/market.py}{load_context}) y devuelve el resultado revisado por
+\codigo{desk/api/validation.py}{ensure_finite}. Los límites de entrada son \codigo{desk/api/validation.py}{MAX_AMOUNT} ($10^{13}$),
+\codigo{desk/api/validation.py}{MAX_PRICE} ($10^{6}$) y \codigo{desk/api/pricing/base.py}{MAX_DAYS} ($18\,250$ días, 50 años: las curvas
+terminan hacia los 10 años y QuantLib las extrapola planas). Cada error es un \codigo{desk/api/errors.py}{ApiError} con su campo.
+
+\paragraph{Registro.} Los exóticos viven en \texttt{fx\_exotics.PRODUCTS} y no en \texttt{PRODUCTS}: la ruta de precios mira
+\codigo{desk/api/pricing/__init__.py}{PRICERS}, una \texttt{ChainMap} \emph{viva} sobre ambos diccionarios, mientras que el alta de
+operaciones, la valuación, el ciclo de vida y el riesgo solo ven \texttt{PRODUCTS}; \texttt{POST /api/trades} con
+\texttt{fx\_no\_touch} responde 400 con \texttt{field: product}. La interfaz oculta «Agregar al portafolio» para estos dos productos y reutiliza el formulario y la
+gráfica de los demás pricers; su texto está en la sección «Exóticos de FX» de la Metodología
+(\codigo{desk/ui/src/screens/MethodologyScreen.tsx}{PRODUCT_SECTIONS}).
+
+\paragraph{Respuesta.} \texttt{\{product, currency: "MXN", pv, pv\_mxn, risk: \{delta, vega\}, cashflows: null, details\}} con
+\texttt{details} $=$ \texttt{\{price\_pct, no\_touch\_probability, std\_error, paths, model, method, analytic\_flat\_pv, chart\}}.
+\texttt{analytic\_flat\_pv} es el valor con la fórmula cerrada plana (signado), o \texttt{null} cuando la serie de QuantLib no converge
+(sección~\ref{sec:cap15-limites}); con \texttt{method=analytic} es el propio \texttt{pv}.
+
+\paragraph{Candado.} \texttt{Settings.evaluationDate} de QuantLib es global al proceso, y \texttt{\_build} y \texttt{\_analytic} la usan. Un
+\texttt{threading.Lock} de módulo (\codigo{desk/api/pricing/fx_exotics.py}{_LOCK}) envuelve el cálculo y la serie de la gráfica
+en \texttt{\_price}: dos precios a la vez se hacen en serie. Sin él, dos hilos con fechas de valuación distintas se pisaban
+(la prueba lo reproduce antes del candado: resultado $0.0$ y «date before reference date»). La validación de entradas queda fuera del candado.
+
+\paragraph{Tamaño.} El módulo tiene 131 líneas de código (sin blancos, comentarios ni docstrings; criterio de la auditoría del corte) más 9 de
+registro, $140\le180$ del presupuesto del diseño.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap15-ejemplo}
+
+Todo se reproduce con \codigo{docs/tex/verificacion/cap15_exoticos_fx.py}{contexto} (llama a \texttt{fx\_exotics} sobre una base temporal con el
+snapshot sintético MX-DEMO; spot $\Spot=18.60$, valuación 2026-11-10, QuantLib 1.42.1; semilla $42$, $20\,000$ trayectorias, $10$ pasos; las
+cifras de Monte Carlo cambian si cambian esas constantes). Salvo que se diga otra cosa, el producto paga $M=10^{6}$ \MXN{} a $d=91$ días
+($T=91/365$) y la tolerancia es de media unidad del último dígito impreso.
+
+\subsection{Mercado en QuantLib}\label{sec:cap15-ej-mercado}
+
+A $T=91/365$ el factor de descuento \texttt{TIIE-F} es $\DF{d}{T}=\verif{cap15-df-mxn-91}{0.9827210278}$ y el de \texttt{SOFR}
+$\DF{f}{T}=\verif{cap15-df-sofr-91}{0.9904858333}$; la \texttt{ZeroCurve} de QuantLib los reproduce a $10^{-9}$. Las tasas cero de
+la ecuación~\eqref{eq:cap15-cero} son $r_d=\verif{cap15-tasa-mxn-91}{0.069911522}$ y $r_f=\verif{cap15-tasa-sofr-91}{0.038343914}$, y la volatilidad plana
+$\vol(\Spot,T)=\verif{cap15-vol-plana-91}{0.120055181}$ (tolerancia $10^{-9}$). Con sonrisa, a un año ($d=365$), el nodo $k=21$ de la
+tabla~\eqref{eq:cap15-tabla} es $\xi_{21}=\tfrac14$, $K_{21}=18.60\,e^{0.25\varsigma}=19.2147$, y su volatilidad local en $t_5=0.5$ años es
+$\hat\sigma[21,5]=\verif{cap15-vol-local-nodo}{0.131888983}$; el script la compara con la ecuación~\eqref{eq:cap15-dupire} escrita a mano
+(derivadas por diferencias finitas sobre la superficie bicúbica) y coinciden a $10^{-6}$.
+
+\subsection{Semilla y trayectoria}\label{sec:cap15-ej-semilla}
+
+El primer uniforme de MT19937 sembrado con $42$ es $U_0=\verif{cap15-semilla-u0}{0.374540114}$ (el script lo reproduce con el generador de \texttt{numpy}
+sembrado igual) y la primera normal $Z_0=\Phi^{-1}(U_0)=\verif{cap15-semilla-z0}{-0.319852392}$. Con sonrisa, a un año, el primer nodo de la primera trayectoria es
+$X_1=\verif{cap15-camino-x1}{18.43283821}$, y la ecuación~\eqref{eq:cap15-paso} reproduce los $10$ pasos de esa trayectoria a $10^{-9}$ (tolerancia $10^{-9}$ en $U_0$ y $Z_0$, $10^{-8}$ en $X_1$).
+
+\subsection{Probabilidad del puente}\label{sec:cap15-ej-puente}
+
+Se llama a \codigo{desk/api/pricing/fx_exotics.py}{_mc} del módulo con una trayectoria dada (se sustituye solo el generador de trayectorias por uno que
+devuelve siempre los mismos nodos), $\sigma_i=0.12$ y $h=T/10$. Entre $X_i=18.80$ y $X_{i+1}=19.05$ con la barrera $H=19.5$, la
+ecuación~\eqref{eq:cap15-puente} da $p_i^{H}=\verif{cap15-puente-p1}{0.008610059}$ y el código devuelve exactamente $1-p_i^{H}$. Con tres nodos
+$18.60,18.90,19.20$ el valor de la trayectoria es el producto de los dos factores,
+$\psi=\verif{cap15-puente-prod3}{0.932498936}$. Si los extremos quedan a lados opuestos de la barrera ($19.40\to19.60$ con $H=19.5$) la fórmula
+da $p=\verif{cap15-puente-p-cruzado}{1.157781526}>1$ y el código fija el factor en $0$. En el double no touch con corredor $(18.0,18.2)$ y los dos
+nodos en $18.1$ (el corredor es más estrecho que $\sigma\sqrt h\approx0.34$), $p^{L}+p^{U}=\verif{cap15-puente-suma-doble}{1.687247770}>1$: la cota se recorta a $0$ aunque
+la supervivencia exacta del paso sea positiva (el sesgo de la sección~\ref{sec:cap15-limites}). Tolerancia $10^{-9}$.
+
+\subsection{Fórmulas cerradas de QuantLib}\label{sec:cap15-ej-cerradas}
+
+Con $r_d$, $r_f$ y $\vol$ de arriba, el no touch superior en $19.5$ ($b=\ln(19.5/18.6)$) vale
+$u_{\uparrow}=\verif{cap15-nt-u-an}{0.534737238}$ con \texttt{AnalyticBinaryBarrierEngine} y con la ecuación~\eqref{eq:cap15-nt-arriba} a mano (coinciden a $10^{-10}$),
+es decir $\PV=M\,\DF{d}{T}\,u_{\uparrow}=\verif{cap15-nt-pv-an}{525497.528}$ \MXN{} (tolerancia $10^{-3}$). El no touch inferior en $17.5$ da
+$u_{\downarrow}=\verif{cap15-ntabajo-u-an}{0.721846060}$ y el double no touch en $(17.5,19.8)$, $u_{\mathrm{DNT}}=\verif{cap15-dnt-u-an}{0.396726331}$, que son
+las ecuaciones~\eqref{eq:cap15-nt-abajo} y~\eqref{eq:cap15-dnt-serie}; el valor del double es $\verif{cap15-dnt-pv-an}{389871.308}$ \MXN{}.
+
+\subsection{Monte Carlo contra el analítico}\label{sec:cap15-ej-mc}
+
+Con el modelo plano, el Monte Carlo del no touch superior en $19.5$ da $\hat\PV=\verif{cap15-nt-mc-pv}{526156.422}$ \MXN{} con
+$\mathrm{se}=\verif{cap15-nt-mc-se}{3268.715}$ \MXN{} (tolerancia $10^{-3}$), es decir $\hat u=\verif{cap15-nt-mc-prob}{0.535408}$
+(tolerancia $10^{-6}$) frente al analítico $525\,497.528$: la diferencia es de $z=\verif{cap15-nt-mc-z}{0.2016}$ errores estándar
+(tolerancia $10^{-4}$). El double no touch en $(17.5,19.8)$ da $\hat\PV=\verif{cap15-dnt-mc-pv}{390211.873}$ con
+$\mathrm{se}=\verif{cap15-dnt-mc-se}{3097.108}$, $\hat u=\verif{cap15-dnt-mc-prob}{0.397073}$ y $z=\verif{cap15-dnt-mc-z}{0.1100}$.
+
+Con sonrisa (volatilidad local), el no touch superior en $19.5$ da $\hat\PV=\verif{cap15-nt-smile-pv}{527649.879}$, es decir
+$\verif{cap15-nt-smile-dif}{1493.46}$ \MXN{} más que el plano con las mismas normales (tolerancia $10^{-2}$), pero respecto a
+la referencia analítica plana está a $z=\verif{cap15-nt-smile-z}{0.6584}$ errores estándar: con las trayectorias por omisión el efecto de la sonrisa no se
+distingue de cero. Por eso la respuesta no trae un «ajuste por sonrisa» precalculado: la Metodología indica leerlo comparando el valor, con su error estándar, contra la
+referencia analítica plana.
+
+\subsection{Delta y vega}\label{sec:cap15-ej-griegas}
+
+Con el método analítico el no touch superior en $19.5$ tiene, por la ecuación~\eqref{eq:cap15-griegas},
+$\Delta_X=\verif{cap15-nt-delta-an}{-539589.485}$ y $\mathcal V=\verif{cap15-nt-vega-an}{-31312.206}$ \MXN{}
+(tolerancia $10^{-3}$; el script los recalcula a mano con la ecuación~\eqref{eq:cap15-nt-arriba} en $1.01\Spot$ y en $\vol+0.01$). Con
+Monte Carlo (plano) son $\verif{cap15-nt-delta-mc}{-540331.75}$ y $\verif{cap15-nt-vega-mc}{-31742.10}$ (tolerancia $10^{-2}$): la
+diferencia con las analíticas es de $0.14\,\%$ y $1.4\,\%$. Ambas son negativas: quien compra un no touch superior pierde valor si sube el spot
+o la volatilidad.
+
+\emph{Delta con la barrera cerca del spot.} Con la barrera superior en $18.62$, a $0.1\,\%$ del spot, el spot chocado ($18.786$) ya está
+del lado muerto. El método analítico, que devuelve cero con el spot sobre la barrera, da $\Delta_X=\verif{cap15-delta-cerca-an}{-66483.61}$; la delta
+verdadera (diferencia central de la forma cerrada con paso $10^{-4}\Spot$) es $\verif{cap15-delta-cerca-real}{-619678.96}$ y el Monte Carlo
+da $\verif{cap15-delta-cerca-mc}{631697.97}$, con \emph{signo contrario}: con los dos extremos de cada paso del lado muerto, la
+ecuación~\eqref{eq:cap15-puente} da $p<1$ y la supervivencia sale positiva en vez de cero (hallazgo H23 de \texttt{HALLAZGOS.md}).
+
+\subsection{Malla e identidades}\label{sec:cap15-ej-malla}
+
+El no touch superior en $18.9$ a $30$ días (barrera cerca) vale $\hat u=\verif{cap15-malla-u10}{0.354160}$ con $10$ pasos y
+$\hat u=\verif{cap15-malla-u40}{0.357795}$ con $40$ (tolerancia $10^{-6}$), una diferencia de
+$\verif{cap15-malla-dif-se}{-0.8020}$ errores estándar combinados: la barrera continua no depende de la malla más allá del ruido de Monte Carlo. Con las
+mismas trayectorias a $91$ días, el no touch inferior en $17.5$ da $\hat u=\verif{cap15-id-abajo}{0.722111}$, el superior en $19.8$,
+$\verif{cap15-id-arriba}{0.671070}$ y el double no touch en $(17.5,19.8)$, $\verif{cap15-id-doble}{0.397073}$, que es menor que los dos. En la gráfica
+del no touch superior en $19.5$ el primer spot es el espejo $\Spot^2/H=\verif{cap15-grafica-x0}{17.741538462}$ y el último es la barrera, con valor $0$.
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap15-validacion}
+
+\subsection{Pruebas del repositorio}\label{sec:cap15-pruebas}
+
+\begin{raggedright}
+Las pruebas de \codigo{desk/api/tests/test_price_fx_exotics.py}{test_mc_matches_quantlib_analytic} (25 casos: $12$ no touch y $13$ double no touch,
+de $7$ a $730$ días, arriba y abajo, barreras cerca y lejos, corredores de $0.6$ a $11$ pesos) exigen que el Monte Carlo plano coincida con el analítico
+de QuantLib dentro de tres errores estándar más $10^{-9}M$ y que el error estándar sea $\le0.5\,\%$ del pago; el corte midió $|z|\le1.14$ y error estándar
+$\le0.327\,\%$. Además:
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_result_does_not_depend_on_time_grid} (10 contra 40 pasos en cuatro casos),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_smile_on_flat_surface_reproduces_flat} (con superficie plana, la sonrisa reproduce el modelo plano),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_smile_on_demo_surface} (finito y entre $0$ y el pago),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_quantlib_curves_give_the_discount_factors_of_the_desk_curves} (DF de QuantLib contra el desk a $10^{-9}$ en pilares, entre ellos, a un día y a 30 años, en \MXN{} y \USD{}),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_barrier_that_cannot_be_touched_pays_the_payout_discounted_with_the_desk_curve} (barrera inalcanzable $=M\,\DF{d}{T}$ a $10^{-6}$ relativo, \texttt{mc} y \texttt{analytic}),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_value_is_between_zero_and_discounted_payout},
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_farther_barrier_never_lowers_value} (monotonía),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_far_barrier_tends_to_discounted_payout},
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_double_no_touch_is_at_most_each_single_no_touch},
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_sell_is_minus_buy_and_runs_are_reproducible},
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_delta_and_vega_are_bumped_repricings} (las definiciones de la ecuación~\eqref{eq:cap15-griegas}),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_flat_model_delta_keeps_the_volatility_of_the_unbumped_spot},
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_prices_at_once_with_different_valuation_dates_equal_the_serial_ones} (el candado),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_corridor_where_the_analytic_series_fails_is_still_priced_by_mc},
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_analytic_method_where_the_series_fails_is_a_400_in_spanish},
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_longest_valid_maturity_is_priced} ($18\,250$ días),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_invalid_request_is_400_with_field} y
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_touched_barrier_message_names_the_field_in_spanish} (la validación en frontera),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_contract_over_http} y
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_labels_registered_and_not_tradable} (contrato y registro),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_chart_reaches_every_barrier_with_zero_value_and_contains_the_spot} (gráfica) y
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_default_price_is_fast} (tiempo, con margen $3\times$).
+\end{raggedright}
+
+\subsection{Auditoría y contraste con QuantLib}\label{sec:cap15-auditoria}
+
+La auditoría del corte (\codigo{docs/superpowers/qf-desk/corte10-fx-exoticos/audit.md}{R3}) repitió el contraste con un proceso propio sobre tasas
+planas, contra \texttt{AnalyticBinaryBarrierEngine} y \texttt{AnalyticDoubleBarrierBinaryEngine}: $16$ casos (de $1$ a $730$ días) con tres semillas,
+\emph{máx $|z|=1.72$}; con $1,2,5,10,50$ y $200$ pasos el no touch de $30$ días en $18.9$ queda en
+$0.3158,0.3155,0.3142,0.3149,0.3186,0.3138$ frente a $0.3141$ analítico ($\pm0.003$); y en un corredor de $1.5\sigma\sqrt T$ con $6$ semillas de $100\,000$ trayectorias,
+el $z$ conjunto es $+0.28$ con $10$ pasos y $-0.41$ con $50$, sin sesgo. Estas cifras son de la
+auditoría; este capítulo no las repitió. El prototipo del plan, con $20\,000$ trayectorias, midió $|z|\le1.12$ (no touch) y $|z|\le1.35$ (double), y la batería final del
+repositorio $|z|\le1.14$. Los tiempos medidos por la auditoría con los valores por omisión son $0.94$--$1.02$ s sin la gráfica y
+$1.55$--$1.84$ s la respuesta completa (límites de la especificación: $1.5$ s y $5$ s; las pruebas fallan por encima de $3\times$). Al
+preparar este capítulo, con la máquina cargada por otros procesos, una corrida de \texttt{\_result} tardó $1.3$--$2.5$ s y la respuesta completa $2.4$--$3.8$ s con
+sonrisa: el tiempo depende de la carga.
+
+\paragraph{No entra en el capítulo~\ref{cap:validacion}.} Los exóticos no están en el arnés de validación contra QuantLib 1.44 porque compararían QuantLib consigo mismo
+(el diseño del corte lo decidió así); lo que sí comparte con ese arnés es la construcción de las curvas
+(\codigo{desk/validation/ql_curves.py}{build_curve}), que el backend importa con la versión 1.42.1 de QuantLib de su propio Python. La validación
+de los exóticos es, entonces, interna: Monte Carlo contra los motores analíticos, la identidad de las curvas, la independencia de la malla y las identidades de arriba.
+
+\subsection{Sesgo del double no touch con corredor estrecho}\label{sec:cap15-sesgo-dnt}
+
+Con la misma malla y las mismas trayectorias a $91$ días ($100\,000$, modelo plano), se compara el valor del código~\eqref{eq:cap15-pi} con el que da la probabilidad
+exacta del puente~\eqref{eq:cap15-puente-exacto} en cada paso (el segundo es sin sesgo para la barrera continua, y coincide con la fórmula cerrada dentro de su error estándar). El
+corredor es simétrico en logaritmo alrededor del spot, de ancho $\ln(U/L)=W\varsigma$. La tabla~\ref{tab:cap15-estrecho} da el sesgo relativo
+$\hat u_{\text{código}}/\hat u_{\text{exacto}}-1$ en \% (siempre negativo: la cota subvalúa) y el valor $u$ de la fórmula cerrada.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}rrrr@{}}
+\toprule
+$W$ (en $\sigma\sqrt T$) & $u$ (fórmula cerrada) & sesgo con $m=5$ (\%) & sesgo con $m=10$ (\%) \\
+\midrule
+$0.6$ & \verif{cap15-estrecho-an-06}{1.4109e-06} & \verif{cap15-estrecho-sesgo-06-5}{-93.21} & \verif{cap15-estrecho-sesgo-06-10}{-15.29} \\
+$0.7$ & \verif{cap15-estrecho-an-07}{5.3573e-05} & \verif{cap15-estrecho-sesgo-07-5}{-44.13} & \verif{cap15-estrecho-sesgo-07-10}{-3.13} \\
+$0.8$ & \verif{cap15-estrecho-an-08}{5.6763e-04} & \verif{cap15-estrecho-sesgo-08-5}{-14.67} & \verif{cap15-estrecho-sesgo-08-10}{-0.65} \\
+$1.0$ & \verif{cap15-estrecho-an-10}{9.1123e-03} & \verif{cap15-estrecho-sesgo-10-5}{-1.49} & \verif{cap15-estrecho-sesgo-10-10}{-0.03} \\
+\bottomrule
+\end{tabular}
+\caption{Sesgo relativo de $\psi_{\mathrm{DNT}}$ (ecuación~\eqref{eq:cap15-pi}) frente a la probabilidad exacta del puente, a 91 días y $100\,000$ trayectorias (tolerancia $0.011$ puntos porcentuales en el sesgo y media unidad del último dígito en $u$).}\label{tab:cap15-estrecho}
+\end{table}
+
+Con $10$ pasos el sesgo relativo es pequeño ($\le0.7\,\%$) para $W\ge0.8$ y llega a $-15\,\%$ en $W=0.6$; con $5$ pasos es mucho mayor. En términos
+\emph{absolutos}, en cambio, es insignificante: el valor del double no touch con $W\le0.7$ es menor que $5.4\times10^{-5}$ del pago, y el error del código
+es de a lo más $4\times10^{-6}$ del pago. Es lo que la Metodología declara («subvalúa en corredores más estrechos que $\sim1$ desviación»), con la
+precisión de que la desviación es el ancho del corredor $W\varsigma$. Con un muestreo ordinario el sesgo de $10$ pasos queda bajo el error de
+Monte Carlo (la auditoría, en un corredor de $0.97\,\varsigma$ a $7$ días con valor $0.67\,\%$ del pago, midió $-100$, $-57$, $-15$, $-3.8$ ($z=-2.7$), $+2.3$ ($z=+1.1$) y
+$-0.9\,\%$ con $1,2,3,5,10$ y $50$ pasos; en un corredor de $1.5\,\varsigma$, $-15$ a $-22\,\%$ con un paso y $\le-1.4\,\%$ con dos), y solo la comparación pareada de la tabla lo resuelve.
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap15-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \emph{Alcance del producto.} Pago solo en \MXN{}, sin \emph{rebate} ni one touch, sin barreras con ventana ni discretas, y la barrera se vigila de
+          forma continua. La volatilidad es \emph{local} (Dupire de QuantLib), no estocástica ni vanna-volga, así que la dinámica de la sonrisa
+          hacia adelante, de la que depende el precio real de un exótico, no está modelada. No se usa la curva \texttt{MXN-USD} ni los puntos forward cotizados.
+          La superficie es la sintética de MX-DEMO (capítulo~\ref{cap:datos}); en un snapshot sin superficie no hay precio con sonrisa
+          (el contexto siempre la exige, así que no hay un caso «sin superficie»).
+    \item \emph{Fuera del portafolio.} Los dos productos solo se precian: no se registran como operaciones, y por tanto no tienen ciclo de vida, vigilancia
+          histórica de la barrera (el spot de la fecha de valuación debe estar en el lado vivo), riesgo, escenarios, VaR ni XVA.
+    \item \emph{Reprecio de las vainillas de la superficie con sonrisa.} El modelo con sonrisa no reprecia las vainillas de su propia superficie. En la
+          tabla~\ref{tab:cap15-vainillas} se da la volatilidad implícita del Monte Carlo menos la de la superficie, en puntos de volatilidad, con
+          variable de control $E[X_T]=X(T)$ y $200\,000$ trayectorias (error de $\approx0.02$), para strikes a $m\,\varsigma$ del forward. A $91$ días el
+          sesgo es $\le0.13$ puntos, a un año llega a $-0.65$ en el ala superior (ATM $-0.24$) y a dos años a $-0.47$ (ATM $-0.39$). El corte midió con otra
+          corrida $-0.06$ ATM a $91$ días, $-0.25$ a un año y $-0.40$ a dos, y $-0.22$ ATM a un año con $20$ pasos (que sube el tiempo de respuesta de
+          $0.98$ s a $1.56$--$1.59$ s, por encima del objetivo de $1.5$ s). Con $40$ pasos la ATM a un año baja a $-0.17$: más pasos no lo resuelve. La auditoría
+          mostró que el mismo sesgo aparece con Dupire al vuelo y $50$ pasos, es decir, viene de Dupire sobre la superficie bicúbica con extrapolación constante y
+          no de la tabla. El efecto sobre el precio de los exóticos no se midió aparte.
+    \item \emph{Tabla de volatilidad local frente al cálculo al vuelo.} Tabular Dupire en $41$ strikes ($\approx15\times$ más rápido) cambia el valor porque
+          interpola linealmente en strike. Diferencia pareada con las mismas normales, en \% del pago (tabla $-$ al vuelo, $40\,000$ trayectorias):
+          no touch superior en $19.5$ a $91$ días $\verif{cap15-tabla-nt91-41}{-0.018}$; no touch superior en $22.0$ a dos años
+          $\verif{cap15-tabla-nt730-41}{-0.314}$; double no touch en $(15.5,23)$ a dos años $\verif{cap15-tabla-dnt730-41}{-0.515}$. Con $161$ strikes bajan a
+          $\verif{cap15-tabla-nt730-161}{-0.003}$ y $\verif{cap15-tabla-dnt730-161}{0.030}$ (tolerancia $0.0011$): la causa es la interpolación
+          (a dos años el paso de $0.25\varsigma$ es $4.6\,\%$ del spot). La auditoría midió $-0.01$ a $-0.33\,\%$ entre $91$ días y dos años. La Metodología
+          declara «del orden de $0.3$--$0.8\,\%$ del pago» (hallazgo H24): solo vale a dos años.
+    \item \emph{Corredores estrechos.} El double no touch usa $10$ pasos y una cota de primer orden por paso (ecuación~\eqref{eq:cap15-pi}), que subvalúa siempre.
+          La tabla~\ref{tab:cap15-estrecho} muestra que el sesgo relativo es sensible con $W<0.8$, pero el valor ya es $<0.06\,\%$ del pago; con corredores
+          de $W\ge1$ no se distingue del ruido. Más pasos lo reducen a costa de tiempo.
+    \item \emph{Corredores muy anchos.} La suma de \texttt{AnalyticDoubleBarrierBinaryEngine} no converge y lanza
+          «serie did not converge sufficiently fast»: con \texttt{method=mc} la referencia sale \texttt{null} («--» en la interfaz) y el precio se calcula normal; con
+          \texttt{method=analytic} la ruta responde 400 («La fórmula cerrada no converge con este corredor; use Monte Carlo»). El umbral, medido con un barrido de
+          paso $0.5\varsigma$ con el corredor centrado en el spot, es $W=\ln(U/L)/\varsigma\approx\verif{cap15-ancho-falla-91}{55.0}$ a $91$ días (primer ancho que
+          falla), $\verif{cap15-ancho-falla-1}{59.0}$ a un día y $\verif{cap15-ancho-falla-730}{50.0}$ a dos años: por ejemplo $(10,40)$ a $7$ días o $(1,100)$ a $91$ días.
+          La serie de imágenes~\eqref{eq:cap15-dnt-serie} converge con esos corredores; el límite es de la suma de QuantLib.
+    \item \emph{Delta con la barrera cerca del spot.} El spot chocado no se revalida: con la barrera a menos de $1\,\%$ del spot (hacia el lado vivo) el reprecio
+          cae del lado muerto, el Monte Carlo da supervivencia positiva y la delta puede salir con el signo contrario (sección~\ref{sec:cap15-ej-griegas}, hallazgo H23). La
+          delta es además a volatilidad fija en strike.
+    \item \emph{Referencia analítica.} Usa tasas cero constantes a $T$ y volatilidad plana, mientras el Monte Carlo usa las tasas forward de la curva; con curvas
+          no planas son dos modelos distintos. \texttt{analytic\_flat\_pv} es siempre plana, aun cuando el modelo pedido sea con sonrisa.
+    \item \emph{Candado.} Por la fecha de valuación global de QuantLib, \codigo{desk/api/pricing/fx_exotics.py}{_LOCK} serializa los precios de exóticos en el
+          proceso: una petición de $\approx2$ s hace esperar a las demás de estos productos (no a las del resto del desk, que no usan QuantLib). Dos procesos del servidor
+          tienen cada uno su candado y su fecha.
+    \item \emph{Semilla y plataforma.} La semilla fija da resultados reproducibles, pero el error estándar es un error de $20\,000$ trayectorias (hasta
+          $0.33\,\%$ del pago); con otra semilla el precio cambia dentro de ese error. Las cifras del capítulo salen de MT19937 e inversa normal de QuantLib en esta máquina.
+  \end{itemize}
+\end{limites}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Plazo y pasos & $-1\varsigma$ & $-\tfrac12\varsigma$ & ATM fwd & $+\tfrac12\varsigma$ & $+1\varsigma$ \\
+\midrule
+91 días, $m=10$ & \verif{cap15-vain-91-10-km1}{-0.04} & \verif{cap15-vain-91-10-km05}{-0.02} & \verif{cap15-vain-91-10-k0}{-0.03} & \verif{cap15-vain-91-10-kp05}{-0.06} & \verif{cap15-vain-91-10-kp1}{-0.13} \\
+1 año, $m=10$ & \verif{cap15-vain-365-10-km1}{-0.30} & \verif{cap15-vain-365-10-km05}{-0.16} & \verif{cap15-vain-365-10-k0}{-0.24} & \verif{cap15-vain-365-10-kp05}{-0.65} & \verif{cap15-vain-365-10-kp1}{-0.49} \\
+1 año, $m=40$ & \verif{cap15-vain-365-40-km1}{-0.24} & \verif{cap15-vain-365-40-km05}{-0.12} & \verif{cap15-vain-365-40-k0}{-0.17} & \verif{cap15-vain-365-40-kp05}{-0.53} & \verif{cap15-vain-365-40-kp1}{-0.38} \\
+2 años, $m=10$ & \verif{cap15-vain-730-10-km1}{-0.30} & \verif{cap15-vain-730-10-km05}{-0.17} & \verif{cap15-vain-730-10-k0}{-0.39} & \verif{cap15-vain-730-10-kp05}{-0.47} & \verif{cap15-vain-730-10-kp1}{-0.32} \\
+\bottomrule
+\end{tabular}
+\caption{Volatilidad implícita del Monte Carlo con sonrisa menos la de la superficie, en puntos de volatilidad (tolerancia $0.011$; ruido de Monte Carlo $\approx0.02$). Columnas: strike $=X(T)\,e^{m\varsigma}$ con $m=-1,-\tfrac12,0,+\tfrac12,+1$.}\label{tab:cap15-vainillas}
+\end{table}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap15-referencias}
+
+El proceso de las opciones de FX es el de \citet{garman1983}. La probabilidad de no cruzar entre nodos y el sesgo de vigilar solo los nodos
+están en \citet{beaglehole1997} y en \citet{glasserman2003} (que también trata la discretización y la generación de trayectorias), y la
+corrección de la barrera discreta en \citet{broadie1997}. La serie de imágenes del double no touch es la de \citet{kunitomo1992}, con las binarias de doble
+barrera en \citet{hui1996}; las expresiones del no touch de una barrera y de las binarias están en \citet{haug2007}. La volatilidad local de Dupire, en la
+forma de varianza total que implementa QuantLib, en \citet{gatheral2006}. Las convenciones de los productos de FX con barrera (no touch, one touch,
+double no touch) y su uso en tesorería, en \citet{wystup2017}.
