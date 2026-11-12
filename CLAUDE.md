@@ -85,6 +85,11 @@ cd desk/ui && npm test && npm run build                               # UI (vite
 
 Diseño, plan y hoja de ruta: `docs/superpowers/qf-desk/` (`design.md`, `plan.md`, `roadmap.md`) y, por corte, `corte2/` … `corte8/` e `integracion/` (`design.md`, `plan.md`, `audit.md`). El estado y lo pendiente están en la sección 6 de `roadmap.md`. Fijaciones reales: `POST /api/fixings/fetch` (SOFR de la Fed de Nueva York; Banxico requiere `BANXICO_TOKEN`). Respaldo: `python -m desk.api.backup`. Validación contra QuantLib: `desk/validation/make_report.sh` (regenerar tras tocar valuación). Para pruebas con servidor, usar otro puerto que 5070 y una base temporal.
 
+### Reglas vigentes desde 2026-11-11 (pedidas por Claudio)
+
+- **QuantLib primero.** El código nuevo se apoya en QuantLib (`QuantLib==1.42.1` en el Python del backend) o en el `qfpy` existente; no se escribe matemática financiera propia en Python. Debe ser eficiente y con el menor código posible: cada diseño fija un presupuesto de líneas y la auditoría lo revisa.
+- **Documentar lo realizado.** Todo trabajo que añada o cambie un modelo, un producto o un cálculo se documenta en LaTeX en `docs/tex/` en el mismo corte: fórmulas matemáticas de lo que el código hace de verdad, referencias académicas verificables (libro o artículo con autor, año y DOI/ISBN) y referencias al código (archivo y símbolo). Un corte no está terminado sin su capítulo; `docs/tex/README.md` dice cómo compilar y cómo comprobar las referencias al código.
+
 ## File Conventions
 
 **For each new feature, create three files:**
