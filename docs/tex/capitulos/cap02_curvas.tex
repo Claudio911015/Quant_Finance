@@ -1,5 +1,449 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Curvas}\label{cap:curvas}
 
-Bootstrap OIS de TIIE-F y SOFR, interpolación, curva MXN-USD por puntos forward y base de cross currency, y colateral.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap02-proposito}
+
+El escritorio valúa con tres curvas de descuento con nombre: \texttt{TIIE-F} (pesos), \texttt{SOFR} (dólares) y,
+cuando el snapshot trae cotizaciones de colateral, \texttt{MXN-USD} (descuento en pesos de una contraparte con
+colateral en dólares). Las tres son curvas de tasa cero continua con pilares en días; la matemática de su
+construcción vive en C++ (\codigo{include/qf/termstructure/ois_bootstrap.hpp}{bootstrapOis},
+\codigo{include/qf/termstructure/xccy_bootstrap.hpp}{bootstrapXccyDiscount}) y el backend solo las arma desde el
+snapshot y elige cuál usa cada flujo (\codigo{desk/api/market.py}{MarketContext}).
+
+Este capítulo documenta, con las convenciones que el código usa de verdad, cuatro cosas: la representación de una
+curva y su interpolación (sección~\ref{sec:cap02-curva}), el bootstrap de las curvas OIS
+(sección~\ref{sec:cap02-ois}), el bootstrap de \texttt{MXN-USD} a partir de puntos forward y base de cross
+currency (sección~\ref{sec:cap02-xccy}) y la selección de la curva de descuento según la moneda de colateral
+(sección~\ref{sec:cap02-contexto}). El swap OIS que se reprecia con estas curvas se trata en el
+capítulo~\ref{cap:swaps-ois}, el forward FX que las usa en el capítulo~\ref{cap:fx}, el cross currency swap como
+producto en el capítulo~\ref{cap:xccy}, el contraste con QuantLib en el capítulo~\ref{cap:validacion} y el origen de
+las cotizaciones en el capítulo~\ref{cap:datos}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap02-notacion}
+
+Los símbolos comunes ($\DF{c}{T}$, $\Nom$, $\Spot$, $\FxF{T}$, \dots) están en el apéndice~\ref{ap:simbolos}. Los
+propios de este capítulo son:
+
+{\raggedright
+\begin{itemize}
+  \item $d_k$: días calendario, desde la fecha de valuación $t_0$, del pilar $k$ de una curva (días);
+        $T_k = d_k/365$ su tiempo en años. $n$ es el número de pilares.
+  \item $z_k$: tasa cero continua del pilar $k$ (decimal anual); $z(T)$ la tasa cero interpolada de la curva.
+  \item $q_k$: tasa cotizada del instrumento del pilar $k$ (decimal anual): depósito simple o tasa par del OIS.
+  \item $\ell$: periodo de cupón del OIS en días (\texttt{period\_days}); $e_1<\dots<e_m$ los días de pago del
+        pilar, $e_0=0$, $t_i = e_i/365$ y $\tau_i = (e_i-e_{i-1})/360$ el devengo del periodo $i$ (años).
+  \item $f_c(T_1,T_2)$: tasa forward \emph{continua} entre $T_1$ y $T_2$ que entrega
+        \codigo{include/qf/termstructure/yieldcurve.hpp}{YieldCurve} (no es la forward simple $\fwd{c}{t_1}{t_2}$
+        del apéndice).
+  \item $\pi_j$: puntos forward USDMXN del pilar $j$ (pesos por dólar); $s_j$: diferencial de la base de cross
+        currency del pilar $j$ (decimal anual).
+  \item $p$: choque porcentual al spot en un escenario; $\beta$: desplazamiento de una curva en puntos base.
+\end{itemize}
+}
+
+Convenciones comunes a todo el capítulo, tal como las fija el código: el tiempo de un pilar es
+$T = d/365$ con $d$ días calendario contados desde la fecha de valuación (sin calendarios de días hábiles), las tasas
+cero son continuas, los devengos de depósitos y cupones usan ACT/360
+(\codigo{include/qf/math/daycount.hpp}{yearFraction}) y todas las tasas son decimales
+(0.07 = 7\,\%). Los factores de descuento valen $\DF{c}{0}=1$ por convención de cada instrumento; la curva misma
+lanza una excepción si se le pide un plazo $T\le 0$.
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap02-modelo}
+
+\subsection{Representación e interpolación de una curva}\label{sec:cap02-curva}
+
+Una curva $c$ es una lista de $n\ge 2$ pilares $(T_k,z_k)$ con $T_1<\dots<T_n$. El factor de descuento es
+\begin{equation}\label{eq:cap02-df}
+  \DF{c}{T} \;=\; \exp\{-z_c(T)\,T\}, \qquad T>0,
+\end{equation}
+\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::discountFactor}, con la tasa cero que da
+\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::zeroRate}. Por omisión (y en toda la aplicación) la tasa cero
+se interpola linealmente en $T$ y se extrapola plana:
+\begin{equation}\label{eq:cap02-lineal}
+  z(T) = \begin{cases}
+    z_1, & T \le T_1,\\[2pt]
+    \dfrac{T_{k+1}-T}{T_{k+1}-T_k}\,z_k + \dfrac{T-T_k}{T_{k+1}-T_k}\,z_{k+1}, & T_k \le T \le T_{k+1},\\[8pt]
+    z_n, & T \ge T_n,
+  \end{cases}
+\end{equation}
+en \codigo{src/math/interpolation.cpp}{Interpolator::operator()}. Antes del primer pilar el factor de descuento es
+entonces $e^{-z_1T}$ y después del último $e^{-z_nT}$. El enumerado
+\codigo{include/qf/math/interpolation.hpp}{InterpolationMethod} ofrece otros dos métodos que el backend no usa
+(\texttt{market.py} nunca pasa \texttt{method}): \texttt{LogLinear}, que interpola linealmente el logaritmo de la
+\emph{tasa cero} (no del factor de descuento) y exige $z_k>0$, y \texttt{CubicSpline}, una spline cúbica natural
+sobre la tasa cero (segunda derivada nula en los extremos, resuelta con el algoritmo de Thomas; con dos pilares es
+la recta). Ambos se mencionan en la sección de límites.
+
+La tasa forward que calcula la curva entre $T_1<T_2$ es continua:
+\begin{equation}\label{eq:cap02-forward}
+  f_c(T_1,T_2) \;=\; \frac{z(T_2)\,T_2 - z(T_1)\,T_1}{T_2-T_1}
+  \;=\; \frac{1}{T_2-T_1}\,\ln\frac{\DF{c}{T_1}}{\DF{c}{T_2}},
+\end{equation}
+con $z(T_1)T_1 := 0$ cuando $T_1=0$ y excepción si $T_1<0$ o $T_1\ge T_2$
+(\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::forwardRate}). Es la columna «forward» del mercado de la
+interfaz: entre el pilar anterior (o $0$) y cada pilar
+(\codigo{desk/api/market.py}{_curve_points}). Los instrumentos no usan esta función: calculan sus forwards simples
+directamente con cocientes de factores de descuento.
+
+Los desplazamientos de riesgo no vuelven a hacer el bootstrap: suman directamente a la tasa cero de los pilares,
+\begin{equation}\label{eq:cap02-bump}
+  z_k \;\longmapsto\; z_k + \beta\cdot 10^{-4}
+\end{equation}
+para todos los pilares (\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::parallelBump}) o solo para uno
+(\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::bumped}), con $\beta$ en puntos base; el método de
+interpolación se conserva. El backend los usa en \codigo{desk/api/market.py}{_shift_curve}.
+
+\begin{diferencia}
+  \citet{hagan2006} estudian cómo la interpolación de una curva determina el comportamiento de sus tasas forward; la
+  que usa el código es la lineal en la tasa cero continua. Con $z$
+  lineal a trozos, la forward instantánea $f(T) = z(T) + T\,z'(T)$ (de $\ln P = -zT$) es lineal en cada tramo pero
+  \emph{discontinua en cada pilar} (salta $T_k\,[z'(T_k^+)-z'(T_k^-)]$); el código no calcula la forward
+  instantánea y esa discontinuidad no se corrige. Tampoco se usa interpolación sobre el logaritmo del factor de
+  descuento ni forwards monótonas convexas. El contraste con QuantLib (capítulo~\ref{cap:validacion}) comprueba que
+  la interpolación es exactamente esta.
+\end{diferencia}
+
+\subsection{Bootstrap de las curvas OIS (TIIE-F y SOFR)}\label{sec:cap02-ois}
+
+La función \codigo{src/termstructure/ois_bootstrap.cpp}{bootstrapOis} (binding
+\codigo{src/python_bindings/qfpy.cpp}{bootstrap_ois}) recibe cotizaciones
+\codigo{include/qf/termstructure/ois_bootstrap.hpp}{OisQuote} con $d_k$ estrictamente creciente y construye un
+pilar por cotización, en orden, con $T_k = d_k/365$. Una cotización es un depósito o un OIS par
+(\texttt{OisQuote::Type}); la primera de cada curva del snapshot es el depósito a 1 día. Hacen falta al menos dos
+cotizaciones, porque \texttt{YieldCurve} exige dos pilares.
+
+\paragraph{Depósito.} Tasa simple ACT/360 a un solo periodo:
+\begin{equation}\label{eq:cap02-deposito}
+  \DF{c}{T_k} = \frac{1}{1 + q_k\,d_k/360},
+  \qquad z_k = \frac{1}{T_k}\ln\!\Bigl(1 + q_k\,\frac{d_k}{360}\Bigr).
+\end{equation}
+
+\paragraph{OIS par.} Los días de pago son los múltiplos de $\ell$ menores que $d_k$ más el propio $d_k$
+(el último periodo es corto si $d_k$ no es múltiplo de $\ell$):
+\begin{equation}\label{eq:cap02-dias-pago}
+  \{e_1,\dots,e_m\} \;=\; \{\ell,\,2\ell,\,3\ell,\dots\}\cap(0,d_k)\;\cup\;\{d_k\},
+\end{equation}
+\codigo{src/termstructure/ois_bootstrap.cpp}{oisPaymentDays}. Los pagos son días sueltos contados desde hoy, sin
+ajuste por días inhábiles. La ecuación de tasa par del OIS, con pata flotante valuada como $1-\DF{c}{t_m}$, es
+\begin{equation}\label{eq:cap02-par}
+  q_k\sum_{i=1}^{m}\tau_i\,\DF{c}{t_i} \;=\; 1 - \DF{c}{t_m},
+  \qquad t_i = \frac{e_i}{365},\quad \tau_i = \frac{e_i-e_{i-1}}{360}.
+\end{equation}
+Los factores $\DF{c}{t_i}$ intermedios salen de la curva que se está construyendo (pilares ya resueltos más el
+pilar candidato $(T_k,z)$, con la interpolación elegida; sin pilares previos, una curva plana en $z$), en
+\codigo{src/termstructure/ois_bootstrap.cpp}{trialDiscountFactors}. La incógnita $z_k$ es la raíz del residuo
+\begin{equation}\label{eq:cap02-residuo}
+  g_k(z) \;=\; q_k\sum_{i=1}^{m}\tau_i\,P(t_i;z) \;-\; \bigl(1 - P(t_m;z)\bigr),
+\end{equation}
+que se busca con el método de Brent en $[-0.5,\,2.0]$, tolerancia $10^{-14}$ y 200 iteraciones como máximo
+(constantes \codigo{src/termstructure/ois_bootstrap.cpp}{kZeroLo}, \texttt{kZeroHi}, \texttt{kSolveTol},
+\texttt{kSolveMaxIt}); si $g_k(-0.5)\,g_k(2.0)>0$ se lanza \texttt{runtime\_error}. Las cotizaciones se procesan
+una a una y ninguna se revisa después. Con interpolación local (\texttt{Linear}) el pilar nuevo solo modifica el
+tramo $(T_{k-1},T_k]$, así que cada cotización anterior sigue repreciándose exactamente.
+
+Cuando todos los pagos intermedios coinciden con pilares ya resueltos (en particular, con un solo pago) la
+ecuación~\eqref{eq:cap02-par} se despeja sin iterar:
+\begin{equation}\label{eq:cap02-cerrada}
+  \DF{c}{t_m} \;=\; \frac{1 - q_k\sum_{i=1}^{m-1}\tau_i\,\DF{c}{t_i}}{1 + q_k\,\tau_m},
+  \qquad\text{y con } m=1:\quad \DF{c}{t_1} = \frac{1}{1+q_k\,\tau_1},
+\end{equation}
+que coincide con el depósito~\eqref{eq:cap02-deposito}. La sección~\ref{sec:cap02-ejemplo} usa esta forma.
+
+Los periodos de cupón de cada curva están fijos en el backend (tabla~\ref{tab:cap02-curvas}): 28 días para
+\texttt{TIIE-F} y 365 días para \texttt{SOFR}, de modo que un OIS de SOFR a un año o menos tiene un solo pago
+(\codigo{desk/api/market.py}{CURVES}).
+
+\begin{table}[ht]
+  \centering\small
+  \caption{Curvas del escritorio y cómo se construyen.}\label{tab:cap02-curvas}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{1.9cm}>{\raggedright\arraybackslash}p{1.3cm}>{\raggedright\arraybackslash}p{2.0cm}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{4.6cm}@{}}
+    \toprule
+    Curva & Moneda & Periodo $\ell$ & Insumos & Función \\
+    \midrule
+    \texttt{TIIE-F} & MXN & 28 días & depósito a 1 día y OIS par & \texttt{bootstrapOis} \\
+    \texttt{SOFR} & USD & 365 días & depósito a 1 día y OIS par & \texttt{bootstrapOis} \\
+    \texttt{MXN-USD} & MXN & 28 días (base) & puntos forward y base de cross currency & \texttt{bootstrapXccyDiscount} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{diferencia}
+  El marco de curvas múltiples que describen \citet{ametrano2013} separa la curva de descuento de las curvas de
+  proyección por plazo y construye cada pilar con fechas de calendario (rezago de liquidación, ajuste por día
+  hábil, cupones en fechas reales). El código hace algo más simple: una sola curva por índice, que proyecta y
+  descuenta (\texttt{TIIE-F}, \texttt{SOFR}); fechas como desplazamientos enteros de días desde la fecha de
+  valuación, con tiempo de pilar $d/365$ pero devengo ACT/360; y un OIS de inicio inmediato cuya pata flotante vale
+  $1-\DF{c}{t_m}$. Solo el descuento en pesos se separa de la proyección, mediante la curva \texttt{MXN-USD}
+  (sección~\ref{sec:cap02-xccy}).
+\end{diferencia}
+
+\subsection{Curva de descuento MXN con colateral en dólares}\label{sec:cap02-xccy}
+
+\codigo{src/termstructure/xccy_bootstrap.cpp}{bootstrapXccyDiscount} (binding
+\codigo{src/python_bindings/qfpy.cpp}{bootstrap_xccy_discount}) construye la curva \texttt{MXN-USD}, que en las fórmulas lleva el subíndice $\cMXNcol$, a partir
+de puntos forward USDMXN \codigo{include/qf/termstructure/xccy_bootstrap.hpp}{FxForwardQuote}
+($d_j$, $\pi_j$ en pesos por dólar), diferenciales de base
+\codigo{include/qf/termstructure/xccy_bootstrap.hpp}{XccyBasisQuote} ($d_j$, $s_j$ decimal), el spot $\Spot$, la
+curva $\cSOFR$ y la curva de proyección $\cTIIE$. Produce un pilar por cotización, con $T_j = d_j/365$ y tasa cero
+continua, primero los forwards y después la base; la primera base debe quedar después del último forward y en total
+se requieren al menos dos cotizaciones
+(\codigo{src/termstructure/xccy_bootstrap.cpp}{validate}).
+
+\paragraph{Pilares de forward (plazo corto).} La paridad cubierta de tasas se despeja para el factor de descuento
+en pesos:
+\begin{equation}\label{eq:cap02-paridad}
+  \DF{\cMXNcol}{T_j} \;=\; \frac{\Spot\;\DF{\cSOFR}{T_j}}{\Spot + \pi_j},
+  \qquad z_j = -\frac{1}{T_j}\ln \DF{\cMXNcol}{T_j}.
+\end{equation}
+El spot es el de hoy (sin rezago de liquidación) y los puntos se suman al spot tal como se cotizan. Con esta curva el
+forward implícito que calcula \codigo{src/instruments/fx_forward.cpp}{FxForward::forwardRate} es
+\begin{equation}\label{eq:cap02-fwd-implicito}
+  \FxF{T} \;=\; \Spot\,\frac{\DF{\cSOFR}{T}}{\DF{\cMXNcol}{T}},
+  \qquad \FxF{T_j} = \Spot + \pi_j \ \text{en cada pilar de forward.}
+\end{equation}
+La interfaz compara este forward implícito con el cotizado y con el de paridad de \texttt{TIIE-F}
+(\codigo{desk/api/market.py}{_csa_info}).
+
+\paragraph{Pilares de base (plazo largo).} Cada pilar de base se elige para que valga cero un cross currency swap de
+nocional constante con la misma estructura que \codigo{src/instruments/xccy_swap.cpp}{XccySwap}: la parte que paga
+dólares y recibe pesos, nocional USD igual a $1$ y nocional MXN igual a $\Spot$, inicio en $t_0$, días de pago
+$e_1,\dots,e_m$ de~\eqref{eq:cap02-dias-pago} con $\ell=28$, el diferencial cotizado $s_j$ sobre los cupones de
+\texttt{TIIE-F}, e intercambio de nocionales al inicio y al final. Cada cupón flotante se valúa por réplica,
+$N\,(\DF{}{t_{i-1}}/\DF{}{t_i}-1)$, igual que en el swap OIS. La pata en dólares se proyecta y descuenta con
+$\cSOFR$ y su valor telescopa:
+\begin{equation}\label{eq:cap02-pata-usd}
+  -1 + \sum_{i=1}^{m}\Bigl(\DF{\cSOFR}{t_{i-1}} - \DF{\cSOFR}{t_i}\Bigr) + \DF{\cSOFR}{t_m} \;=\; 0,
+  \qquad \DF{c}{t_0}:=1,
+\end{equation}
+independientemente de la curva SOFR. La condición de valor cero se reduce entonces a la pata en pesos, que
+proyecta con $\cTIIE$ y descuenta con la propia $\cMXNcol$ en construcción (dividida entre $\Spot$):
+\begin{equation}\label{eq:cap02-base}
+  \sum_{i=1}^{m}\Bigl(\frac{\DF{\cTIIE}{t_{i-1}}}{\DF{\cTIIE}{t_i}} - 1 + s_j\,\tau_i\Bigr)\DF{\cMXNcol}{t_i}
+  \;+\; \DF{\cMXNcol}{t_m} \;=\; 1,
+  \qquad \tau_i=\frac{e_i-e_{i-1}}{360}.
+\end{equation}
+La incógnita es la tasa cero $z_j$ del pilar nuevo, resuelta con Brent en $[-0.5,\,2.0]$, tolerancia $10^{-14}$,
+sobre la curva formada por los pilares ya resueltos más el pilar candidato (si todavía no hay pilares, una curva
+plana en $z$); el residuo es el \texttt{npv} del \texttt{XccySwap} real
+(\codigo{src/termstructure/xccy_bootstrap.cpp}{trialCurve}, \codigo{src/instruments/xccy_swap.cpp}{XccySwap::cashFlows}).
+Dos consecuencias se leen de~\eqref{eq:cap02-base}: con $s_j=0$ y $\DF{\cMXNcol}{t_i}=\DF{\cTIIE}{t_i}$ el lado
+izquierdo vale $\sum_i(\DF{\cTIIE}{t_{i-1}}-\DF{\cTIIE}{t_i})+\DF{\cTIIE}{t_m}=1$, así que paridad en los forwards
+y base cero reproducen \texttt{TIIE-F}; y con $s_j<0$ el lado izquierdo baja para el mismo $P_{\cMXNcol}$, de modo
+que la solución lo sube por encima de $P_{\cTIIE}$.
+
+\subsection{Contexto de mercado y descuento según el colateral}\label{sec:cap02-contexto}
+
+\codigo{desk/api/market.py}{_build_context} arma el contexto de un snapshot: para cada curva de
+\texttt{CURVES} toma, en el orden en que están guardadas, las cotizaciones de esa curva (tipo \texttt{deposit} se
+mapea a depósito, cualquier otro a OIS par), llama a \texttt{bootstrap\_ois} con el periodo de la
+tabla~\ref{tab:cap02-curvas} y verifica que la curva tenga un pilar por cotización. Las listas opcionales
+\texttt{fx\_forwards} y \texttt{xccy\_basis} del snapshot se normalizan con
+\codigo{desk/api/market.py}{normalize_csa_quotes} (días enteros positivos y estrictamente crecientes, valor finito,
+primera base posterior al último forward); si entre ambas hay menos de dos cotizaciones la curva
+\codigo{desk/api/market.py}{CSA_CURVE} no existe. En otro caso
+\codigo{desk/api/market.py}{_calibrate_csa} llama a \texttt{bootstrap\_xccy\_discount} con
+$\ell = 28$ (\texttt{CSA\_PERIOD\_DAYS}) y las curvas \texttt{SOFR} y \texttt{TIIE-F} del mismo contexto; cualquier
+fallo de C++ se convierte en un \texttt{RuntimeError} en español. El entorno de valuación
+(\texttt{env}) recibe las curvas por nombre, el spot \texttt{USDMXN} y la superficie de volatilidad.
+
+La curva de descuento que usa un producto depende de su curva y de la moneda de colateral de la contraparte:
+\begin{equation}\label{eq:cap02-descuento}
+  c_{\mathrm{desc}}(\text{curva},\text{colateral}) \;=\;
+  \begin{cases}
+    \texttt{MXN-USD}, & \text{curva}=\texttt{TIIE-F},\ \text{colateral}=\texttt{USD}\ \text{y la curva existe},\\
+    \texttt{TIIE-F},  & \text{curva}=\texttt{TIIE-F}\ \text{en cualquier otro caso},\\
+    \texttt{SOFR},    & \text{curva}=\texttt{SOFR}\ \text{con cualquier colateral,}
+  \end{cases}
+\end{equation}
+con la proyección de los cupones siempre en \texttt{TIIE-F}. La regla vive en
+\codigo{desk/api/market.py}{MarketContext.with_collateral} (atributos \texttt{mxn\_discount} y
+\texttt{csa\_missing}); la aplican \codigo{desk/api/pricing/rates.py}{_discount} (swaps, caps, bonos),
+\codigo{desk/api/pricing/fx.py}{_domestic} (lado peso de forwards y opciones FX) y
+\codigo{desk/api/valuation.py}{aged_swap_terms} (swaps envejecidos). La moneda de colateral de una operación en una
+fecha es la del último evento de cambio con fecha efectiva no posterior, y \texttt{MXN} si no hay ninguno
+(\codigo{desk/api/collateral.py}{currency_on}); cuando el colateral es dólares y la curva no existe, el valor cae en
+\texttt{TIIE-F} y, si el producto depende del descuento en pesos, la valuación añade el aviso
+\texttt{no\_csa\_curve} (\codigo{desk/api/valuation.py}{_sensitive_to_mxn_discount}).
+
+En escenarios y riesgo, \texttt{MXN-USD} es una curva \emph{dependiente}
+(\codigo{desk/api/market.py}{MarketContext.shifted}): un choque a \texttt{TIIE-F}, a \texttt{SOFR} o al spot, con
+\begin{equation}\label{eq:cap02-choque-spot}
+  \Spot' \;=\; \Spot\,\Bigl(1+\frac{p}{100}\Bigr),
+\end{equation}
+la recalibra con las mismas cotizaciones $\pi_j$ y $s_j$ sobre las curvas y el spot ya chocados; un choque a la
+propia \texttt{MXN-USD} suma $\beta\,10^{-4}$ a sus tasas cero~\eqref{eq:cap02-bump} sin recalibrar. Como los
+puntos forward se quedan fijos, el forward implícito con colateral USD sigue a $\Spot'+\pi_j$ y reacciona poco a un
+choque de SOFR.
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap02-implementacion}
+
+{\raggedright
+\begin{itemize}
+  \item Representación y interpolación, ecuaciones~\eqref{eq:cap02-df}--\eqref{eq:cap02-forward}:
+        \codigo{include/qf/termstructure/yieldcurve.hpp}{YieldCurve} sobre
+        \codigo{include/qf/math/interpolation.hpp}{Interpolator}; los pilares se leen con \texttt{maturities()} y
+        \texttt{rates()} (los usa \texttt{market.py} para comprobar un pilar por cotización).
+  \item Desplazamientos, ecuación~\eqref{eq:cap02-bump}:
+        \codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::parallelBump} y
+        \codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::bumped}, desde Python
+        \codigo{desk/api/market.py}{_shift_curve}.
+  \item Bootstrap OIS, ecuaciones~\eqref{eq:cap02-deposito}--\eqref{eq:cap02-cerrada}:
+        \codigo{src/termstructure/ois_bootstrap.cpp}{bootstrapOis}, con el calendario de pagos
+        \codigo{src/termstructure/ois_bootstrap.cpp}{oisPaymentDays} (también expuesto como
+        \texttt{ois\_payment\_days} y usado por el swap OIS, capítulo~\ref{cap:swaps-ois}).
+  \item Curva \texttt{MXN-USD}, ecuaciones~\eqref{eq:cap02-paridad}--\eqref{eq:cap02-base}:
+        \codigo{src/termstructure/xccy_bootstrap.cpp}{bootstrapXccyDiscount} y, para su residuo, el instrumento
+        \codigo{src/instruments/xccy_swap.cpp}{XccySwap::npv}.
+  \item Ensamblado y selección, ecuaciones~\eqref{eq:cap02-descuento}--\eqref{eq:cap02-choque-spot}:
+        \codigo{desk/api/market.py}{_build_context}, \codigo{desk/api/market.py}{MarketContext.with_collateral},
+        \codigo{desk/api/market.py}{MarketContext.shifted}, \codigo{desk/api/collateral.py}{currency_on}.
+  \item Cotizaciones del demo (sintéticas): \codigo{desk/api/seed_market.py}{demo_data} y
+        \codigo{desk/api/seed_market.py}{csa_quotes_data}.
+\end{itemize}
+}
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap02-ejemplo}
+
+Los insumos son las cotizaciones del snapshot sintético \texttt{MX-DEMO}
+(\codigo{desk/api/seed_market.py}{demo_data}) y los cuatro ejemplos se reproducen con
+\codigo{docs/tex/verificacion/cap02_curvas.py}{curva}, que llama a \texttt{qfpy} y compara con los números
+impresos con tolerancia absoluta $10^{-9}$ (media unidad del último dígito impreso: $5\cdot10^{-11}$).
+
+\paragraph{Ejemplo 1: forma cerrada con SOFR.}
+Dos OIS de SOFR con periodo $\ell=365$: $q_1=3.70\,\%$ a 365 días y $q_2=3.55\,\%$ a 730 días, sin depósito
+(la primera cotización es un OIS con un solo pago). Con $\tau_1=\tau_2=365/360$, la ecuación~\eqref{eq:cap02-cerrada}
+da primero $\DF{\cSOFR}{1} = 1/(1+0.0370\cdot 365/360) = \verif{cap02-sofr-df-365}{0.9638425188}$ y después, con el pago
+anual intermedio ya conocido,
+\[
+  \DF{\cSOFR}{2} \;=\; \frac{1 - 0.0355\cdot\frac{365}{360}\cdot 0.9638425188}{1 + 0.0355\cdot\frac{365}{360}}
+  \;=\; \verif{cap02-sofr-df-730}{0.9317710746}.
+\]
+El código reproduce ambos valores (la función \codigo{docs/tex/verificacion/cap02_curvas.py}{sofr_df_730} además
+compara con la fórmula a mano a $10^{-12}$).
+
+\paragraph{Ejemplo 2: TIIE-F, resolución numérica y reprecio.}
+La curva \texttt{TIIE-F} de \texttt{MX-DEMO} tiene el depósito a 1 día (7.00\,\%) y OIS a 28, 84, 168, \dots\ días
+con $\ell=28$. El OIS de 168 días paga en $e = 28, 56, 84, 112, 140, 168$; los pagos de 56, 112 y 140 días no son
+pilares y se interpolan, de modo que~\eqref{eq:cap02-par} se resuelve con Brent. El pilar de 28 días tiene un solo
+pago: $\DF{\cTIIE}{28/365} = 1/(1+0.0698\cdot 28/360) = \verif{cap02-tiie-df-28}{0.9946004248}$ y
+$z_{28} = \verif{cap02-tiie-zero-28}{0.0705780372}$; el de 84 días da $\DF{\cTIIE}{84/365} =
+\verif{cap02-tiie-df-84}{0.9840260887}$ y $z_{84} = \verif{cap02-tiie-zero-84}{0.0699708016}$; el de 168 días
+da
+\[
+  \DF{\cTIIE}{168/365} \;=\; \verif{cap02-tiie-df-168}{0.9686244368}.
+\]
+Para comprobar el reprecio, la tasa par de ese OIS calculada con \texttt{OisSwap} sobre la curva resultante es
+$(1-\DF{\cTIIE}{168/365})\big/\sum_i\tau_i\DF{\cTIIE}{t_i} = \verif{cap02-tiie-par-168}{0.0685000000}$,
+la cotización de entrada (la función \codigo{docs/tex/verificacion/cap02_curvas.py}{tiie_par_168} lo recalcula
+también con la anualidad a mano).
+
+\paragraph{Ejemplo 3: interpolación y forward.}
+Entre los pilares de 28 y 84 días, el punto de 56 días está en $w=\tfrac12$ del tramo en $T$ (porque
+$t=d/365$), así que~\eqref{eq:cap02-lineal} da $z(56/365) = \tfrac12(z_{28}+z_{84}) =
+\verif{cap02-tiie-zero-56}{0.0702744194}$. La forward continua~\eqref{eq:cap02-forward} entre ambos pilares es
+\[
+  f_{\cTIIE}\!\Bigl(\tfrac{28}{365},\tfrac{84}{365}\Bigr) =
+  \frac{\ln\bigl(0.9946004248/0.9840260887\bigr)}{56/365} = \verif{cap02-tiie-fwd-28-84}{0.0696671838}.
+\]
+
+\paragraph{Ejemplo 4: curva \texttt{MXN-USD}.}
+Con $\Spot=18.60$, las cotizaciones de \texttt{MX-DEMO} (forwards a 28, 84, 168 y 364 días con puntos
+$0.0438$, $0.1317$, $0.2637$ y $0.5745$; base $-10$, $-12$, $-15$, $-17$ y $-20$~\pb\ a 728, 1092, 1820, 2548 y
+3640 días) y la curva \texttt{SOFR} con $\DF{\cSOFR}{28/365} = \verif{cap02-sofr-df-28}{0.9970118212}$, el pilar de
+28 días sale de~\eqref{eq:cap02-paridad}:
+\[
+  \DF{\cMXNcol}{28/365} \;=\; \frac{18.60\cdot 0.9970118212}{18.60+0.0438} \;=\; \verif{cap02-mxnusd-df-28}{0.9946695349},
+\]
+y el forward implícito~\eqref{eq:cap02-fwd-implicito} reproduce la cotización,
+$\FxF{28/365} = \verif{cap02-fwd-implicito-28}{18.6438000000}$, mientras que el de paridad con \texttt{TIIE-F}
+es $\verif{cap02-fwd-paridad-28}{18.6450954689}$ (los puntos del demo quedan unos 9~\pb\ anualizados por debajo de la
+paridad). Para el primer pilar de base, el de 728 días ($m=26$ pagos de 28 días), la
+ecuación~\eqref{eq:cap02-base} con $s=-0.0010$ y $\DF{\cTIIE}{728/365} = \verif{cap02-tiie-df-728}{0.8736516037}$
+se cumple con $\DF{\cMXNcol}{728/365} = \verif{cap02-mxnusd-df-728}{0.8754185136}$, por encima de
+$\DF{\cTIIE}{728/365}$, como corresponde a una base negativa; la función
+\codigo{docs/tex/verificacion/cap02_curvas.py}{mxnusd_df_728} comprueba además que el residuo de~\eqref{eq:cap02-base}
+y el \texttt{npv} del \texttt{XccySwap} correspondiente son nulos (menos de $10^{-10}$).
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap02-validacion}
+
+\begingroup\raggedright
+\emph{Bootstrap OIS.} Las pruebas de GoogleTest de
+\codigo{tests/test_ois_bootstrap.cpp}{parRate} comprueban, con una tasa par recalculada a mano a partir de los
+factores de descuento, que cada OIS reprecia a $10^{-10}$ (también con un OIS como primera cotización), que el
+depósito reprecia a $10^{-12}$, que los pilares están en $d/365$, que un desplazamiento paralelo de 10~\pb\ en las
+cotizaciones baja todos los factores de descuento, el calendario de pagos y las entradas inválidas; los nombres son
+\texttt{EveryOisRepricesToItsQuote}, \texttt{DepositRepricesToItsQuote}, \texttt{PillarsAreDaysOver365},
+\texttt{PaymentDaysSchedule} e \texttt{InvalidInputsThrow}. En el contexto de mercado
+\codigo{desk/api/tests/test_market.py}{test_bootstrapped_curve_reprices_its_quote} repite el reprecio sobre el
+snapshot.
+
+\emph{Curva \texttt{MXN-USD}.} \codigo{tests/test_xccy_bootstrap.cpp}{basisSwapNpv} sirve a las pruebas de que cada
+forward reprecia y cada swap de base vale cero, de que paridad y base cero reproducen \texttt{TIIE-F} a $10^{-8}$,
+y de que una base positiva (negativa) deja \texttt{MXN-USD} por debajo (encima) de \texttt{TIIE-F}; en Python,
+\codigo{tests/test_xccy_bootstrap_py.py}{test_r1_every_forward_and_every_basis_swap_reprices} y, en el backend,
+\codigo{desk/api/tests/test_market_csa.py}{test_r1_implied_forwards_match_quoted},
+\codigo{desk/api/tests/test_market_csa.py}{test_r1_each_basis_swap_reprices_to_zero} y
+\codigo{desk/api/tests/test_market_csa.py}{test_r2_parity_forwards_and_zero_basis_equal_tiie}.
+
+\emph{Recalibración y colateral.}
+\codigo{desk/api/tests/test_market_csa.py}{test_tiie_shock_moves_basis_pillars_only},
+\codigo{desk/api/tests/test_market_csa.py}{test_sofr_and_spot_shocks_move_the_forward_pillars} y
+\codigo{desk/api/tests/test_market_csa.py}{test_csa_shock_leaves_tiie_and_sofr_alone} cubren
+\texttt{shifted}; \codigo{desk/api/tests/test_market_csa.py}{test_with_collateral_usd_without_curve_falls_back_to_tiie}
+y \codigo{desk/api/tests/test_collateral_valuation.py}{test_usd_collateral_changes_the_pv_of_every_mxn_product} cubren
+la selección de curva de descuento.
+
+\emph{Contra QuantLib.} El capítulo~\ref{cap:validacion} contrasta con QuantLib las curvas \emph{ya construidas}: se
+le entregan los factores de descuento de los pilares y se comprueba que la interpolación lineal en tasa cero
+continua, con $t=d/365$ y extrapolación plana, coincide en los pilares ($10^{-12}$) y en diez fechas intermedias
+($10^{-8}$) (\codigo{desk/validation/ql_curves.py}{build_curve}). El \emph{bootstrap} en sí no se contrasta con
+QuantLib; su validación son las pruebas de reprecio de arriba.
+\endgroup
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap02-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item Las curvas \texttt{TIIE-F} y \texttt{SOFR} de \texttt{MX-DEMO} y las cotizaciones de colateral son
+          \emph{sintéticas} (inventadas para demostración); \texttt{MKT-LIVE} no trae puntos forward ni base
+          porque no hay fuente libre, así que no tiene curva \texttt{MXN-USD} y todo se descuenta con \texttt{TIIE-F}.
+    \item Las convenciones (TIIE-F compuesta diaria, cupones de 28 días y ACT/360; SOFR ACT/360; cross currency
+          de nocional constante, SOFR plana contra TIIE-F más diferencial, ambas patas cada 28 días y con
+          intercambio de nocional) son un \emph{supuesto de convención}: práctica general de mercado, pendiente de
+          confirmar contra la nota de Banorte y la metodología de CME, según declara la Metodología.
+    \item El bootstrap trabaja con días enteros desde la fecha de valuación: sin calendarios de días hábiles, sin
+          rezago de liquidación ni de pago, y el spot USDMXN es el de hoy. Las fechas de pago no se ajustan por
+          día inhábil.
+    \item El tiempo de pilar usa $d/365$ y el devengo ACT/360; la interpolación es lineal en la tasa cero y la
+          extrapolación es plana en la tasa cero en ambos extremos (la forward instantánea es discontinua en los
+          pilares; sección~\ref{sec:cap02-curva}). \texttt{MXN-USD} no tiene pilar a un día: antes de su primera
+          cotización la tasa cero es plana, así que con puntos forward de paridad y base cero solo coincide con
+          \texttt{TIIE-F} donde los días de cotización coinciden con los pilares de esta.
+    \item Las cotizaciones se procesan en el orden guardado y deben tener días estrictamente crecientes; el
+          residuo se busca con Brent en tasas cero de $-50\,\%$ a $200\,\%$, y las tasas editables por la API
+          deben quedar entre $-5\,\%$ y $100\,\%$.
+    \item Los puntos forward y la base cotizados se mantienen fijos cuando se recalibra \texttt{MXN-USD} en un
+          escenario: un forward FX con colateral USD apenas reacciona a un choque de SOFR.
+    \item \texttt{LogLinear} y \texttt{CubicSpline} existen en C++ pero no se usan en el backend. Con
+          \texttt{CubicSpline} los pilares anteriores se reprecian solo de forma aproximada (desviación del orden
+          de $10^{-6}$ en la tasa par). Con \texttt{LogLinear} el bootstrap OIS no es utilizable: devuelve una
+          curva que no reprecia sin avisar (hallazgo H01 de \texttt{HALLAZGOS.md}), contra lo que dice el contrato
+          del código.
+    \item La validación con QuantLib cubre la interpolación de las curvas, no su bootstrap.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap02-referencias}
+
+Para los métodos de interpolación de curvas y su efecto en las forwards se sigue a \citet{hagan2006}; el marco de
+curvas múltiples y la separación entre proyección y descuento está en \citet{ametrano2013}, y la construcción de
+curvas de swaps con y sin colateral en \citet{fujii2009}. La tasa par de un swap sobre una sola curva y la réplica de la
+pata flotante son resultados estándar, que se encuentran por ejemplo en \citet{brigo2006} y \citet{andersen2010}; la
+paridad cubierta de tasas que aquí se despeja en~\eqref{eq:cap02-paridad} se presenta, entre otros, en \citet{hull2018}.

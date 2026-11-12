@@ -1,4 +1,13 @@
 % filas del capítulo 02: símbolo & significado & unidad \\ (4.ª columna, macro, opcional; toda fila termina en \\)
-% Ejemplo: $w_k$ & peso del vértice $k$ & adimensional \\
-% Sustituir la fila de abajo por las filas propias del capítulo (no definir macros nuevas; ver README.md).
-\multicolumn{4}{@{}l}{\textit{Sin símbolos propios por ahora.}} \\
+$d_k$ & días calendario, desde la fecha de valuación, del pilar $k$ de una curva & días \\
+$T_k$ & tiempo del pilar $k$, $T_k=d_k/365$ & años \\
+$z_k$, $z(T)$ & tasa cero continua del pilar $k$; tasa cero interpolada de la curva & tasa anual (decimal) \\
+$q_k$ & tasa cotizada del instrumento del pilar $k$ (depósito simple u OIS par) & tasa anual (decimal) \\
+$\ell$ & periodo de cupón del OIS (\texttt{period\_days}) & días \\
+$e_i$, $t_i$ & día de pago $i$ de un pilar y su tiempo, $t_i=e_i/365$ ($e_0=0$) & días; años \\
+$\tau_i$ & devengo ACT/360 del periodo $i$, $(e_i-e_{i-1})/360$ & años \\
+$f_c(T_1,T_2)$ & tasa forward continua de la curva $c$ entre $T_1$ y $T_2$ & tasa anual (decimal) \\
+$\pi_j$ & puntos forward USDMXN del pilar $j$ & MXN por USD \\
+$s_j$ & diferencial de la base de cross currency del pilar $j$ & tasa anual (decimal) \\
+$p$ & choque porcentual al spot en un escenario & por ciento \\
+$\beta$ & desplazamiento de una curva & puntos base \\
