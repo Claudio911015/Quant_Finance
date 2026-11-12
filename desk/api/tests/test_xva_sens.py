@@ -204,3 +204,22 @@ def test_without_the_mxn_usd_curve_it_does_not_appear(app, client):
     body = _sens(client)
     assert [c["curve"] for c in body["curves"]] == ["TIIE-F", "SOFR"]
     assert body["n_inputs"] == 10 + 10 + 1 + 5 + 6 + 6 + 1
+
+
+def test_assumptions_carry_the_same_notes_as_get_xva(app, client):
+    """MXN-USD ausente, fondeo por omisión, crédito propio supuesto y crédito supuesto de la contraparte: las
+    mismas líneas, en el mismo orden, que `GET /api/xva` (una sola función de `xva.py` las escribe)."""
+    _put_paths(client, 100)
+    strip_csa(app, SNAP)
+    trade_with(client, "irs", DELTA, {"curve": "TIIE-F", "side": "payer", "notional": 1e8, "periods": 13, "fixed_rate": 0.07})
+    conn = db.connect(app.config["DESK_DB"])
+    try:
+        conn.execute("DROP TRIGGER credit_curves_no_delete")
+        conn.execute("DELETE FROM credit_curves WHERE entity = 'propia'")
+        conn.commit()
+    finally:
+        conn.close()
+    reference = client.get("/api/xva", query_string={"snapshot": SNAP}).get_json()["assumptions"]
+    notes = [a for a in reference if "curva MXN-USD" in a or "Spread de fondeo" in a or a.startswith(("Crédito propio", DELTA))]
+    assert len(notes) == 4  # las cuatro existen en el caso armado: la prueba no puede pasar vacía
+    assert _sens(client, DELTA)["assumptions"] == reference + [xva_sens.PARTIAL_NOTE]

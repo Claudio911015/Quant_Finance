@@ -104,7 +104,8 @@ def compute(conn: sqlite3.Connection, snapshot_id: str, name: str) -> Dict[str, 
             for side, info in (("counterparty", cp["credit"]), ("own", own_info))
         },
         "empty_reason": "La contraparte no tiene swaps de tasa ni cross currency swaps vivos: no hay sensibilidades del XVA",
-        "assumptions": assumptions + [xva.INTEGRATION_NOTE, PARTIAL_NOTE], "warnings": warnings,
+        "assumptions": assumptions + [xva.INTEGRATION_NOTE] + xva.run_notes(conn, mkt, own_info, [cp]) + [PARTIAL_NOTE],
+        "warnings": warnings,
     }  # type: Dict[str, Any]
     if not cp["included"]:
         return body

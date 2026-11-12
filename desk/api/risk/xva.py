@@ -376,6 +376,25 @@ def average_hazard(curve: Any, years: float = 5.0) -> float:
     return math.log(1.0 / curve.survival_probability(years)) / years
 
 
+def run_notes(conn: sqlite3.Connection, mkt: Any, own_info: Dict[str, Any], counterparties: List[Dict[str, Any]]) -> List[str]:
+    """Líneas de `assumptions` de una corrida que no son del modelo: curva MXN-USD ausente, fondeo por omisión,
+    crédito propio supuesto y el crédito supuesto de cada elemento de `counterparties`. Las usan `GET /api/xva`
+    y `GET /api/xva/sensitivities`, para que las dos declaren lo mismo con el mismo texto."""
+    params = params_response(conn)
+    notes = []  # type: List[str]
+    if not mkt.csa_available:
+        notes.append(
+            "El snapshot no trae la curva MXN-USD: la base cross currency se tomó nula y el descuento con "
+            "colateral USD usa TIIE-F"
+        )
+    if params["assumed"]["funding_spread"]:
+        notes.append("Spread de fondeo %.2f %%: valor por omisión, sin ajuste capturado" % (params["funding_spread"] * 100))
+    if own_info["assumed"]:
+        notes.append("Crédito propio: %s" % own_info["note"])
+    notes.extend("%s: %s" % (cp["counterparty"], cp["credit"]["note"]) for cp in counterparties if cp["credit"]["assumed"])
+    return notes
+
+
 def compute(conn: sqlite3.Connection, snapshot_id: str) -> Dict[str, Any]:
     """Cuerpo de `GET /api/xva`: CVA, DVA, FVA y perfil de exposición de cada contraparte con operaciones vivas."""
     return compute_detailed(conn, snapshot_id)[0]
@@ -391,15 +410,6 @@ def compute_detailed(conn: sqlite3.Connection, snapshot_id: str) -> Tuple[Dict[s
     model, model_json, assumptions = model_from_snapshot(mkt)
     assumptions.append(INTEGRATION_NOTE)
     own_curve, own_recovery, own_info = own_credit(conn, mkt)
-    if not mkt.csa_available:
-        assumptions.append(
-            "El snapshot no trae la curva MXN-USD: la base cross currency se tomó nula y el descuento con "
-            "colateral USD usa TIIE-F"
-        )
-    if params["assumed"]["funding_spread"]:
-        assumptions.append("Spread de fondeo %.2f %%: valor por omisión, sin ajuste capturado" % (simulation["funding_spread"] * 100))
-    if own_info["assumed"]:
-        assumptions.append("Crédito propio: %s" % own_info["note"])
     counterparties = []  # type: List[Dict[str, Any]]
     curves = {}  # type: Dict[str, Any]
     warnings = []  # type: List[List[Dict[str, Any]]]
@@ -407,10 +417,9 @@ def compute_detailed(conn: sqlite3.Connection, snapshot_id: str) -> Tuple[Dict[s
         cp, warns, curves[name] = _counterparty(
             conn, mkt, model, simulation, fixings, (own_curve, own_recovery), name, trades
         )
-        if cp["credit"]["assumed"]:
-            assumptions.append("%s: %s" % (name, cp["credit"]["note"]))
         counterparties.append(cp)
         warnings.append(warns)
+    assumptions.extend(run_notes(conn, mkt, own_info, counterparties))
     body = {
         "snapshot": snapshot_id,
         "as_of": mkt.as_of.isoformat(),
