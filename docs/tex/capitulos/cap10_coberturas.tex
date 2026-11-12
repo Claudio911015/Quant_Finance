@@ -1,5 +1,478 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Contabilidad de coberturas IFRS 9}\label{cap:coberturas}
 
-Derivado hipotético, efectividad, regla del menor, reserva y reciclaje, y asientos de la contabilidad de coberturas.
+\begin{aviso}[Aviso IFRS 9: pendiente de revisión por un contador]
+  Metodología pendiente de revisión por un contador con experiencia en IFRS 9; nadie la ha hecho aún. Los asientos
+  de este capítulo son \emph{sugeridos}: el sistema no es el libro mayor ni sustituye al contador. Este capítulo
+  documenta lo que el código \emph{hace}, no que sea la lectura correcta de la norma; donde se aparta de
+  \citet{iasb2014} o la simplifica, lo dice el recuadro «Diferencia con la referencia» y la sección de límites.
+\end{aviso}
+
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap10-proposito}
+
+El módulo de coberturas permite designar una fracción de una operación del portafolio como instrumento de cobertura de
+una partida (un crédito a tasa variable o fija, o un flujo pronosticado en dólares), medir la efectividad al cierre de
+cada periodo y producir los asientos contables sugeridos y un reporte por relación. No hay matemática de valuación
+nueva: el instrumento y la partida se valúan con el motor existente (capítulos~\ref{cap:swaps-ois},
+\ref{cap:fx} y~\ref{cap:ciclo-vida}), y lo liquidado sale de las mismas fijaciones y calendarios que el P\&L. Lo que
+este capítulo documenta es la capa contable: el derivado hipotético que representa la partida, la prueba
+prospectiva, la regla del menor entre los cambios acumulados, el reparto entre otro resultado integral (ORI) y
+resultados, el reciclaje, la desdesignación y los asientos (\codigo{desk/api/hedges.py}{create_hedge},
+\codigo{desk/api/hedge_measure.py}{measure}). El capítulo~\ref{cap:operaciones} describe la conciliación de operaciones, que no
+interviene aquí.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap10-notacion}
+
+Los símbolos comunes ($\Nom$, $\K$, $\PV$, $\Spar$, $\FxF{T}$, \dots) están en el apéndice~\ref{ap:simbolos}. Todas las
+cifras de este capítulo están en pesos (\MXN): un flujo en dólares se convierte con el FIX de su fecha o, si falta, con
+el spot del snapshot. Los símbolos nuevos son los de la tabla~\ref{tab:cap10-simbolos}; la última columna es el campo
+del \texttt{result} que guarda cada cierre (el nombre que se ve en la API y en el reporte).
+
+\begin{table}[htb]
+  \centering\small
+  \caption{Símbolos del capítulo y su campo en el resultado de un cierre.}\label{tab:cap10-simbolos}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.27\textwidth}>{\raggedright\arraybackslash}p{0.48\textwidth}@{}}
+    \toprule
+    Símbolo & Campo & Significado \\
+    \midrule
+    $F$, $h$ & \texttt{fraction}, \texttt{hedge\_ratio} & fracción de la operación designada; razón de cobertura \\
+    $t_d$, $t_k$ & \texttt{designation\_date}, \texttt{as\_of} & fecha de designación; fecha del cierre $k$, con $t_0:=t_d$ \\
+    $\PV^{\mathrm{ins}}_t$, $\PV^{\mathrm{hip}}_t$ & \texttt{pv\_inst}, \texttt{pv\_hypo} & valor presente de la operación completa y del derivado hipotético \\
+    $C^{\mathrm{ins}}_k$, $C^{\mathrm{hip}}_k$ & \texttt{inst\_cum}, \texttt{hypo\_cum} & cambio acumulado de valor desde la designación (el del instrumento ya por $F$) \\
+    $L^{\mathrm{ins}}_k$, $L^{\mathrm{hip}}_k$ & \texttt{settled\_period}, \texttt{hypo\_settled\_period} & lo liquidado en el periodo $k$ (el del instrumento ya por $F$) \\
+    $G^{\mathrm{ins}}_k$, $G^{\mathrm{hip}}_k$ & \texttt{inst\_total}, \texttt{hypo\_total} & cambio acumulado más lo liquidado acumulado \\
+    $E_k$ & \texttt{effective\_cum} & porción efectiva acumulada \\
+    $I_k$ & \texttt{ineffectiveness} & inefectividad del periodo, a resultados \\
+    $q_k$, $Q_k$ & --- & parte liquidada que coincide en el periodo y su acumulado \\
+    $R_k$ & \texttt{recycled} & reciclaje del periodo, de la reserva a resultados \\
+    $M_k$ & \texttt{oci} & saldo de la reserva de cobertura (ORI) al cierre \\
+    $a_k$ & \texttt{item\_adjustment} & ajuste de la partida en valor razonable \\
+    $\eta_s$ & \texttt{ratio} & razón de la prueba prospectiva en el escenario $s$ \\
+    $\kappa(x)$ & --- & importe $x$ en centavos enteros (mitad alejándose de cero) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap10-modelo}
+
+\subsection{Relaciones, eventos y estados}\label{sec:cap10-datos}
+
+Una relación guarda la operación, la fracción $F$, el tipo de cobertura (\texttt{cash\_flow} o \texttt{fair\_value}), la
+partida (\texttt{floating\_loan}, \texttt{fixed\_loan} o \texttt{forecast\_fx}) con sus términos, la razón $h$ y la
+documentación. Las combinaciones válidas son las de \codigo{desk/api/hedges.py}{VALID_COMBINATIONS}: flujo de efectivo con
+crédito variable o flujo pronosticado; valor razonable solo con crédito fijo. El instrumento admitido es un \texttt{irs}
+del mismo índice para los créditos y un \texttt{fx\_forward} para el flujo pronosticado
+(\codigo{desk/api/hedges.py}{INSTRUMENT_FOR}). Las tres tablas (\codigo{desk/api/db.py}{SCHEMA}) son solo de
+inserción: \texttt{hedge\_relationships} no se modifica tras crearse y \texttt{hedge\_events} y
+\texttt{hedge\_periods} solo crecen, con disparadores que abortan cualquier \texttt{UPDATE} o \texttt{DELETE}. Los eventos
+son \texttt{designation}, \texttt{period\_close}, \texttt{dedesignation} y \texttt{reserve\_release}
+(\codigo{desk/api/hedges.py}{HEDGE_EVENT_TYPES}).
+
+El estado lo deduce \codigo{desk/api/hedges.py}{status}: \emph{desdesignada} si existe un evento \texttt{dedesignation};
+\emph{concluida} si el último cierre fue el final (la operación estaba \texttt{vencida}); \emph{activa} en otro caso. El
+saldo vigente de la reserva es el \texttt{oci} del último periodo, o el \texttt{reserve\_after} de la última liberación si
+la hubo (\codigo{desk/api/hedges.py}{oci_balance}).
+
+La fecha de designación es la del snapshot elegido; la designación exige que la operación esté viva a esa fecha, que
+la fecha no sea anterior al último evento de ninguna relación de la misma operación y que las fracciones vigentes a esa
+fecha más $F$ no excedan 1 (con holgura de $10^{-12}$). No bloquean, pero quedan guardados en el evento y se muestran
+como avisos: ausencia de relación económica en la prueba prospectiva, instrumento fuera de mercado, flujo en fin de
+semana o inhábil, y documentación más de un día posterior a la fecha de designación
+(\codigo{desk/api/hedges.py}{_designation_warnings}). El instrumento cuenta como fuera de mercado cuando
+\begin{equation}\label{eq:cap10-fuera-mercado}
+  \bigl|\PV^{\mathrm{ins}}_{t_d}\bigr| > 10^{-6}\,\Nom_{\MXN},
+\end{equation}
+con $\Nom_{\MXN}$ el nocional de la operación en pesos.
+
+\subsection{Derivado hipotético}\label{sec:cap10-hipotetico}
+
+La partida cubierta se representa con un derivado hipotético que el código construye al designar y guarda en el evento
+\texttt{designation}; es una operación en memoria que nunca se inserta en \texttt{trades}
+(\codigo{desk/api/hedges.py}{hypothetical_trade}). Es el derivado que cubriría la partida a la perfección, calibrado para
+valer cero al designar, y se valúa con el mismo motor que el instrumento
+(\codigo{desk/api/valuation.py}{value_trade}).
+
+\emph{Crédito.} El hipotético es un \texttt{irs} sobre el índice $c$ de la partida, con el nocional y las fechas del
+crédito, del lado que compensa el riesgo: un crédito que paga variable (\texttt{pays\_floating}) o que recibe fija
+(\texttt{receives\_fixed}) se cubre con un swap pagador de fija; un crédito que recibe variable o paga fija, con uno
+receptor. El número de periodos y la tasa fija son
+\begin{equation}\label{eq:cap10-hipotetico-credito}
+  n = \max\!\Bigl(1,\ \operatorname{round}\frac{T_n - T_0}{p_c}\Bigr), \qquad
+  \K^{\mathrm{hip}} = \Spar_c(t_d),
+\end{equation}
+donde $T_0$ y $T_n$ son el inicio y el vencimiento del crédito, $p_c$ los días del periodo de la curva (28 para TIIE-F,
+365 para SOFR) y $\Spar_c(t_d)$ la tasa par de ese swap en el snapshot de designación, obtenida del swap envejecido
+(\codigo{desk/api/hedges.py}{build_hypothetical}, \codigo{desk/api/valuation.py}{aged_swap};
+tasa par en \codigo{src/python_bindings/qfpy.cpp}{par_rate}, capítulo~\ref{cap:swaps-ois}). El número de periodos $n$
+se guarda en los parámetros del hipotético, pero el calendario de pagos del swap envejecido sale de las fechas del
+crédito y de $p_c$ (un pago cada $p_c$ días desde $T_0$ y un último pago en $T_n$), no de $n$.
+
+\emph{Flujo pronosticado.} El hipotético es un \texttt{fx\_forward} por el monto en dólares de la partida, que vence
+en la fecha del flujo, comprador si la empresa compra dólares, con
+\begin{equation}\label{eq:cap10-hipotetico-forward}
+  \K^{\mathrm{hip}} = \FxF{T},
+\end{equation}
+el forward de mercado a la fecha del flujo $T$ en el snapshot de designación (capítulo~\ref{cap:fx}).
+
+En ambos casos $\PV^{\mathrm{hip}}_{t_d}\approx 0$; el código guarda ese valor y $\PV^{\mathrm{ins}}_{t_d}$ en el evento y
+los resta en todas las mediciones posteriores.
+
+\subsection{Efectividad prospectiva}\label{sec:cap10-prospectiva}
+
+La prueba compara la fracción designada del instrumento con el hipotético en dos pasos
+(\codigo{desk/api/hedge_effectiveness.py}{assess}). Primero los \emph{términos críticos}
+(\codigo{desk/api/hedge_effectiveness.py}{critical_terms}): para un crédito, nocional, índice, inicio, vencimiento y
+sentido del swap; para un flujo pronosticado, nocional, moneda, vencimiento y sentido (el término de moneda compara la
+constante «USD» consigo misma: hallazgo H11). El nocional coincide cuando
+\begin{equation}\label{eq:cap10-nocional}
+  \bigl|F\,\Nom^{\mathrm{ins}} - h\,\Nom^{\mathrm{item}}\bigr| \le 10^{-9}\max\bigl(|F\,\Nom^{\mathrm{ins}}|,\ |h\,\Nom^{\mathrm{item}}|,\ 1\bigr),
+\end{equation}
+con $\Nom^{\mathrm{ins}}$ el nocional vigente de la operación a la fecha de la prueba. Segundo, los \emph{escenarios}: los
+ocho de \codigo{desk/api/risk/scenarios.py}{DEFAULT_SCENARIOS} (desplazamientos paralelos de $\pm 50~\pb$ en TIIE-F y
+SOFR, \emph{steepener} de 25~\pb en cada curva y USDMXN $\pm 10\,\%$; capítulo~\ref{cap:riesgo}). Para cada escenario $s$
+se revalúan el instrumento y el hipotético con el choque y
+\begin{equation}\label{eq:cap10-razon}
+  \eta_s = \frac{F\,\Delta_s\PV^{\mathrm{ins}}}{\Delta_s\PV^{\mathrm{hip}}}
+  \quad\text{si}\quad \bigl|\Delta_s\PV^{\mathrm{hip}}\bigr| > 10^{-9}\max(1, \Nom^{\mathrm{item}}),
+\end{equation}
+donde $\Delta_s\PV$ es el valor con choque menos el valor base. Si el hipotético no se mueve, $\eta_s$ es nulo y el
+escenario no cuenta. Hay \emph{relación económica} cuando existe al menos un $\eta_s$ y todos son positivos; además se
+informa cuántas razones caen en $[0.8,\,1.25]$, \emph{solo como referencia}, porque \citet{iasb2014} no fija umbral.
+La prueba exige que la operación y el hipotético estén vivos a la fecha del snapshot (409 en otro caso).
+
+\subsection{Medición del periodo: cobertura de flujo de efectivo}\label{sec:cap10-medicion}
+
+Cada cierre $k$ usa un snapshot con fecha $t_k>t_{k-1}$ y mide en MXN
+(\codigo{desk/api/hedge_measure.py}{measure}). Con $F$ la fracción designada,
+\begin{equation}\label{eq:cap10-acumulados}
+  C^{\mathrm{ins}}_k = F\bigl(\PV^{\mathrm{ins}}_{t_k} - \PV^{\mathrm{ins}}_{t_d}\bigr), \qquad
+  C^{\mathrm{hip}}_k = \PV^{\mathrm{hip}}_{t_k} - \PV^{\mathrm{hip}}_{t_d},
+\end{equation}
+y lo liquidado en la ventana $(t_{k-1},\,t_k]$ sale de \codigo{desk/api/settlement.py}{settled_flows} (cupones del swap,
+liquidación del forward), en pesos y, para el instrumento, por $F$:
+\begin{equation}\label{eq:cap10-liquidado}
+  L^{\mathrm{ins}}_k = F\sum_{f\in(t_{k-1},\,t_k]} f^{\mathrm{ins}}_{\MXN}, \qquad
+  L^{\mathrm{hip}}_k = \sum_{f\in(t_{k-1},\,t_k]} f^{\mathrm{hip}}_{\MXN}.
+\end{equation}
+Los cambios \emph{totales} desde la designación incluyen lo ya liquidado, porque el valor presente solo contiene flujos
+futuros:
+\begin{equation}\label{eq:cap10-totales}
+  G^{\mathrm{ins}}_k = C^{\mathrm{ins}}_k + \sum_{j\le k} L^{\mathrm{ins}}_j, \qquad
+  G^{\mathrm{hip}}_k = C^{\mathrm{hip}}_k + \sum_{j\le k} L^{\mathrm{hip}}_j.
+\end{equation}
+La \emph{regla del menor} se aplica sobre esos totales:
+\begin{equation}\label{eq:cap10-menor}
+  E_k =
+  \begin{cases}
+    \operatorname{sgn}\!\bigl(G^{\mathrm{ins}}_k\bigr)\,\min\!\bigl(|G^{\mathrm{ins}}_k|,\ |G^{\mathrm{hip}}_k|\bigr)
+      & \text{si } G^{\mathrm{ins}}_k\,G^{\mathrm{hip}}_k > 0,\\[2pt]
+    0 & \text{en otro caso,}
+  \end{cases}
+\end{equation}
+y la inefectividad del periodo es el resto del resultado del instrumento,
+\begin{equation}\label{eq:cap10-inefectividad}
+  I_k = \bigl(G^{\mathrm{ins}}_k - G^{\mathrm{ins}}_{k-1}\bigr) - \bigl(E_k - E_{k-1}\bigr),
+\end{equation}
+con $G_0 = E_0 = 0$. El reciclaje reconoce en resultados la parte de lo liquidado que coincide en instrumento e hipotético
+(\codigo{desk/api/hedge_measure.py}{_matched}):
+\begin{equation}\label{eq:cap10-coincide}
+  q_k =
+  \begin{cases}
+    \operatorname{sgn}\!\bigl(L^{\mathrm{ins}}_k\bigr)\,\min\!\bigl(|L^{\mathrm{ins}}_k|,\ |L^{\mathrm{hip}}_k|\bigr)
+      & \text{si } L^{\mathrm{ins}}_k\,L^{\mathrm{hip}}_k > 0,\\[2pt]
+    0 & \text{en otro caso,}
+  \end{cases}
+  \qquad Q_k = \sum_{j\le k} q_j .
+\end{equation}
+La reserva y el reciclaje del periodo son
+\begin{align}
+  M_k &=
+  \begin{cases}
+    0 & \text{si } E_k = 0 \text{ o es el cierre final con instrumento e hipotético vencidos,}\\
+    E_k - Q_k & \text{en otro caso,}
+  \end{cases}\label{eq:cap10-reserva}\\
+  R_k &= E_k - (E_{k-1} - M_{k-1}) - M_k .\label{eq:cap10-reciclaje}
+\end{align}
+Por construcción $\Delta M_k + R_k = \Delta E_k$ (ecuación~\eqref{eq:cap10-reciclaje}), y de~\eqref{eq:cap10-totales} y~\eqref{eq:cap10-inefectividad} se sigue la
+\emph{identidad de control} que el código calcula y guarda como \texttt{identity\_residual} en cada cierre:
+\begin{equation}\label{eq:cap10-identidad}
+  \Delta C^{\mathrm{ins}}_k + L^{\mathrm{ins}}_k \;=\; \Delta M_k + R_k + I_k ,
+\end{equation}
+es decir, el P\&L del instrumento en el periodo se reparte completo entre ORI, reciclaje y resultados. Si la reserva
+no tiene respaldo ($E_k=0$) vale cero y $R_k$ revierte lo reciclado antes (puede ser negativo); no se exige que $M_k$ tenga
+el signo ni la magnitud de $E_k$, porque $E_k$ incluye los cupones ya cobrados y $M_k$ solo lo pendiente.
+
+El \emph{cierre final} ocurre cuando la operación está \texttt{vencida} al $t_k$ (su valor es cero). Si también el
+hipotético venció, $M_k=0$; si la partida sobrevive al instrumento, la reserva se conserva y la relación queda
+\emph{concluida}: no admite más cierres, pero sí liberar la reserva (sección~\ref{sec:cap10-desdesignacion}). El código llama
+\emph{concluida} a la relación siempre que el último cierre fue el final, también cuando instrumento y partida vencen
+juntos y la reserva queda en cero (hallazgo H09).
+Una operación \texttt{terminada} o \texttt{ejercida} no admite cierre normal (409): se desdesigna con la causa
+«el instrumento venció, se vendió o se terminó», y la medición final llega hasta esa fecha con el pago de la
+terminación entre lo liquidado (\codigo{desk/api/hedge_measure.py}{_close}).
+
+\subsection{Cobertura de valor razonable}\label{sec:cap10-vr}
+
+Para un crédito a tasa fija cubierto con un swap no hay reserva ($E_k=M_k=R_k=0$). El ajuste de la partida es el cambio
+del hipotético con signo contrario y todo va a la cuenta de cobertura de valor razonable:
+\begin{equation}\label{eq:cap10-vr}
+  a_k = -\bigl(C^{\mathrm{hip}}_k - C^{\mathrm{hip}}_{k-1}\bigr), \qquad
+  I_k = \bigl(C^{\mathrm{ins}}_k - C^{\mathrm{ins}}_{k-1}\bigr) + a_k, \qquad
+  \mathrm{FV}_k = I_k + L^{\mathrm{ins}}_k ,
+\end{equation}
+donde $\mathrm{FV}_k$ es el resultado neto del periodo en esa cuenta (\texttt{fv\_result}). En esta rama el campo
+\texttt{identity\_residual} vale cero para cualquier entrada, porque se calcula con las mismas cantidades que lo
+definen (hallazgo H10 en \texttt{HALLAZGOS.md}).
+
+\subsection{Asientos sugeridos}\label{sec:cap10-asientos}
+
+Cada cierre produce asientos \texttt{\{account, debit, credit, memo\}} en pesos con siete cuentas fijas
+(\codigo{desk/api/hedges.py}{ACCOUNTS}): \emph{Derivado (valor razonable)}, \emph{ORI --- reserva de cobertura},
+\emph{Resultados --- inefectividad de cobertura}, \emph{Resultados --- partida cubierta (reciclaje)},
+\emph{Resultados --- cobertura de valor razonable}, \emph{Efectivo} y \emph{Partida cubierta --- ajuste de valor razonable}.
+Con el convenio de cargo positivo, el saldo con signo de cada cuenta de balance al cierre $k$ es
+\begin{equation}\label{eq:cap10-saldos}
+  b_{\mathrm{der}} = C^{\mathrm{ins}}_k, \qquad
+  b_{\mathrm{ORI}} = -M_k, \qquad
+  b_{\mathrm{efe}} = \sum_{j\le k} L^{\mathrm{ins}}_j, \qquad
+  b_{\mathrm{par}} = -C^{\mathrm{hip}}_k ,
+\end{equation}
+y el importe de una cuenta de balance en el periodo es la diferencia de saldos \emph{ya redondeados},
+$\Delta B_a = \kappa(b_a) - \beta_a$, con $\beta_a$ los centavos ya asentados en la cuenta por cierres y liberaciones
+anteriores; así el acumulado de asientos coincide al centavo con el saldo. En flujo de efectivo las líneas son
+$\Delta B_{\mathrm{der}}$, $\Delta B_{\mathrm{ORI}}$, $\Delta B_{\mathrm{efe}}$, inefectividad $\kappa(-I_k)$ y reciclaje
+$\kappa(-R_k)$; en valor razonable, cada $\Delta B$ contra su contrapartida exacta en la cuenta de resultados de cobertura.
+El redondeo deja un residuo $\epsilon=\sum$ de las líneas (en centavos) que se absorbe en la última línea de la cuenta
+de resultados principal del tipo (inefectividad en flujo de efectivo, cobertura de valor razonable en valor razonable;
+se crea con la nota «Residuo de redondeo» si no hay), de modo que cargos y abonos cuadran exactamente
+(\codigo{desk/api/hedge_measure.py}{journal}). El redondeo es el de \texttt{decimal.ROUND\_HALF\_UP} sobre
+\texttt{repr} del número.
+
+\subsection{Desdesignación y liberación de la reserva}\label{sec:cap10-desdesignacion}
+
+\codigo{desk/api/hedge_measure.py}{dedesignate} recibe un snapshot, un motivo y una causa. La fecha de desdesignación es
+el \texttt{as\_of} del snapshot; si es posterior al último cierre (o a la designación), primero se hace un cierre con
+las mismas reglas y la reserva congelada (\texttt{frozen\_oci}) es la de ese cierre. La causa se contrasta con el estado
+de la operación a esa fecha: \texttt{instrument\_ended} exige que \emph{no} esté viva y \texttt{criteria\_not\_met} y
+\texttt{risk\_objective\_changed} exigen que lo esté (409 \texttt{cause} en otro caso); no existe desdesignación sin
+causa (párrafo 6.5.6 de \citealp{iasb2014}).
+
+\codigo{desk/api/hedge_measure.py}{release_reserve} libera la reserva de una relación desdesignada o concluida con saldo
+$B\neq 0$ (en valor absoluto de al menos media centésima). El monto $x$ va con el signo del saldo, no puede exceder $|B|$ (con
+tolerancia de media centésima) y el saldo que queda es
+\begin{equation}\label{eq:cap10-liberacion}
+  B' = B - x ,
+\end{equation}
+exactamente cero si se libera todo. El asiento lleva \emph{ORI} contra \emph{reciclaje} si la causa es
+\texttt{flow\_occurred} (que no puede fecharse antes de la primera fecha de flujo de la partida) o contra
+\emph{inefectividad} si es \texttt{flow\_no\_longer\_expected}. El párrafo 6.5.12 de \citet{iasb2014} es la referencia de ambos casos.
+
+\subsection{Reporte}\label{sec:cap10-reporte}
+
+\codigo{desk/api/hedge_report.py}{build_report} solo reúne lo guardado más la prueba prospectiva (al snapshot de
+designación o al que se pida): documentación de la designación, periodos, asientos por periodo y acumulados
+(sumados en centavos enteros para que cuadren), liberaciones, saldo de la reserva, nivel de jerarquía de valor
+razonable (Nivel~2 para todos los instrumentos, con la procedencia del snapshot de cada medición) y el aviso de revisión
+contable. \codigo{desk/api/hedge_report.py}{report_csv} exporta los asientos como CSV
+(\texttt{period\_id,as\_of,snapshot,account,debit,credit,memo}).
+
+\begin{diferencia}
+  Frente a \citet{iasb2014}, y según lo que el código hace:
+  \begin{itemize}
+    \item El hipotético sigue al párrafo B6.5.5 (derivado calibrado a cero al designar, expediente para medir el cambio
+      de valor de la partida), pero el código lo usa además como flujo cubierto \emph{proxy}: el reciclaje se reconoce
+      cuando liquida el hipotético, con el supuesto de que la partida afecta resultados en esa misma fecha, y no cuando la
+      partida afecta resultados (párrafo 6.5.11(d)(ii)).
+    \item Para el menor del párrafo 6.5.11(a) se usan totales desde la designación que incluyen lo liquidado,
+      ecuación~\eqref{eq:cap10-totales}, y la reserva es la porción efectiva menos lo reciclado, ecuación~\eqref{eq:cap10-reserva}.
+      El código no verifica que esa lectura coincida con la de un contador.
+    \item No hay ajuste de base para partidas no financieras (6.5.11(d)(i)) ni reclasificación inmediata de una pérdida
+      que no se espera recuperar (6.5.11(d)(iii)).
+    \item En valor razonable la partida se mide por su componente de tasa de referencia (swap hipotético a la par, 6.3.7),
+      cuyo cambio de valor presente incluye el devengo del cupón en curso, y el ajuste no se amortiza (6.5.10). El cupón
+      neto del swap se presenta en la cuenta de cobertura, no en gasto por intereses.
+  \end{itemize}
+\end{diferencia}
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap10-implementacion}
+
+La tabla~\ref{tab:cap10-mapa} da el mapa de fórmulas a funciones; las rutas son relativas a la raíz del repositorio y
+las funciones se leen sin números de línea. Las rutas HTTP están en \codigo{desk/api/routes/hedges.py}{close_period} y
+funciones vecinas; la valoración que consumen viene de \codigo{desk/api/valuation.py}{value_trade}.
+
+\begin{table}[htb]
+  \centering\small
+  \caption{Mapa de las fórmulas del capítulo a las funciones que las calculan.}\label{tab:cap10-mapa}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.68\textwidth}@{}}
+    \toprule
+    Fórmula & Función \\
+    \midrule
+    \eqref{eq:cap10-fuera-mercado}, avisos & \codigo{desk/api/hedges.py}{_designation_warnings} \\
+    \eqref{eq:cap10-hipotetico-credito}, \eqref{eq:cap10-hipotetico-forward} & \codigo{desk/api/hedges.py}{build_hypothetical} \\
+    \eqref{eq:cap10-nocional} & \codigo{desk/api/hedge_effectiveness.py}{critical_terms} \\
+    \eqref{eq:cap10-razon} & \codigo{desk/api/hedge_effectiveness.py}{assess} \\
+    \eqref{eq:cap10-acumulados}--\eqref{eq:cap10-identidad}, \eqref{eq:cap10-vr} & \codigo{desk/api/hedge_measure.py}{measure} \\
+    \eqref{eq:cap10-coincide} & \codigo{desk/api/hedge_measure.py}{_matched} \\
+    \eqref{eq:cap10-saldos} & \codigo{desk/api/hedge_measure.py}{journal} \\
+    \eqref{eq:cap10-liberacion} & \codigo{desk/api/hedge_measure.py}{release_reserve} \\
+    Estado y saldo de la reserva & \codigo{desk/api/hedges.py}{status}, \codigo{desk/api/hedges.py}{oci_balance} \\
+    Reporte y CSV & \codigo{desk/api/hedge_report.py}{build_report}, \codigo{desk/api/hedge_report.py}{report_csv} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplos numéricos verificables}\label{sec:cap10-ejemplo}
+
+Los ejemplos usan una base temporal con el snapshot sintético MX-DEMO (2026-11-10) y tres snapshots rodados a 35, 70 y
+364 días; un crédito TIIE-F de 500 millones de \MXN que paga variable, con 13 periodos de 28 días del 2026-11-10 al
+2027-11-09, y fijaciones de TIIE-F de 7\,\% en todos los días hábiles. Cada cobertura se cubre con un swap TIIE-F
+pagador \emph{a la par} en MX-DEMO (sin tasa fija explícita), designado completo ($F=1$, $h=1$). Todo se calcula con el
+código de la aplicación (\codigo{docs/tex/verificacion/cap10_coberturas.py}{cobertura}, que da de alta la relación con
+\codigo{desk/api/hedges.py}{create_hedge} y la cierra con \codigo{desk/api/hedge_measure.py}{close_period}); las cifras
+están en \MXN y la tolerancia es absoluta de $10^{-4}$ salvo donde se dice otra.
+
+\subsection{Regla del menor en el primer cierre}
+
+Con un swap de 600 millones (120\,\% del crédito), el primer cierre es el snapshot rodado a 2026-12-15 (35 días). El
+motor da, para el instrumento, $C^{\mathrm{ins}}_1=\verif{cap10-inst-cum-1}{125341.2290}$ y
+$L^{\mathrm{ins}}_1=\verif{cap10-liq-inst-1}{124982.5684}$, y para el hipotético (swap de 500 millones a la par del
+crédito) $C^{\mathrm{hip}}_1=\verif{cap10-hypo-cum-1}{104451.0242}$ y
+$L^{\mathrm{hip}}_1=\verif{cap10-liq-hip-1}{104152.1403}$. Por~\eqref{eq:cap10-totales},
+\[
+  G^{\mathrm{ins}}_1 = \verif{cap10-inst-total}{250323.7974}, \qquad
+  G^{\mathrm{hip}}_1 = \verif{cap10-hypo-total}{208603.1645},
+\]
+ambos positivos, de modo que~\eqref{eq:cap10-menor} da $E_1=\min(G^{\mathrm{ins}}_1,G^{\mathrm{hip}}_1)=
+\verif{cap10-efectiva}{208603.1645}$ (la del hipotético: la cobertura está sobrecubierta). La inefectividad,
+ecuación~\eqref{eq:cap10-inefectividad}, es $I_1 = G^{\mathrm{ins}}_1 - E_1 = \verif{cap10-inefectividad}{41720.6329}$.
+Lo liquidado que coincide es el del hipotético, $q_1 = L^{\mathrm{hip}}_1$, así que el reciclaje es
+$R_1=\verif{cap10-reciclaje-1}{104152.1403}$ y la reserva $M_1 = E_1 - Q_1 =
+\verif{cap10-reserva-1}{104451.0242}$, que es justamente $C^{\mathrm{hip}}_1$. El exceso del swap sobre la partida
+(el 20\,\%) va entero a resultados. Con un swap de 400 millones (80\,\%) el instrumento es el menor:
+$E_1=G^{\mathrm{ins}}_1=\verif{cap10-sub-efectiva}{166882.5316}$ e $I_1=0$. Con un swap \emph{receptor} de 500 millones los
+totales tienen signo contrario ($G^{\mathrm{ins}}_1=-G^{\mathrm{hip}}_1$), $E_1=0$, $M_1=0$ y toda la pérdida del instrumento es
+inefectividad: $I_1=\verif{cap10-opuesto-inefectividad}{-208603.1645}$. Se reproduce con
+\codigo{docs/tex/verificacion/cap10_coberturas.py}{regla_menor}, tolerancia absoluta $10^{-4}$.
+
+\subsection{Segundo cierre: reserva e identidad}
+
+Con la misma cobertura de 600 millones, el segundo cierre es el snapshot rodado a 2027-01-19 ($t_2=t_d+70$ días). Como
+$E_2 = \verif{cap10-efectiva-2}{401156.4854}$ y $Q_2 = q_1+q_2 = 208304.2806$ (dos veces lo liquidado por el hipotético),
+la reserva es
+$M_2=E_2-Q_2=\verif{cap10-reserva-2}{192852.2048}$ y el cambio de reserva $\Delta M_2 = M_2-M_1 = 88401.1806$, que el
+asiento lleva como abono a \emph{ORI} de \verif{cap10-asiento-ori-2}{88401.18} (tolerancia $5\times10^{-3}$, el
+redondeo a centavos). El reciclaje del periodo vuelve a ser lo liquidado por el hipotético,
+$R_2=\verif{cap10-reciclaje-2}{104152.1403}$, y la inefectividad $I_2=\verif{cap10-inefectividad-2}{38510.6642}$. La
+identidad~\eqref{eq:cap10-identidad} se cumple con el P\&L del instrumento en el periodo,
+$\Delta C^{\mathrm{ins}}_2+L^{\mathrm{ins}}_2=\verif{cap10-pnl-instrumento-2}{231063.9851}$, que es
+$88401.1806 + 104152.1403 + 38510.6642$. Se reproduce con
+\codigo{docs/tex/verificacion/cap10_coberturas.py}{reserva_acumulada}, tolerancia absoluta $10^{-4}$.
+
+\subsection{Asiento con residuo de redondeo}
+
+Sea un cierre de flujo de efectivo con saldos sin redondear de 100.005 en \emph{Derivado}, $-60.004$ en \emph{ORI}
+(reserva de 60.004) e inefectividad de 40.001 (suman cero). Redondeados a centavos, $\kappa(100.005)=10001$,
+$\kappa(-60.004)=-6000$ y $\kappa(-40.001)=-4000$ suman $+1$ centavo; ese centavo se absorbe en la línea de
+inefectividad, que queda en 40.01 (\verif{cap10-asiento-residuo}{40.01}) de abono, contra un cargo a \emph{Derivado} de
+\verif{cap10-asiento-derivado}{100.01} y un abono a \emph{ORI} de \verif{cap10-asiento-ori}{60.00}. Tolerancia absoluta
+$5\times10^{-3}$; se reproduce con \codigo{docs/tex/verificacion/cap10_coberturas.py}{asiento_con_residuo}.
+
+\subsection{Prueba prospectiva}
+
+En el snapshot MX-DEMO, el swap de 600 millones frente al crédito de 500 da una razón $\eta_s=
+\verif{cap10-razon-120}{1.200000}$ en el escenario TIIE-F $+50~\pb$ (la misma en los tres escenarios de TIIE-F; los otros
+cinco no mueven al hipotético y su razón es nula): \verif{cap10-contados}{3} escenarios cuentan y
+\verif{cap10-en-rango-120}{3} caen en $[0.8,\,1.25]$. Con un swap de 650 millones la razón es
+\verif{cap10-razon-130}{1.300000} y ninguna (\verif{cap10-en-rango-130}{0}) cae en el rango, aunque la relación
+económica sigue siendo «sí» porque las razones son positivas: el rango es solo referencia. Tolerancia $5\times10^{-7}$
+en las razones y $0.5$ en los conteos; se reproduce con
+\codigo{docs/tex/verificacion/cap10_coberturas.py}{razon_escenarios}.
+
+\subsection{Valor razonable y cierre final}
+
+Una deuda a tasa fija de 300 millones de \MXN a 26 periodos de 28 días, cubierta con un swap receptor idéntico, da en el
+primer cierre un ajuste de la partida $a_1=\verif{cap10-vr-ajuste}{44032.2080}$ (el cambio del hipotético con signo
+contrario, ecuación~\eqref{eq:cap10-vr}); como el instrumento se mueve igual, $I_1=0$ y el resultado neto en la cuenta de
+cobertura es lo liquidado: $\mathrm{FV}_1=L^{\mathrm{ins}}_1=\verif{cap10-vr-resultado}{-74157.9509}$ (el cupón neto
+pagado). Se reproduce con \codigo{docs/tex/verificacion/cap10_coberturas.py}{valor_razonable}.
+
+Finalmente, un swap idéntico al crédito (500 millones) cerrado a 35 días y al vencimiento (2027-11-09): en el cierre
+final la operación está \texttt{vencida}, $M=\verif{cap10-final-reserva}{0.0000}$ y el reciclaje acumulado de los dos
+cierres es $\sum_k R_k = \verif{cap10-final-reciclaje}{1353977.8244}$, igual al total acumulado $G^{\mathrm{ins}}$ del
+instrumento: todo lo acumulado pasó por resultados. La relación queda \emph{concluida}. Se reproduce con
+\codigo{docs/tex/verificacion/cap10_coberturas.py}{cierre_final}, tolerancia absoluta $10^{-4}$.
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap10-validacion}
+
+La valuación que alimenta la medición (el PV de swaps TIIE-F y SOFR y de forwards de FX) es la que se contrasta con
+QuantLib en el capítulo~\ref{cap:validacion}. La capa contable de este capítulo --- la regla del menor, el reciclaje y
+los asientos --- no tiene contraparte en QuantLib, así que se valida con pruebas del repositorio y con los cuadres que
+el propio código calcula (cargos igual a abonos al centavo, ecuación~\eqref{eq:cap10-identidad}):
+\begingroup\raggedright
+\begin{itemize}
+  \item Cobertura perfecta, sobre y subcubierta, y signos opuestos:
+    \codigo{desk/api/tests/test_hedges_periods.py}{test_identical_swap_is_perfectly_effective_in_every_period},
+    \codigo{desk/api/tests/test_hedges_periods.py}{test_over_hedge_books_only_the_hypothetical_change_to_oci},
+    \codigo{desk/api/tests/test_hedges_periods.py}{test_under_hedge_books_the_whole_instrument_change_to_oci} y
+    \codigo{desk/api/tests/test_hedges_periods.py}{test_opposite_signs_leave_oci_at_zero_and_everything_in_profit_or_loss}.
+  \item Cierre final, instrumento que vence antes que la partida y valor razonable:
+    \codigo{desk/api/tests/test_hedges_periods.py}{test_the_final_close_leaves_the_reserve_and_the_booked_balances_at_exactly_zero},
+    \codigo{desk/api/tests/test_hedges_periods.py}{test_an_instrument_that_matures_before_the_hedged_item_keeps_the_reserve_and_concludes_the_relationship} y
+    \codigo{desk/api/tests/test_hedges_periods.py}{test_fair_value_hedge_of_a_fixed_loan_books_everything_to_profit_or_loss}.
+  \item Redondeo de los asientos:
+    \codigo{desk/api/tests/test_hedges_periods.py}{test_rounding_residual_is_absorbed_by_the_last_main_result_line} y
+    \codigo{desk/api/tests/test_hedges_periods.py}{test_balance_accounts_book_the_difference_of_rounded_balances_so_nothing_drifts}.
+  \item Prueba prospectiva y esquema:
+    \codigo{desk/api/tests/test_hedges_effectiveness.py}{test_identical_loan_swap_matches_every_term_and_every_ratio_is_one} y
+    \codigo{desk/api/tests/test_hedges_schema.py}{test_hedge_tables_reject_update_and_delete}.
+  \item Desdesignación, liberación y reporte:
+    \codigo{desk/api/tests/test_hedges_dedesignation.py}{test_dedesignating_with_a_later_snapshot_closes_a_period_first_and_freezes_that_reserve},
+    \codigo{desk/api/tests/test_hedges_release.py}{test_full_release_moves_the_reserve_to_the_recycling_account_and_zeroes_oci_exactly} y
+    \codigo{desk/api/tests/test_hedges_report.py}{test_csv_debits_equal_credits_to_the_cent}.
+\end{itemize}
+\endgroup
+Los ejemplos de la sección~\ref{sec:cap10-ejemplo} se ejecutan con
+\codigo{docs/tex/verificacion/correr.py}{main}, que compara cada número impreso con el que da el código.
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap10-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \textbf{Revisión pendiente.} La metodología no ha sido revisada por un contador con experiencia en IFRS 9; los
+      asientos son sugeridos y el sistema no es el libro mayor.
+    \item \textbf{Simplificaciones declaradas.} Sin costo de cobertura ni valor temporal de opciones; sin riesgo de
+      crédito en la medición; sin ajuste de base para partidas no financieras; sin reequilibrio de la razón de cobertura.
+      Quedan fuera opciones como instrumento, coberturas de inversión neta, libro mayor y pólizas reales, y las revelaciones de IFRS~7.
+    \item \textbf{Proxy de la partida.} La partida es el derivado hipotético, con el calendario regular de pagos de la
+      aplicación (cada $p_c$ días y un último pago al vencimiento, sin ajuste por inhábiles); no es el calendario
+      contractual del crédito si este difiere.
+    \item \textbf{La razón de cobertura $h$} solo entra a la comparación de nocional
+      (ecuación~\eqref{eq:cap10-nocional}); la medición del periodo no la usa: un swap de 600 millones contra un crédito de 500
+      con $h=1.2$ mide la misma inefectividad que con $h=1$ (hallazgo H07 en \texttt{HALLAZGOS.md}).
+    \item \textbf{Efectividad.} La prueba es de escenarios con razón de cambios, no de regresión ni de mínima varianza
+      \citep{hull2018}; el rango $[0.8, 1.25]$ solo se informa. Que $h$ y los términos críticos coincidan no prueba nada
+      sobre el riesgo de crédito, que no se mide.
+    \item \textbf{Cambios de nocional y fechas.} Un cambio de nocional después de designar no tiene tratamiento
+      especial (se usa el nocional vigente); la fecha de designación es la de un snapshot y el sistema no puede comprobar
+      que la documentación existiera ese día: solo controla el orden entre relaciones de la misma operación y avisa si se
+      documenta más de un día después.
+    \item \textbf{Datos.} Los snapshots sintéticos (\texttt{synthetic}) heredan la procedencia declarada en el
+      capítulo~\ref{cap:datos}; el reporte la muestra por medición y declara Nivel~2 para todos los instrumentos.
+    \item \textbf{Reserva sin signo ni magnitud forzados.} $M_k$ no tiene que parecerse a $E_k$ (ver la nota tras la
+      ecuación~\eqref{eq:cap10-identidad}); si la regla produce un saldo que un contador objetaría, el sistema no lo detecta.
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap10-referencias}
+
+La norma es \citet{iasb2014}: los párrafos citados son 6.3.7, 6.4.1, 6.5.6, 6.5.8--6.5.12 y B6.5.5. Para un tratamiento
+general de la contabilidad de derivados y coberturas bajo IFRS~9 véase \citet{ramirez2015}. La razón de cobertura de
+mínima varianza con futuros, frente a la cual la prueba por escenarios es solo una razón de cambios, está en
+\citet{hull2018}.
