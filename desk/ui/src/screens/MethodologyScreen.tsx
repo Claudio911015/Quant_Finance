@@ -171,7 +171,7 @@ const GENERAL_SECTIONS: Section[] = [
       },
       {
         label: 'Alta a la par',
-        text: 'Un swap dado de alta sin tasa fija nace a la par: se guarda con la tasa par del snapshot de la petición (o MX-DEMO), de modo que su PV en la fecha de pacto es cero.',
+        text: 'Un swap dado de alta sin tasa fija, o un cross currency swap sin diferencial, nace a la par: se guarda con la tasa o el diferencial par del snapshot de la petición (o MX-DEMO), de modo que su PV en la fecha de pacto es cero. Solo se permite omitirlos si el inicio no es anterior a la fecha de ese snapshot: la par solo se calcula en la fecha de inicio, así que una operación que ya empezó exige capturar la tasa o el diferencial pactados (400 en el campo omitido).',
       },
       {
         label: 'P&L',

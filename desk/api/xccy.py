@@ -247,10 +247,21 @@ def at_par(
 ) -> Dict[str, Any]:
     """`params` con `fx_rate` (el spot) y `spread` (el diferencial par con las fechas finales) completados
     en el snapshot de la petición (o `MX-DEMO`): la operación nace a la par y queda guardada con ambos.
-    Es el mismo instrumento que luego valúa `aged_xccy`."""
+    Es el mismo instrumento que luego valúa `aged_xccy`.
+
+    El diferencial par solo tiene sentido en la fecha de inicio: con `start` anterior al `as_of` del snapshot
+    la operación ya devengó (sin fijaciones) y el diferencial que la deja en cero hoy no es el de su pacto, así
+    que, si falta el diferencial, se exige capturarlo (400 `spread`)."""
     from desk.api.pricing import PRODUCTS
 
     mkt = market.load_context(conn, text(body, "snapshot", required=False) or SNAPSHOT_ID)
+    if params.get("spread") is None and start < mkt.as_of:
+        raise ApiError(
+            400,
+            "Para una operación que ya empezó capture el diferencial pactado: el diferencial par solo se calcula "
+            "en la fecha de inicio",
+            "spread",
+        )
     try:
         filled = resolve({"start_date": start, "maturity_date": maturity}, params, mkt, {})
         return PRODUCTS["xccy_swap"].validate(filled)

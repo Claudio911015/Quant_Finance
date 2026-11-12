@@ -252,9 +252,19 @@ def _at_par(
     finales, en el snapshot de la petición (o `MX-DEMO`): el swap nace a la par y queda guardado
     con esa tasa. Es el mismo instrumento que luego valúa `valuation.aged_swap`.
 
+    La par solo tiene sentido en la fecha de inicio: con `start` anterior al `as_of` del snapshot el swap
+    ya devengó días (con la tasa a un día de la curva, sin fijaciones) y su par no es la de la fecha de
+    pacto, así que se exige la tasa pactada (400 `fixed_rate`).
+
     Corte 3: la tasa par es la que corresponde al colateral que la contraparte (`body["counterparty"]`)
     tiene en `start_date`; con colateral USD y curva `MXN-USD` el swap TIIE-F se descuenta con ella."""
     mkt = market.load_context(conn, text(body, "snapshot", required=False) or SNAPSHOT_ID)
+    if start < mkt.as_of:
+        raise ApiError(
+            400,
+            "Para una operación que ya empezó capture la tasa pactada: la tasa par solo se calcula en la fecha de inicio",
+            "fixed_rate",
+        )
     history = collateral.history(conn).get(text(body, "counterparty", required=False) or "", [])
     mkt = mkt.with_collateral(collateral.currency_on({"collateral": history}, start))
     try:
@@ -272,7 +282,9 @@ def prepare_trade(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, A
 
     Es todo lo que hace `create_trade` salvo insertar, así que el XVA incremental valida a su candidata con los
     mismos mensajes y `field`. Un `irs` sin `fixed_rate` sale con la tasa par del snapshot de la petición; un
-    `xccy_swap` sin `fx_rate` o sin `spread`, con el spot y el diferencial par. No exige que la contraparte exista.
+    `xccy_swap` sin `fx_rate` o sin `spread`, con el spot y el diferencial par. Omitir la tasa o el diferencial
+    solo se permite si el inicio no es anterior al `as_of` del snapshot (400 `fixed_rate` o `spread`). No exige
+    que la contraparte exista.
     """
     name = choice(body, "product", tuple(PRODUCTS))
     counterparty = text(body, "counterparty")

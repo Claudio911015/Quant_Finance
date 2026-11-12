@@ -205,14 +205,16 @@ def test_notional_mxn_and_basis_points(client, product, params, currency, in_usd
 
 def test_candidate_pv_is_the_desk_valuation_of_the_saved_trade(client):
     _fast(client)
-    request = _body(BETA, "xccy_swap", {"side": "pay_usd", "notional_usd": 3e6, "periods": 13}, trade_date="2026-08-17")
+    # inicio en el pasado: el diferencial y el tipo de cambio pactados se capturan (H15: la par no se calcula)
+    terms = {"side": "pay_usd", "notional_usd": 3e6, "periods": 13, "fx_rate": 18.4, "spread": 0.0007}
+    request = _body(BETA, "xccy_swap", terms, trade_date="2026-08-17")
     body = _ok(client, request)
     created = client.post("/api/trades", json=request).get_json()
     rows = client.get("/api/portfolio/valuation?snapshot=%s" % SNAP).get_json()["rows"]
     pv = [r["pv_mxn"] for r in rows if r["id"] == created["id"]][0]
     assert body["candidate"]["pv_mxn"] == pytest.approx(pv, rel=1e-9)
     assert body["candidate"]["trade_date"] == "2026-08-17"
-    assert body["candidate"]["params"] == created["params"]  # fx_rate y spread a la par, resueltos igual
+    assert body["candidate"]["params"] == created["params"]  # los mismos términos que se guardan
 
 
 def test_same_direction_adds_cva_and_the_opposite_direction_offsets_it(client):
@@ -307,6 +309,10 @@ INVALID = {
     "unknown-product": {"product": "swap_raro"},
     "blank-counterparty": {"counterparty": "   "},
     "counterparty-not-text": {"counterparty": 7},
+    "irs-started-without-rate": {"params": {k: v for k, v in IRS.items() if k != "fixed_rate"},
+                                 "trade_date": "2026-10-12"},
+    "xccy-started-without-spread": {"product": "xccy_swap", "trade_date": "2026-10-12",
+                                    "params": {k: v for k, v in XCCY.items() if k != "spread"}},
     "xccy-bad-side": {"product": "xccy_swap", "params": dict(XCCY, side="x")},
     "xccy-negative-notional": {"product": "xccy_swap", "params": dict(XCCY, notional_usd=-5.0)},
 }

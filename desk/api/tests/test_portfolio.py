@@ -206,6 +206,47 @@ def test_irs_at_par_uses_the_request_snapshot_and_the_final_dates(client):
     assert abs(row["pv"]) < 1e-6 * 1e6
 
 
+# H02: la par solo tiene sentido en la fecha de inicio. Con inicio anterior al as_of del snapshot el alta
+# guardaba la par del swap envejecido (sin fijaciones, sin aviso): ahora exige la tasa pactada.
+PAR_MESSAGE = (
+    "Para una operación que ya empezó capture la tasa pactada: la tasa par solo se calcula en la fecha de inicio"
+)
+
+
+@pytest.mark.parametrize("omit", [True, False], ids=["sin fixed_rate", "fixed_rate null"])
+def test_irs_that_already_started_needs_its_fixed_rate(client, omit):
+    params = {k: v for k, v in IRS.items() if k != "fixed_rate"}
+    params = params if omit else {**params, "fixed_rate": None}
+    before = len(client.get("/api/trades").get_json()["trades"])
+    r = client.post("/api/trades", json={**_trade(params=params), "trade_date": "2026-10-12"})  # as_of: 2026-11-10
+    assert r.status_code == 400
+    assert r.get_json() == {"error": PAR_MESSAGE, "field": "fixed_rate"}
+    assert len(client.get("/api/trades").get_json()["trades"]) == before
+
+
+def test_irs_that_already_started_with_its_fixed_rate_is_booked_as_given(client):
+    r = client.post("/api/trades", json={**_trade(), "trade_date": "2026-10-12"})
+    assert r.status_code == 201, r.get_json()
+    assert r.get_json()["params"]["fixed_rate"] == IRS["fixed_rate"]
+
+
+def test_irs_par_is_judged_against_the_request_snapshot_not_the_default_one(client):
+    assert client.post("/api/market/MX-DEMO/roll", json={"id": "D35", "as_of": "2026-12-15"}).status_code == 201
+    params = {k: v for k, v in IRS.items() if k != "fixed_rate"}
+    # 2026-11-24 es posterior al as_of de MX-DEMO pero anterior al de D35: con D35 ya empezó
+    body = {**_trade(params=params), "trade_date": "2026-11-24", "snapshot": "D35"}
+    r = client.post("/api/trades", json=body)
+    assert (r.status_code, r.get_json()["field"]) == (400, "fixed_rate")
+    assert client.post("/api/trades", json={**body, "snapshot": "MX-DEMO"}).status_code == 201
+
+
+def test_irs_born_at_par_on_the_snapshot_date_or_later_still_works(client):
+    params = {k: v for k, v in IRS.items() if k != "fixed_rate"}
+    for start in ("2026-11-10", "2026-11-24"):  # el as_of de MX-DEMO y un inicio a futuro
+        r = client.post("/api/trades", json={**_trade(params=params), "trade_date": start})
+        assert r.status_code == 201 and isinstance(r.get_json()["params"]["fixed_rate"], float), start
+
+
 def test_equity_option_trade_values_in_mxn(client):
     params = {"option_type": "call", "spot": 100.0, "strike": 100.0, "volatility": 0.2,
               "rate": 0.05, "dividend_yield": 0.0, "maturity_years": 1.0, "quantity": 10}

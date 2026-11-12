@@ -209,6 +209,31 @@ def test_r6_trade_without_spread_or_fx_rate_is_stored_at_par_with_both(client):
     assert abs(row["pv_mxn"]) <= 1e-6 * NOTIONAL_MXN and row["pv"] == row["pv_mxn"]
 
 
+# H15: igual que el irs, el diferencial par solo se calcula en la fecha de inicio.
+SPREAD_MESSAGE = (
+    "Para una operación que ya empezó capture el diferencial pactado: el diferencial par solo se calcula en la "
+    "fecha de inicio"
+)
+
+
+@pytest.mark.parametrize("params", [{}, {"fx_rate": 18.2}], ids=["sin nada", "solo fx_rate"])
+def test_r6_trade_that_already_started_needs_its_spread(client, params):
+    body = {"product": "xccy_swap", "counterparty": CP, "params": {**BASE, **params}, "trade_date": "2026-10-12"}
+    before = len(client.get("/api/trades").get_json()["trades"])
+    r = client.post("/api/trades", json=body)
+    assert r.status_code == 400
+    assert r.get_json() == {"error": SPREAD_MESSAGE, "field": "spread"}
+    assert len(client.get("/api/trades").get_json()["trades"]) == before
+
+
+def test_r6_trade_that_already_started_keeps_the_terms_it_is_given(client):
+    body = {"product": "xccy_swap", "counterparty": CP, "trade_date": "2026-10-12",
+            "params": {**BASE, "fx_rate": 18.2, "spread": 0.0005}}
+    r = client.post("/api/trades", json=body)
+    assert r.status_code == 201, r.get_json()
+    assert (r.get_json()["params"]["fx_rate"], r.get_json()["params"]["spread"]) == (18.2, 0.0005)
+
+
 def test_r6_maturity_date_rewrites_the_periods_to_whole_28_day_coupons(client):
     trade = _book(client, maturity="2028-11-10")  # 731 días -> 26 periodos
     assert trade["params"]["periods"] == 26
