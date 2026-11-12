@@ -151,3 +151,19 @@ Qué hace el código: `vol` ancla la varianza total en (T = 0, w = 0) y la inter
 Qué declara la Metodología/el diseño: el comentario de clase de `VolSurface` dice que el segundo paso interpola «w linearly in T (flat extrapolation on w)»; con extrapolación plana en la varianza la volatilidad sería √(w_1/T) = 0.1768 a 0.125 años y √(w_n/T) = 0.1099 a 0.7 años. La Metodología («Opción FX») solo dice «Vol de la superficie por plazo y strike».
 Impacto: ninguno en el cálculo; quien lea el contrato del encabezado en vez del cuerpo de `vol` esperaría una volatilidad que sube antes del primer plazo y decae después del último.
 Capítulo: 4 (Derivados de FX y opción sobre acción)
+
+## H17 — La bandera de términos de la conciliación se levanta sin probar ningún factor en `xccy_swap` y `equity_option`
+Archivo: `desk/api/ops_recon.py`
+Símbolo: `reconcile_trade` (con `CURVE_PRODUCTS` y `FX_PRODUCTS`)
+Qué hace el código: `terms_flag = status == "revisar" and (bp is None or abs(bp) > 25) and (pct is None or abs(pct) > 2)`. `bp` solo se calcula para `CURVE_PRODUCTS` (`irs`, `cap_floor`, `swaption`, `bond`) y `pct` solo para `FX_PRODUCTS` (`fx_forward`, `fx_option`). Para `xccy_swap` y `equity_option` ambos son `None`, de modo que cualquier fila `revisar` de esos dos productos sale con bandera de términos aunque ni la curva ni el tipo de cambio se hayan probado (verificado con un `equity_option` y un `xccy_swap` cuyo PV del banco difiere en 5 millones de MXN: `terms_flag` verdadero, `decomposition.curve` y `decomposition.fx` en `None`).
+Qué declara la Metodología/el diseño: Metodología, «Conciliación»: «se marca para revisar, con bandera de términos si ni ±25 pb ni ±2 % la explican»; corte 5, D5: bandera «si la diferencia supera lo explicable por ±25 pb o ±2 % de spot».
+Impacto: para esos dos productos la bandera no aporta información (es siempre verdadera en `revisar`); un auditor que la lea como «se probó el desplazamiento de curva y de spot y no explica» se equivoca. En los demás productos la regla coincide con la Metodología.
+Capítulo: 11 (Operaciones: conciliación)
+
+## H18 — El docstring de `settlement.py` dice que el bono no liquida; el código ya liquida cupones y amortización
+Archivo: `desk/api/settlement.py`
+Símbolo: docstring del módulo (lista de productos) y `settled_flows`
+Qué hace el código: `settled_flows` despacha el bono a `aging.bond_settled`, que emite los cupones (`coupon`) y la amortización (`redemption`) en `(d0, d1]` con la misma regla de «viva el día anterior» que el `irs`; solo `cap_floor` y `swaption` (`_NO_SETTLEMENT`) quedan con el aviso `no_settlement`. El docstring del módulo todavía enumera «`cap_floor`, `swaption`, `bond`: sin flujo derivado al vencer, solo el aviso `no_settlement` (el bono lo despacha a `aging`; T9 lo hará liquidar)».
+Qué declara la Metodología/el diseño: Metodología, «Bono y cap/floor envejecidos»: «sus cupones y su amortización se liquidan»; el cap/floor y la swaption no tienen liquidación derivada.
+Impacto: ninguno en el cálculo; el encabezado del módulo describe un estado anterior y puede hacer creer que el cupón y la amortización de un bono no entran al P&L.
+Capítulo: 8 (Ciclo de vida, liquidaciones y P&L)
