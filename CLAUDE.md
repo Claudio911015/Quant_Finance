@@ -11,7 +11,7 @@ cmake -S . -B build
 # Build everything
 cmake --build build --target all 2>&1
 
-# Run C++ tests (GoogleTest) — 463 tests, must all pass before commit
+# Run C++ tests (GoogleTest) — 519 tests, must all pass before commit
 cd build && ctest --output-on-failure 2>&1
 
 # Single test file
@@ -77,13 +77,13 @@ Workstation local de valuación y riesgo sobre `qfpy` (rama `feat/qf-desk`): bac
 Las cuatro suites (todas verdes antes de commit; `desk/api` y vitest crecen con cada corte, la cuenta vigente la da su propia salida):
 
 ```bash
-cmake --build build -j4 && (cd build && ctest --output-on-failure)   # C++ (463)
+cmake --build build -j4 && (cd build && ctest --output-on-failure)   # C++ (519; 510 con -DQF_WITH_XAD=OFF)
 cmake --build build --target pytests                                  # bindings qfpy (unittest)
 /home/claudio/anaconda3/bin/python -m pytest desk/api/tests -q        # backend
 cd desk/ui && npm test && npm run build                               # UI (vitest + tsc -b && vite build)
 ```
 
-Diseño, plan y hoja de ruta: `docs/superpowers/qf-desk/` (`design.md`, `plan.md`, `roadmap.md`) y, por corte, `corte2/` … `corte8/` e `integracion/` (`design.md`, `plan.md`, `audit.md`). El estado y lo pendiente están en la sección 6 de `roadmap.md`. Fijaciones reales: `POST /api/fixings/fetch` (SOFR de la Fed de Nueva York; Banxico requiere `BANXICO_TOKEN`). Respaldo: `python -m desk.api.backup`. Validación contra QuantLib: `desk/validation/make_report.sh` (regenerar tras tocar valuación). Para pruebas con servidor, usar otro puerto que 5070 y una base temporal.
+Diseño, plan y hoja de ruta: `docs/superpowers/qf-desk/` (`design.md`, `plan.md`, `roadmap.md`) y, por corte, `corte2/` … `corte8/`, `corte9-xva/`, `corte10-fx-exoticos/`, `corte11-docs/`, `corte12-xad/` e `integracion/` (`design.md`, `plan.md`, `audit.md`). Documentación técnica en LaTeX: `docs/tex/` (compilar y verificar según su `README.md`). XVA: motor en `src/xva/exposure_engine.cpp`, API en `desk/api/risk/xva.py` y `xva_sens.py` (sensibilidades con XAD, AGPL-3.0, opción `QF_WITH_XAD`). Exóticos de FX: `desk/api/pricing/fx_exotics.py` (QuantLib 1.42.1 en el Python del backend). El estado y lo pendiente están en la sección 6 de `roadmap.md`. Fijaciones reales: `POST /api/fixings/fetch` (SOFR de la Fed de Nueva York; Banxico requiere `BANXICO_TOKEN`). Respaldo: `python -m desk.api.backup`. Validación contra QuantLib: `desk/validation/make_report.sh` (regenerar tras tocar valuación). Para pruebas con servidor, usar otro puerto que 5070 y una base temporal.
 
 ### Reglas vigentes desde 2026-11-11 (pedidas por Claudio)
 

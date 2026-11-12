@@ -201,14 +201,26 @@ Para lanzar un corte: `/fableorchestrate corte N de docs/superpowers/qf-desk/roa
 - CME, metodología MXN: https://www.cmegroup.com/articles/files/2024/mxn-methodology-and-examples.pdf
 - Contabilidad de coberturas (fichas de proveedores): https://iongroup.com/blog/treasury/ifrs-9-hedge-accounting-from-policy-to-execution/
 
-## 6. Estado al cierre del 2026-11-11
+## 6. Estado al cierre del 2026-11-12
 
-Los cortes 2 a 7 y la versión reducida del 8 están construidos, auditados por un agente independiente y fusionados en `feat/qf-desk`. Los cortes 3, 5, 6 y 7 se construyeron en paralelo desde el mismo commit y se integraron después (`corte8/audit.md` cubre también esa integración).
+Los cortes 1 a 8 (el 8 en versión reducida) y cuatro cortes más, pedidos por Claudio el 2026-11-11, están construidos, auditados por un agente independiente y fusionados en `feat/qf-desk`:
+
+- **Corte 9 — XVA** (`corte9-xva/`): 9 operaciones más sobre las mismas contrapartes, curvas de crédito sintéticas por CDS con probabilidades de incumplimiento, motor de exposición multimoneda en C++ (tasa MXN, tasa USD y tipo de cambio), CVA/DVA/FVA por contraparte, XVA incremental con gráfica de exposición, pantalla `/xva`.
+- **Corte 10 — Exóticos de FX** (`corte10-fx-exoticos/`): no touch y double no touch sobre USDMXN con barrera americana, Monte Carlo sobre QuantLib (plano y con sonrisa), 142 líneas de backend.
+- **Corte 11 — Documentación** (`corte11-docs/`, `docs/tex/`): documento LaTeX de 16 capítulos con fórmulas, referencias académicas verificadas y referencias al código; `docs/tex/HALLAZGOS.md` lista los 25 hallazgos que salieron al documentar, todos con su resolución.
+- **Corte 12 — Sensibilidades del XVA con XAD** (`corte12-xad/`): derivadas de CVA/DVA/FVA respecto de cada pilar de curva, tipo de cambio, volatilidades, CDS y fondeo por diferenciación adjunta; parcial y total (con recalibración de MXN-USD).
+
+Suites al cierre: ctest 519 (510 sin XAD), bindings 101, backend 3 806, interfaz 684, validación contra QuantLib 62 de 62, 403 valores de la documentación reproducidos por script.
+
+Reglas vigentes desde el 2026-11-11 (en `CLAUDE.md`): código nuevo sobre QuantLib con el menor código posible, y un capítulo LaTeX por corte.
 
 Qué sigue abierto, por orden de importancia para vender:
 
-1. **Revisión de un contador IFRS 9** de la contabilidad de coberturas (corte 4). La pantalla lo avisa de forma permanente.
-2. **Token de Banxico** (`BANXICO_TOKEN`): el cliente de TIIE de Fondeo y FIX está escrito y probado solo con respuestas simuladas; no se ha probado contra la API real. El token lleva captcha y lo genera Claudio en `https://www.banxico.org.mx/SieAPIRest/service/v1/token`.
-3. **Curva TIIE-F, superficie de volatilidad, Hull-White, puntos forward y base de cross currency siguen sintéticos.** No hay fuente gratuita; entran con el archivo del proveedor de precios del cliente.
-4. **Plataforma multiusuario** (resto del corte 8): espera a un cliente piloto.
-5. Límites declarados en Metodología por corte (envejecimiento del cap/floor, CVA informativo solo de swaps de tasa con un escalón inicial de hasta un cupón diario, conciliación indicativa, FpML solo de irs/fx_forward/fx_option, confirmación imprimible sin plantilla para cross currency swap).
+1. **Licencia de XAD (decisión de Claudio).** XAD es AGPL-3.0; para vender el producto sin publicar el código hace falta su licencia comercial, o compilar con `-DQF_WITH_XAD=OFF` (se pierde solo la pantalla de sensibilidades). Ver `desk/README.md`.
+2. **Revisión de un contador IFRS 9** de la contabilidad de coberturas (corte 4), incluida la observación de que la razón de cobertura capturada no entra en la medición (`corte4/audit.md`, observación 8).
+3. **Token de Banxico** (`BANXICO_TOKEN`): el cliente de TIIE de Fondeo y FIX solo se probó con respuestas simuladas. Lleva captcha; lo genera Claudio en `https://www.banxico.org.mx/SieAPIRest/service/v1/token`.
+4. **Datos sintéticos:** curva TIIE-F, superficie de volatilidad, Hull-White, puntos forward, base de cross currency y **curvas de crédito**. Entran con el archivo del proveedor de precios del cliente.
+5. **Pendientes guardados del XVA:** margen y colateral en la exposición (umbral, periodo de riesgo de margen); riesgo de correlación adversa; KVA y MVA; XVA de opciones, caps/floors, swaptions, bonos y forwards FX; reparto del XVA entre las operaciones existentes; error estándar de las sensibilidades; adjunto escrito a mano de la fórmula afín (las sensibilidades tardan de 6 a 13 s por contraparte); corregir o retirar el `CVACalculator` anterior (sesgo medido de +7 %).
+6. **Pendientes de exóticos de FX:** registrarlos como operaciones del portafolio; pago en USD; one touch y rebates; volatilidad estocástica o vanna-volga (con sonrisa, el modelo no reprecia exactamente las vainillas a más de un año: declarado en Metodología).
+7. **Plataforma multiusuario** (resto del corte 8): espera a un cliente piloto.
+8. Instalar `texlive-lang-spanish` para que la documentación parta palabras en español.
