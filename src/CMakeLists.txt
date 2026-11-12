@@ -42,6 +42,7 @@ add_library(qf
     xva/cva_calculator.cpp
     xva/exposure_profile.cpp
     xva/piecewise_hazard_curve.cpp
+    xva/exposure_engine.cpp
 )
 
 target_include_directories(qf

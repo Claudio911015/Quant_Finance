@@ -24,6 +24,7 @@ if(GTest_FOUND)
         test_CVACalculator.cpp
         test_ExposureProfile.cpp
         test_PiecewiseHazardCurve.cpp
+        test_ExposureEngine.cpp
         test_scenario.cpp
         test_calibration.cpp
         test_volsurface.cpp
