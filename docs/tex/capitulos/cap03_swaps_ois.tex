@@ -1,5 +1,470 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Swaps de tasa OIS}\label{cap:swaps-ois}
 
-Valuación de swaps OIS, envejecimiento, fijaciones compuestas del periodo en curso y tasa par.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap03-proposito}
+
+Este capítulo documenta cómo el código valúa un swap de tasa a un día (OIS): una pata fija que paga $\K$ por
+periodo contra una pata flotante que capitaliza día a día la tasa a un día del índice (TIIE de Fondeo en
+pesos, SOFR en dólares). Cubre el instrumento C++ \codigo{include/qf/instruments/ois_swap.hpp}{OisSwap}
+(flujos, valor presente, anualidad y tasa par), la capitalización de fijaciones
+(\codigo{src/instruments/ois_swap.cpp}{compoundOvernight}), el \emph{envejecimiento} (valuar a la fecha de
+un snapshot un swap que ya empezó, con las fijaciones conocidas de su periodo en curso, que arma
+\codigo{desk/api/valuation.py}{aged_swap_terms}) y los cupones ya liquidados
+(\codigo{desk/api/settlement.py}{_irs_coupons}). Las curvas que consume se construyen en el
+capítulo~\ref{cap:curvas}; el efecto del tiempo sobre el valor y el \PnL{} se tratan en el
+capítulo~\ref{cap:ciclo-vida} y las sensibilidades en el capítulo~\ref{cap:riesgo}. Las fijaciones se
+obtienen de las fuentes descritas en el capítulo~\ref{cap:datos}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap03-notacion}
+
+Los símbolos comunes ($\Nom$, $\K$, $\Ann$, $\Spar$, $\PV$, $\Rcomp{i}$, $\ON{k}$, $\DF{c}{T}$, \dots) están en
+el apéndice~\ref{ap:simbolos}. Los símbolos propios de este capítulo, con sus unidades, son:
+
+\begin{itemize}
+  \item $m$: días entre cupones (28 para TIIE-F, 365 para SOFR); $D$: días del contrato (inicio a último
+        pago); $n=\lceil D/m\rceil$: número de cupones de un swap nuevo.
+  \item $d_i$ ($i=1,\dots,n$): día de pago $i$ contado desde la \emph{fecha de valuación}; $s=d_0$: día en
+        que empieza el periodo~1 (negativo si ya empezó, cero si empieza hoy, positivo si empieza después).
+  \item $\tau_i=\yf{d_{i-1}}{d_i}=(d_i-d_{i-1})/360$: fracción de devengo ACT/360 del periodo $i$ (años).
+  \item $c$ y $c'$: curva de proyección y curva de descuento (en el código, \texttt{curve\_key} y
+        \texttt{discount\_curve\_key}); $c'=c$ cuando no se da curva de descuento.
+  \item $\widetilde P_c(d)$: factor de descuento de la curva $c$ a $d$ días, con
+        $\widetilde P_c(d)=1$ si $d\le0$ y $\widetilde P_c(d)=\DF{c}{d/365}$ si $d>0$ (ecuación~\eqref{eq:cap03-df}).
+  \item $G$: factor acumulado de las fijaciones ya conocidas del periodo~1 (adimensional; $G=1$ si no hay);
+        $r_k$, $n_k$ y $B=360$: tasa de la entrada $k$ de fijaciones, días que devenga y base de días.
+  \item $C^{\mathrm{fij}}_i$ y $C^{\mathrm{flo}}_i$: cupón fijo y flotante del periodo $i$ (moneda de la curva);
+        $\varphi=+1$ si el tenedor \emph{paga} la fija (Payer) y $\varphi=-1$ si la \emph{recibe} (Receiver).
+  \item $t_a$, $t_v$, $t_0$: fechas de inicio, de vencimiento y de valuación; $e=t_0-t_a$: días transcurridos;
+        $q_i$: día de pago $i$ contado desde $t_a$ (de modo que $d_i=q_i-e$).
+\end{itemize}
+
+En este capítulo $\Ann$ \emph{incluye el nocional} (se mide en la moneda de la curva), como
+\codigo{src/instruments/ois_swap.cpp}{OisSwap::annuity}; dividida entre $\Nom$ es la anualidad en años. Las
+tasas van en decimal ($0.07=7\,\%$) y el tiempo de una curva es $T=d/365$.
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap03-modelo}
+
+\subsection{Calendario de pagos y fracción de devengo}\label{sec:cap03-calendario}
+
+Un swap nuevo de $D$ días con cupones cada $m$ días paga en días naturales múltiplos de $m$ y su último pago
+es siempre el vencimiento; si $D$ no es múltiplo de $m$ el último periodo es corto:
+\begin{equation}\label{eq:cap03-calendario}
+  d_i = i\,m\quad(i=1,\dots,n-1),\qquad d_n = D,\qquad n=\lceil D/m\rceil,\qquad d_0=0 .
+\end{equation}
+Es la función \codigo{src/termstructure/ois_bootstrap.cpp}{oisPaymentDays}, la misma que usa el bootstrap de
+la curva (capítulo~\ref{cap:curvas}); se expone en Python como
+\codigo{src/python_bindings/qfpy.cpp}{ois_payment_days}. Las fechas \emph{no} se ajustan por días inhábiles.
+El devengo de cada periodo se calcula sobre los días naturales reales:
+\begin{equation}\label{eq:cap03-tau}
+  \tau_i=\yf{d_{i-1}}{d_i}=\frac{d_i-d_{i-1}}{360}\qquad(\text{ACT/360}),
+\end{equation}
+con $d_0=s$ (para un swap nuevo, $s=0$). La convención es un parámetro de
+\codigo{include/qf/instruments/ois_swap.hpp}{OisSwap} resuelto por
+\codigo{src/math/daycount.cpp}{yearFraction}: ACT/360 (por omisión), ACT/365 (divisor 365) o ACT/ACT ISDA, que
+en esta llamada usa el divisor 365 porque no se le pasa el número de días del año; 30/360 se rechaza con
+\texttt{std::invalid\_argument}. Ninguna llamada del backend cambia la convención, así que en la aplicación
+siempre rige~\eqref{eq:cap03-tau} con divisor 360. Los periodos se arman en
+\codigo{src/instruments/ois_swap.cpp}{buildPeriods}.
+
+\subsection{Cupones fijo y flotante}\label{sec:cap03-cupones}
+
+Una curva de descuento $c$ da el factor $\DF{c}{T}=\exp(-z_c(T)\,T)$, con $z_c$ la tasa cero continua
+interpolada entre los pilares (lineal por omisión; plana fuera de ellos) y $T=d/365$ en años
+(\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::discountFactor}; los detalles son del
+capítulo~\ref{cap:curvas}). La curva no admite $T\le0$, de modo que el código define
+\begin{equation}\label{eq:cap03-df}
+  \widetilde P_c(d)=\begin{cases}1, & d\le0,\\[2pt] \DF{c}{d/365}, & d>0,\end{cases}
+\end{equation}
+en \codigo{src/instruments/ois_swap.cpp}{discountAt}: la fecha de valuación vale 1 por definición y un
+periodo que empezó antes se proyecta desde la fecha de valuación.
+
+El cupón fijo del periodo $i$ es
+\begin{equation}\label{eq:cap03-cupon-fijo}
+  C^{\mathrm{fij}}_i=\Nom\,\K\,\tau_i ,
+\end{equation}
+siempre del periodo completo, también en el periodo en curso de un swap envejecido. La pata flotante se valúa
+por réplica: el cupón es el factor de capitalización a un día del periodo menos uno, y se obtiene del cociente
+de factores de descuento de la curva de proyección $c$,
+\begin{equation}\label{eq:cap03-cupon-flotante}
+  C^{\mathrm{flo}}_i=\Nom\!\left(G_i\,\frac{\widetilde P_c(d_{i-1})}{\widetilde P_c(d_i)}-1\right),
+  \qquad G_1=G,\quad G_i=1\ (i\ge2),
+\end{equation}
+donde $G$ es el factor de las fijaciones ya conocidas del periodo~1
+(ecuación~\eqref{eq:cap03-factor}; vale 1 en un swap nuevo o que aún no empieza). Equivale a la tasa
+compuesta del periodo
+\begin{equation}\label{eq:cap03-tasa-compuesta}
+  \Rcomp{i}=\frac{1}{\tau_i}\left(G_i\,\frac{\widetilde P_c(d_{i-1})}{\widetilde P_c(d_i)}-1\right),
+  \qquad C^{\mathrm{flo}}_i=\Nom\,\tau_i\,\Rcomp{i}.
+\end{equation}
+Ambos cupones son filas de \codigo{src/instruments/ois_swap.cpp}{OisSwap::cashFlows} (la fila se llama
+\codigo{include/qf/instruments/ois_swap.hpp}{OisCashFlow}; en Python, \texttt{fixed\_amount} y
+\texttt{float\_amount}).
+
+\begin{diferencia}
+  La parte proyectada de la pata flotante no compone fijaciones futuras ni lleva calendario de observación:
+  usa el cociente de factores de descuento de la curva. No es una aproximación, porque ese cociente es
+  \emph{exactamente} la capitalización de las tasas a un día ACT/360 que la curva implica,
+  $f_j=360\bigl(\widetilde P_c(j)/\DF{c}{(j+1)/365}-1\bigr)$:
+  \[
+    \prod_{j=d_{i-1}}^{d_i-1}\Bigl(1+\frac{f_j}{360}\Bigr)=\frac{\widetilde P_c(d_{i-1})}{\widetilde P_c(d_i)}
+    \qquad(d_{i-1}\ge0,\ G_i=1).
+  \]
+  Lo que el código \emph{no} tiene frente a las definiciones de mercado de tasas a un día compuestas
+  \citep{isda2021} es el rezago de observación (\emph{lookback}), el desplazamiento del periodo de
+  observación, el bloqueo (\emph{lockout}) ni el rezago de pago; tampoco ajusta las fechas de pago a días hábiles. La composición de un grupo de
+  $n_k>1$ días con una sola tasa (fin de semana) es de interés simple sobre esos días,
+  $1+r_kn_k/360$, y la capitalización ocurre entre entradas (ecuación~\eqref{eq:cap03-factor}).
+\end{diferencia}
+
+\subsection{Valor presente, anualidad y tasa par}\label{sec:cap03-valor}
+
+El flujo neto de cada periodo es $\varphi\,(C^{\mathrm{flo}}_i-C^{\mathrm{fij}}_i)$: el pagador de fija recibe la
+flotante ($\varphi=+1$) y el recibidor la paga ($\varphi=-1$). Todos los flujos se descuentan en la curva
+$c'$ al día de pago:
+\begin{align}
+  \PV &= \varphi\sum_{i=1}^{n}\bigl(C^{\mathrm{flo}}_i-C^{\mathrm{fij}}_i\bigr)\,\DF{c'}{d_i/365},
+  \label{eq:cap03-pv}\\
+  \Ann &= \Nom\sum_{i=1}^{n}\tau_i\,\DF{c'}{d_i/365},
+  \label{eq:cap03-anualidad}\\
+  \Spar &= \frac{\sum_{i=1}^{n}C^{\mathrm{flo}}_i\,\DF{c'}{d_i/365}}{\Ann},
+  \label{eq:cap03-tasa-par}
+\end{align}
+implementadas en \codigo{src/instruments/ois_swap.cpp}{OisSwap::npv} (suma de la columna
+\texttt{present\_value} de la tabla de flujos), \codigo{src/instruments/ois_swap.cpp}{OisSwap::annuity} y
+\codigo{src/instruments/ois_swap.cpp}{OisSwap::parRate}. La tasa par es la tasa fija que anula~\eqref{eq:cap03-pv}
+y no depende de $\K$ ni de $\varphi$; con ella,
+\begin{equation}\label{eq:cap03-pv-par}
+  \PV=\varphi\,\Ann\,(\Spar-\K).
+\end{equation}
+El signo es el de la óptica del tenedor: un pagador de fija a una tasa $\K$ menor que $\Spar$ tiene valor
+positivo.
+
+Cuando se descuenta con la curva de proyección ($c'=c$) los factores intermedios se cancelan
+(suma telescópica) y los cupones flotantes valen en conjunto
+\begin{equation}\label{eq:cap03-telescopica}
+  \sum_{i=1}^{n}C^{\mathrm{flo}}_i\,\DF{c}{d_i/365}=\Nom\bigl(G\,\widetilde P_c(s)-\DF{c}{d_n/365}\bigr),
+\end{equation}
+que para un swap nuevo ($G=1$, $s=0$) es $\Nom\bigl(1-\DF{c}{d_n/365}\bigr)$.
+El código \emph{no} usa esta forma cerrada: suma la tabla de flujos, de modo que sigue siendo válido con otra
+curva de descuento; la identidad se verifica en las pruebas (sección~\ref{sec:cap03-validacion}). Un swap con la
+misma calendarización $d_i$ que una cotización del bootstrap y fijado a esa cotización vale cero sobre la curva
+resultante.
+
+\subsection{Fijaciones compuestas y factor acumulado}\label{sec:cap03-fijaciones}
+
+El factor de un conjunto de fijaciones $(r_k,n_k)$, con $n_k$ los días que devenga la tasa $r_k$, es
+\begin{equation}\label{eq:cap03-factor}
+  G=\prod_{k=1}^{K}\Bigl(1+\frac{r_k\,n_k}{B}\Bigr),\qquad B=360,\qquad G=1\ \text{si } K=0 ,
+\end{equation}
+\codigo{src/instruments/ois_swap.cpp}{compoundOvernight} (en Python,
+\codigo{src/python_bindings/qfpy.cpp}{compound_overnight}). La función lanza
+\texttt{std::invalid\_argument} si las listas difieren en longitud, si algún $n_k\le0$, si $B\le0$ o si algún
+factor $1+r_kn_k/B$ no es positivo.
+
+Las entradas $(r_k,n_k)$ las construye \codigo{desk/api/valuation.py}{accrued_factor} a partir de la tabla de
+fijaciones (\codigo{desk/api/fixings.py}{load_all}) para el rango de días naturales $[j_0,j_1)$, donde $j_0$
+es el inicio del periodo y $j_1$ la fecha de valuación (que no se incluye: su tasa es la primera del tramo
+proyectado). Para cada día $j$ del rango, en orden:
+\begin{enumerate}
+  \item si hay una fijación publicada para $j$, se abre una entrada $(r_j,1)$ (también si $j$ es inhábil: una
+        fijación cargada en sábado o domingo se usa tal cual);
+  \item si no la hay, $j$ es inhábil en el calendario del índice y ya existe una entrada, se suma uno a los
+        días de la última entrada (la tasa del día anterior sigue devengando: la del viernes devenga también
+        sábado y domingo);
+  \item en otro caso se abre $(\hat r_j,1)$ con $\hat r_j$ la última fijación publicada anterior a $j$ o, si
+        no hay ninguna, la tasa a un día implícita en la curva del índice,
+        \begin{equation}\label{eq:cap03-tasa-curva}
+          r^{c}_{\mathrm{ON}}=360\left(\frac{1}{\DF{c}{1/365}}-1\right);
+        \end{equation}
+        si además $j$ es día hábil se anota como faltante y la valuación devuelve el aviso
+        \texttt{missing\_fixing} con las fechas.
+\end{enumerate}
+Inhábil significa sábado, domingo o feriado del calendario del índice
+(\codigo{desk/api/calendars.py}{INDEX_CALENDAR}: México para TIIE-F, Estados Unidos para SOFR;
+\codigo{desk/api/calendars.py}{is_business_day}). Un día inhábil que abre el rango (no hay entrada previa) cae en
+el caso~3 sin aviso.
+
+\subsection{Envejecimiento: el periodo en curso}\label{sec:cap03-envejecimiento}
+
+Para un contrato con inicio $t_a$ y vencimiento $t_v$ valuado en $t_0$, sean $e=t_0-t_a$, $D=t_v-t_a$,
+$q_1<\dots<q_n$ los días de~\eqref{eq:cap03-calendario} para $D$ y $m$ (con $q_0=0$) y
+$j^\ast=\min\{i:q_i>e\}$ el periodo en curso. \codigo{desk/api/valuation.py}{aged_swap_terms} entrega
+\begin{align}
+  s &= q_{j^\ast-1}-e, \qquad d_i=q_i-e\ \ (i\ge j^\ast),
+  \label{eq:cap03-envejecido}\\
+  G &= \begin{cases}
+         \text{\eqref{eq:cap03-factor} sobre los días } [\,t_a+q_{j^\ast-1},\,t_0\,), & q_{j^\ast-1}<e,\\
+         1, & \text{en otro caso,}
+       \end{cases}
+  \label{eq:cap03-g-envejecido}
+\end{align}
+y \codigo{desk/api/valuation.py}{aged_swap} los pasa al segundo constructor de
+\codigo{include/qf/instruments/ois_swap.hpp}{OisSwap}. Si ningún $q_i>e$ (el swap ya no tiene pagos
+pendientes) lanza \texttt{ValueError}. El pago que cae exactamente en $t_0$ ya no es parte del valor
+(se considera liquidado, capítulo~\ref{cap:ciclo-vida}). Si $e<0$ el swap aún no empieza: $s=-e>0$, $G=1$ y el
+primer cupón flotante es $\Nom(\widetilde P_c(s)/\DF{c}{d_1/365}-1)$ con $\tau_1=q_1/360$.
+
+En el periodo en curso ($s<0$) el cupón flotante de~\eqref{eq:cap03-cupon-flotante} es el producto de lo ya
+devengado, $G$, y de la parte proyectada, $1/\DF{c}{d_1/365}$: capitalización geométrica entre ambas. El cupón
+fijo es el del periodo completo~\eqref{eq:cap03-cupon-fijo}, de modo que el valor es sucio (incluye el devengo
+transcurrido). Los constructores validan: nocional positivo, días de pago estrictamente crecientes y positivos,
+$s<d_1$, $G>0$, $G=1$ si $s\ge0$ y convención distinta de 30/360.
+
+\subsection{Descuento con otra curva}\label{sec:cap03-colateral}
+
+Las ecuaciones~\eqref{eq:cap03-pv}--\eqref{eq:cap03-tasa-par} descuentan en $c'$ y proyectan en $c$. El
+backend elige $c'$ en \codigo{desk/api/pricing/rates.py}{_discount} y en
+\codigo{desk/api/valuation.py}{aged_swap_terms}: para un swap sobre la curva TIIE-F, $c'=\cMXNcol$ si la
+contraparte tiene colateral en USD y el snapshot trae esa curva, y $c'=\cTIIE$ en cualquier otro caso (se
+decide en \codigo{desk/api/market.py}{MarketContext.with_collateral}); un swap sobre SOFR descuenta siempre en
+SOFR. La construcción de la curva MXN--USD es del capítulo~\ref{cap:curvas}. Con $c'\ne c$ no vale la
+suma telescópica~\eqref{eq:cap03-telescopica} y la tasa par cambia con el descuento. La separación entre curva
+de proyección y de descuento sigue el marco multicurva \citep{ametrano2013}; la construcción de curvas de
+swaps con y sin colateral se trata en \citet{fujii2009}.
+
+\subsection{Cupones liquidados y valor en pesos}\label{sec:cap03-liquidados}
+
+Los cupones que ya vencieron no se guardan: se derivan de términos, fijaciones y eventos
+(\codigo{desk/api/settlement.py}{_irs_coupons}). Para el pago en $q_i$ con periodo $[q_{i-1},q_i)$ desde
+$t_a$, con nocional $\Nom$ y tasa $\K$ vigentes al pago,
+\begin{equation}\label{eq:cap03-liquidado}
+  C^{\mathrm{fij}}=\Nom\,\K\,\frac{q_i-q_{i-1}}{360},\qquad
+  C^{\mathrm{flo}}=\Nom\,(G_{[q_{i-1},q_i)}-1),\qquad
+  \text{importe}=\varphi\,(C^{\mathrm{flo}}-C^{\mathrm{fij}}),
+\end{equation}
+con $G_{[q_{i-1},q_i)}$ el factor~\eqref{eq:cap03-factor} de todos los días del periodo (misma regla de
+fijaciones y mismos avisos que el envejecimiento). Los cupones futuros de la ficha son las filas de la tabla
+de flujos del swap envejecido (\codigo{desk/api/settlement.py}{_projected_irs}).
+
+El valor se reporta en la moneda de la curva y, para SOFR, también en pesos con el spot del snapshot:
+\begin{equation}\label{eq:cap03-pv-mxn}
+  \PV_{\MXN}=\begin{cases}\PV, & \text{curva TIIE-F},\\ \PV\cdot\Spot, & \text{curva SOFR},\end{cases}
+\end{equation}
+en \codigo{desk/api/valuation.py}{value_trade} y, para el pricer de un swap nuevo, en
+\codigo{desk/api/pricing/rates.py}{_to_mxn}. El DV01 que devuelve el pricer es la diferencia contra una curva
+desplazada $+1~\pb$ en todas las tasas cero de $c$ (con la curva MXN--USD recalibrada cuando existe); es
+positivo para el recibidor de fija y negativo para el pagador:
+\begin{equation}\label{eq:cap03-dv01}
+  \DVO=\PV(\text{base})-\PV(c+1~\pb)
+\end{equation}
+(\codigo{desk/api/pricing/rates.py}{_irs_price}; se desarrolla en el capítulo~\ref{cap:riesgo}).
+
+\subsection{TIIE-F y SOFR}\label{sec:cap03-indices}
+
+La aplicación define las dos curvas elegibles para un swap en \codigo{desk/api/market.py}{CURVES}; la
+tabla~\ref{tab:cap03-indices} resume lo que cambia entre ambas. El código no tiene rezago de observación,
+bloqueo ni rezago de pago en ninguno de los dos.
+
+\begin{table}[ht]
+  \centering
+  \caption{Parámetros de los swaps OIS por índice.}\label{tab:cap03-indices}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    & TIIE-F & SOFR \\
+    \midrule
+    Moneda de la curva & \MXN & \USD \\
+    Días entre cupones $m$ & 28 & 365 (no un año calendario) \\
+    Devengo y base de fijaciones & ACT/360 & ACT/360 \\
+    Calendario de fijaciones & México & Estados Unidos (SIFMA) \\
+    Descuento & TIIE-F o MXN--USD & SOFR \\
+    Valor en pesos & $\PV$ & $\PV\cdot\Spot$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+TIIE de Fondeo es la tasa a un día hábil bancario que publica Banco de México \citep{banxico2021}; SOFR es la
+tasa a un día garantizada que publica la Fed de Nueva York \citep{nyfed2026}. El código toma la fecha de la
+serie como el día al que aplica la tasa, sin desplazarla.
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap03-implementacion}
+
+\begin{itemize}
+  \item Calendario~\eqref{eq:cap03-calendario}: \codigo{src/termstructure/ois_bootstrap.cpp}{oisPaymentDays}.
+        Devengo~\eqref{eq:cap03-tau}: \codigo{src/math/daycount.cpp}{yearFraction} desde
+        \codigo{src/instruments/ois_swap.cpp}{buildPeriods}.
+  \item Factor de descuento~\eqref{eq:cap03-df}: \codigo{src/instruments/ois_swap.cpp}{discountAt}.
+  \item Cupones y tabla de flujos~\eqref{eq:cap03-cupon-fijo}--\eqref{eq:cap03-tasa-compuesta}:
+        \codigo{src/instruments/ois_swap.cpp}{OisSwap::cashFlows}; filas en
+        \codigo{include/qf/instruments/ois_swap.hpp}{OisCashFlow}; clase y constructores en
+        \codigo{include/qf/instruments/ois_swap.hpp}{OisSwap}.
+  \item Valor, anualidad y tasa par~\eqref{eq:cap03-pv}--\eqref{eq:cap03-tasa-par}:
+        \codigo{src/instruments/ois_swap.cpp}{OisSwap::npv}, \codigo{src/instruments/ois_swap.cpp}{OisSwap::annuity}
+        y \codigo{src/instruments/ois_swap.cpp}{OisSwap::parRate}. El binding expone la clase
+        (\codigo{src/python_bindings/qfpy.cpp}{OisSwap}) con \texttt{npv}, \texttt{par\_rate}, \texttt{annuity} y
+        \texttt{cash\_flows}.
+  \item Factor de fijaciones~\eqref{eq:cap03-factor}: \codigo{src/instruments/ois_swap.cpp}{compoundOvernight};
+        armado de las entradas~\eqref{eq:cap03-tasa-curva}: \codigo{desk/api/valuation.py}{accrued_factor};
+        fuente de las fijaciones: \codigo{desk/api/fixings.py}{add_fixing}, \codigo{desk/api/fixings.py}{load_all}
+        y \codigo{desk/api/fixings_fetch.py}{fetch_fixings} (capítulo~\ref{cap:datos}).
+  \item Envejecimiento~\eqref{eq:cap03-envejecido}: \codigo{desk/api/valuation.py}{aged_swap_terms},
+        \codigo{desk/api/valuation.py}{aged_swap} y \codigo{desk/api/valuation.py}{value_trade}; swap nuevo del
+        pricer: \codigo{desk/api/pricing/rates.py}{_irs_swap}, tasa par por omisión
+        \codigo{desk/api/pricing/rates.py}{_irs_par} y respuesta \codigo{desk/api/pricing/rates.py}{_irs_price}.
+  \item Alta a la par: \codigo{desk/api/portfolio.py}{_at_par} guarda como tasa fija la tasa par del swap
+        envejecido en el snapshot de la petición (ver los límites de la sección~\ref{sec:cap03-limites}).
+  \item Cupones liquidados~\eqref{eq:cap03-liquidado}: \codigo{desk/api/settlement.py}{_irs_coupons};
+        proyectados: \codigo{desk/api/settlement.py}{_projected_irs}.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap03-ejemplo}
+
+Los tres ejemplos usan un nocional $\Nom=\num{100000000}$~\MXN{} y se reproducen con
+\codigo{docs/tex/verificacion/cap03_swaps_ois.py}{ejemplo_nuevo},
+\codigo{docs/tex/verificacion/cap03_swaps_ois.py}{ejemplo_envejecido} y
+\codigo{docs/tex/verificacion/cap03_swaps_ois.py}{ejemplo_colateral}. El script llama a \texttt{qfpy} y a
+\codigo{desk/api/valuation.py}{aged_swap}; no reimplementa las fórmulas. Los factores de descuento llevan diez
+decimales (tolerancia absoluta $5\times10^{-11}$), los importes dos (tolerancia $0.005$) y las tasas diez
+(tolerancia $5\times10^{-11}$).
+
+\subsection*{Ejemplo 1: swap nuevo de 70 días}
+
+Pagador de fija, $\K=7.05\,\%$, $D=70$ días y $m=28$: la ecuación~\eqref{eq:cap03-calendario} da $d=(28,56,70)$ y
+$\tau=(28,28,14)/360$ (último periodo corto). La curva (TIIE-F, una sola para proyectar y descontar) tiene
+tasas cero continuas $7.00\,\%$, $7.05\,\%$ y $7.10\,\%$ en 28, 56 y 84 días, interpoladas linealmente;
+a 70 días $z=0.0705+(0.0710-0.0705)\cdot(70-56)/(84-56)=0.07075$ y
+$\DF{\cTIIE}{70/365}=e^{-0.07075\cdot70/365}$. Los factores son
+$\DF{\cTIIE}{28/365}=\verif{cap03-df-28}{0.9946445289}$,
+$\DF{\cTIIE}{56/365}=\verif{cap03-df-56}{0.9892418490}$ y
+$\DF{\cTIIE}{70/365}=\verif{cap03-df-70}{0.9865231439}$. Los cupones salen de~\eqref{eq:cap03-cupon-fijo}
+y~\eqref{eq:cap03-cupon-flotante}; por ejemplo, el primer flotante es
+$\Nom\,(1/\DF{\cTIIE}{28/365}-1)$.
+
+\begin{table}[ht]
+  \centering
+  \caption{Ejemplo 1: cupones del swap nuevo de 70 días (\MXN).}\label{tab:cap03-ejemplo1}
+  \begin{tabular}{@{}rrrrr@{}}
+    \toprule
+    $i$ & $d_i$ & $\tau_i$ & $C^{\mathrm{fij}}_i$ & $C^{\mathrm{flo}}_i$ \\
+    \midrule
+    1 & 28 & $28/360$ & \verif{cap03-fij-1}{548333.33} & \verif{cap03-flo-1}{538430.66} \\
+    2 & 56 & $28/360$ & \verif{cap03-fij-2}{548333.33} & \verif{cap03-flo-2}{546143.49} \\
+    3 & 70 & $14/360$ & \verif{cap03-fij-3}{274166.67} & \verif{cap03-flo-3}{275584.52} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+La anualidad~\eqref{eq:cap03-anualidad} es $\Ann=\verif{cap03-anualidad}{19266706.28}$~\MXN{}. Los cupones
+flotantes descontados suman $\Nom(1-\DF{\cTIIE}{70/365})=\verif{cap03-flotante-telescopica}{1347685.61}$
+(ecuación~\eqref{eq:cap03-telescopica}), así que la tasa par~\eqref{eq:cap03-tasa-par} es
+$\Spar=\verif{cap03-tasa-par}{0.0699489362}$ y, por~\eqref{eq:cap03-pv-par}, el valor del pagador a
+$\K=7.05\,\%$ es $\PV=\Ann\,(\Spar-\K)=\verif{cap03-pv-pagador}{-10617.19}$~\MXN{} (negativo porque paga una
+fija mayor que la par). El script comprueba además que la suma de la tabla coincide con la forma
+cerrada y con $\Ann(\Spar-\K)$ con tolerancia $10^{-6}$.
+
+\subsection*{Ejemplo 2: el mismo swap envejecido 10 días}
+
+El contrato empieza el lunes 2026-06-01 y se valúa el jueves 2026-06-11, así que $e=10$, $q=(28,56,70)$,
+$j^\ast=1$, $s=-10$ y $d=(18,46,60)$ (ecuación~\eqref{eq:cap03-envejecido}). Hay ocho entradas de fijación
+(tabla~\ref{tab:cap03-fijaciones}); el viernes devenga también sábado y domingo, que no son fijaciones
+faltantes, y la valuación no devuelve avisos.
+
+\begin{table}[ht]
+  \centering
+  \caption{Ejemplo 2: fijaciones de TIIE-F del periodo en curso, del lunes 2026-06-01 al miércoles 2026-06-10.}\label{tab:cap03-fijaciones}
+  \begin{tabular}{@{}lcccccccc@{}}
+    \toprule
+    Día & Lun & Mar & Mié & Jue & Vie & Lun & Mar & Mié \\
+    \midrule
+    $r_k$ (\%) & 7.00 & 7.01 & 7.01 & 7.02 & 7.03 & 7.02 & 7.01 & 7.00 \\
+    $n_k$ & 1 & 1 & 1 & 1 & 3 & 1 & 1 & 1 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+El factor~\eqref{eq:cap03-factor} es el producto de los ocho factores $1+r_kn_k/360$:
+$G=\verif{cap03-factor-acumulado}{1.0019504844}$. La curva a la fecha de valuación tiene tasas cero
+$7.02\,\%$, $7.07\,\%$ y $7.12\,\%$ en 18, 46 y 60 días, con
+$\DF{\cTIIE}{18/365}=\verif{cap03-df-env-18}{0.9965440677}$,
+$\DF{\cTIIE}{46/365}=\verif{cap03-df-env-46}{0.9911294406}$ y
+$\DF{\cTIIE}{60/365}=\verif{cap03-df-env-60}{0.9883641171}$. El primer cupón flotante es
+$\Nom\,(G/\DF{\cTIIE}{18/365}-1)=\verif{cap03-flo-env-1}{542516.57}$~\MXN{} y el fijo sigue siendo el del
+periodo completo, $\verif{cap03-fij-env-1}{548333.33}$. Con $\Ann=\verif{cap03-anualidad-env}{19303321.08}$, los flotantes
+descontados valen $\Nom(G-\DF{\cTIIE}{60/365})=\verif{cap03-flotante-telescopica-env}{1358636.73}$ (ecuación~\eqref{eq:cap03-telescopica} con
+$s<0$, $\widetilde P_c(s)=1$), la tasa par del swap envejecido es
+$\Spar=\verif{cap03-tasa-par-env}{0.0703835743}$ y su valor, para $\K=7.05\,\%$,
+$\PV=\verif{cap03-pv-envejecido}{-2247.40}$~\MXN{}.
+
+\subsection*{Ejemplo 3: descuento con otra curva}
+
+Con la curva y los cupones flotantes del ejemplo~1, pero $\K=9\,\%$ y descuento en una curva $c'$ de ejemplo
+con tasas cero $6.00\,\%$ (28 días) y $6.20\,\%$ (84 días): $\DF{c'}{28/365}=\verif{cap03-df-col-28}{0.9954078366}$,
+$\DF{c'}{56/365}=\verif{cap03-df-col-56}{0.9906847541}$ y $\DF{c'}{70/365}=\verif{cap03-df-col-70}{0.9882747622}$. Los
+cupones flotantes no cambian (se proyectan en TIIE-F) pero se descuentan en $c'$: suman
+$\verif{cap03-flo-descontado-col}{1349367.35}$, distinto de la forma telescópica
+$\Nom(1-\DF{c'}{70/365})=\verif{cap03-flo-telescopica-col}{1172523.78}$, que aquí no aplica. La anualidad es
+$\Ann=\verif{cap03-anualidad-col}{19290677.56}$, la tasa par
+$\Spar=\verif{cap03-tasa-par-col}{0.0699491940}$ y el valor del pagador pasa de
+$\verif{cap03-pv-un-curva}{-386317.96}$~\MXN{} (descuento en TIIE-F) a $\verif{cap03-pv-col}{-386793.63}$~\MXN{}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap03-validacion}
+
+\begin{itemize}
+  \item \textbf{C++ (GoogleTest).} En \codigo{tests/test_ois_swap.cpp}{compoundOvernight} las suites
+        \texttt{OisSwap}, \texttt{OisSwapAged} y \texttt{OisSwapDiscountCurve}: valor nulo a la tasa par, valor
+        nulo de un swap fijado en una cotización del bootstrap, suma de la tabla igual al valor, forma cerrada
+        $\Nom(1-\DF{c}{T})-\K\Ann$, pagador igual a menos recibidor, periodo final corto con días reales,
+        el swap envejecido sobre la curva de 26 pilares \codigo{tests/test_ois_swap.cpp}{tiiefCurve26}
+        (\texttt{RolledSwapMatchesOriginalValueRebasedToTheNewDate}: el valor envejecido es el original
+        menos lo liquidado, dividido entre el factor de descuento a la nueva fecha), el swap que empieza
+        después y el descuento en otra curva (cada flujo se descuenta en $c'$ y se proyecta en $c$).
+  \item \textbf{Bindings.} \codigo{tests/test_ois_aged_py.py}{OisAgedBindings.test_compound_overnight} y
+        \codigo{tests/test_ois_aged_py.py}{OisAgedBindings.test_aged_swap_matches_original_value_rebased_to_the_new_date}.
+  \item \textbf{Backend.} Pricer: \codigo{desk/api/tests/test_price_rates.py}{test_irs_at_par_rate_has_zero_pv},
+        \codigo{desk/api/tests/test_price_rates.py}{test_irs_cashflows_sum_to_pv} y
+        \codigo{desk/api/tests/test_price_rates.py}{test_irs_payer_is_minus_receiver}. Envejecimiento y fijaciones:
+        \codigo{desk/api/tests/test_valuation_aged.py}{test_weekend_is_grouped_with_the_friday_fixing_and_does_not_warn},
+        \codigo{desk/api/tests/test_valuation_aged.py}{test_missing_day_takes_last_published_before_it},
+        \codigo{desk/api/tests/test_valuation_aged.py}{test_missing_day_without_any_fixing_uses_the_curve_overnight_rate},
+        \codigo{desk/api/tests/test_valuation_aged.py}{test_future_start_irs_uses_start_days_and_unit_factor} y
+        \codigo{desk/api/tests/test_valuation_aged.py}{test_r3_par_swap_aged_on_shifted_curve_stays_at_par}. Colateral:
+        \codigo{desk/api/tests/test_collateral_valuation.py}{test_aged_swap_discounts_with_the_context_collateral}
+        y \codigo{desk/api/tests/test_collateral_valuation.py}{test_r12_a_par_irs_with_a_usd_counterparty_is_at_par_in_its_snapshot}.
+  \item \textbf{QuantLib} (capítulo~\ref{cap:validacion}). \codigo{desk/validation/ql_rates.py}{price_irs}
+        valúa cada caso con un \texttt{OvernightIndexedSwap} y \texttt{DiscountingSwapEngine} sobre la misma
+        curva, con fechas enteras, \texttt{NullCalendar} y sin ajuste. En el reporte versionado
+        (\codigo{desk/validation/report.json}{irs-02}) los 12 casos de swaps quedan dentro de la tolerancia
+        de $10^{-6}$ del nocional, con diferencia relativa máxima de orden $10^{-15}$. Esos casos son swaps
+        nuevos: \emph{no} hay referencia de QuantLib para el periodo en curso con fijaciones; ese cálculo lo
+        cubren solo las pruebas anteriores.
+\end{itemize}
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap03-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item Las fechas de pago son las pactadas (días naturales desde el inicio) y \emph{no} se ajustan por días
+          inhábiles; los calendarios solo deciden si una fijación sin publicar es faltante. Los cupones de
+          SOFR caen cada 365 días, no cada año calendario.
+    \item No hay rezago de observación, desplazamiento del periodo de observación, bloqueo ni rezago de pago.
+          La aplicación solo usa ACT/360 (el instrumento acepta además ACT/365 y ACT/ACT con divisor 365).
+    \item La parte proyectada del periodo en curso y los periodos futuros dependen de la curva del snapshot
+          (datos sintéticos en \texttt{MX-DEMO}, capítulo~\ref{cap:datos}); no hay prima de riesgo de crédito ni
+          ajustes de valuación (capítulo~\ref{cap:xva}).
+    \item Un día hábil sin fijación usa la última publicada anterior o, si no hay, la tasa a un día de la curva
+          del índice~\eqref{eq:cap03-tasa-curva}, siempre con aviso \texttt{missing\_fixing}. Esa tasa es una
+          aproximación (la cola corta de la curva se extrapola plana).
+    \item El nocional y la tasa fija vigentes se aplican a todo el periodo en curso al valuar; en los cupones
+          liquidados rigen los vigentes al pago (\codigo{desk/api/settlement.py}{_irs_coupons}).
+    \item El valor es sucio (incluye el devengo del periodo en curso) y es el del tenedor: positivo si
+          recibe más de lo que paga.
+    \item El pricer de un swap nuevo no usa fijaciones; las fijaciones solo entran por el envejecimiento.
+    \item \emph{Alta a la par.} \codigo{desk/api/portfolio.py}{_at_par} guarda la tasa par del swap
+          \emph{envejecido} en la fecha del snapshot de la petición, sin fijaciones y sin devolver avisos. Si el
+          swap empieza antes de esa fecha, la tasa guardada no es la par de la fecha de inicio (hallazgo H02 en
+          \texttt{HALLAZGOS.md}).
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap03-referencias}
+
+Las definiciones de tasa simple, factor de descuento y swap siguen a \citet{brigo2006}, \citet{hull2018} y
+\citet{andersen2010}. El tratamiento de curvas de proyección y descuento separadas viene de
+\citet{ametrano2013} y \citet{fujii2009}. Los índices, de \citet{banxico2021} y \citet{nyfed2026}; las
+definiciones de mercado que el código no implementa, de \citet{isda2021}.
