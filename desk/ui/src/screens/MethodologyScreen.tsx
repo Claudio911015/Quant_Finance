@@ -99,7 +99,7 @@ const PRODUCT_SECTIONS: Section[] = [
       },
       {
         label: 'Modelos',
-        text: 'Plano = vol de la superficie en spot y vencimiento. Con sonrisa = volatilidad local de Dupire calculada por QuantLib desde la superficie del snapshot (bicúbica, extrapolación constante), tabulada en la malla del Monte Carlo; donde la varianza local sale negativa se usa la vol plana. Diferencia frente a Dupire al vuelo: del orden de 0.3–0.8 % del pago. El efecto de la sonrisa se lee comparando el valor (± error estándar) con la referencia analítica plana.',
+        text: 'Plano = vol de la superficie en spot y vencimiento. Con sonrisa = volatilidad local de Dupire calculada por QuantLib desde la superficie del snapshot (bicúbica, extrapolación constante), tabulada en 161 strikes y la malla del Monte Carlo; donde la varianza local sale negativa se usa la vol plana. Diferencia frente a Dupire al vuelo (mismas normales, medida a 91 días, 1 y 2 años): de a lo más 0.03 % del pago. El efecto de la sonrisa se lee comparando el valor (± error estándar) con la referencia analítica plana.',
       },
       {
         label: 'Cálculo',
@@ -107,11 +107,11 @@ const PRODUCT_SECTIONS: Section[] = [
       },
       {
         label: 'Error de Monte Carlo',
-        text: '20 000 trayectorias, 10 pasos, semilla fija 42: resultados reproducibles. Error estándar en MXN; delta (+1 % de spot) y vega (+1 punto de vol) por reprecio con la misma semilla.',
+        text: '20 000 trayectorias, 10 pasos, semilla fija 42: resultados reproducibles. Error estándar en MXN; delta (+1 % de spot, o la mitad de la distancia a la barrera más cercana si esta queda a menos de 2 %, para que el choque nunca cruce una barrera) y vega (+1 punto de vol) por reprecio con la misma semilla.',
       },
       {
         label: 'Límites',
-        text: 'Pago solo en MXN; volatilidad local, no estocástica ni vanna-volga; superficie sintética; sin rebate ni one touch; no se registran como operaciones del portafolio. El snapshot siempre trae superficie, no hay caso «sin superficie». Con sonrisa, el Monte Carlo reprecia las vainillas de la superficie con una vol implícita algo menor (Dupire de QuantLib sobre la bicúbica con extrapolación constante, 10 pasos): ATM −0.06 puntos a 91 días, −0.25 a 1 año y −0.40 a 2 años; en las alas (strikes a ±0.5 y ±1 σ√T) hasta −0.15, −0.65 y −0.47. Con 20 o 40 pasos a 1 año baja a −0.22 y −0.18 ATM: no basta para pagar el tiempo de respuesta. Con corredores muy anchos la fórmula cerrada no converge: la referencia sale «—» y el método analítico responde con error. La vigilancia continua del double no touch usa 10 pasos y subvalúa en corredores más estrechos que ~1 desviación (σ√T).',
+        text: 'Pago solo en MXN; volatilidad local, no estocástica ni vanna-volga; superficie sintética; sin rebate ni one touch; no se registran como operaciones del portafolio. El snapshot siempre trae superficie, no hay caso «sin superficie». Con sonrisa, el Monte Carlo reprecia las vainillas de la superficie con una vol implícita algo menor (Dupire de QuantLib sobre la bicúbica con extrapolación constante, 10 pasos): ATM −0.04 puntos a 91 días, −0.22 a 1 año y −0.50 a 2 años; en las alas (strikes a ±0.5 y ±1 σ√T) hasta −0.13, −0.60 y −0.58. Con 20 o 40 pasos a 1 año baja a −0.18 y −0.15 ATM: no basta para pagar el tiempo de respuesta. Con corredores muy anchos la fórmula cerrada no converge: la referencia sale «—» y el método analítico responde con error. La vigilancia continua del double no touch usa 10 pasos y subvalúa en corredores más estrechos que ~1 desviación (σ√T).',
       },
     ],
   },

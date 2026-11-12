@@ -9,7 +9,7 @@ from desk.api.pricing.base import MAX_DAYS, Product
 from desk.api.validation import MAX_AMOUNT, MAX_PRICE, choice, integer, number
 from desk.validation.ql_curves import build_curve
 
-PATHS, STEPS, SEED, LV_STRIKES = 20000, 10, 42, 41
+PATHS, STEPS, SEED, LV_STRIKES = 20000, 10, 42, 161
 CHART_POINTS, CHART_PATHS = 21, 2000
 SPOT_BUMP = VOL_BUMP = 0.01
 _LOCK = threading.Lock()  # la fecha de valuación de QuantLib es global al proceso: un precio a la vez
@@ -69,7 +69,7 @@ def _build(p, mkt, spot, dvol):
     surf.enableExtrapolation()
     h = ql.BlackVolTermStructureHandle(surf)
     lv = ql.NoExceptLocalVolSurface(h, dom, fgn, q, sigma)  # Dupire; con varianza local negativa usa sigma
-    # Dupire de QuantLib tabulado en la malla del Monte Carlo (15x más rápido que al vuelo, ~0.5 % de diferencia)
+    # Dupire de QuantLib tabulado en la malla del Monte Carlo (~6x más rápido que al vuelo; con 161 strikes difiere <= 0.03 % del pago)
     times = [T * i / STEPS for i in range(STEPS)]
     times[0] = 1e-3 * T / STEPS
     ks = list(spot * np.exp(np.linspace(-5, 5, LV_STRIKES) * sigma * np.sqrt(T)))

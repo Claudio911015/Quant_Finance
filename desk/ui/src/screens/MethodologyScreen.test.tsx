@@ -450,11 +450,19 @@ describe('MethodologyScreen', () => {
       renderScreen();
       const text = exo('Límites');
       expect(text).toContain('vainillas');
-      expect(text).toContain('−0.25 a 1 año');
+      expect(text).toContain('−0.22 a 1 año');
       expect(text).toContain('la fórmula cerrada no converge');
       expect(text).toContain('el método analítico responde con error');
       expect(text).toContain('10 pasos');
       expect(text).toContain('σ√T');
+    });
+
+    it('declara la tabla de volatilidad local con su diferencia medida y el choque acotado de la delta', () => {
+      renderScreen();
+      expect(exo('Modelos')).toContain('161 strikes');
+      expect(exo('Modelos')).toContain('0.03 % del pago');
+      expect(exo('Modelos')).not.toContain('0.3–0.8');
+      expect(exo('Error de Monte Carlo')).toContain('mitad de la distancia a la barrera más cercana');
     });
   });
 });
