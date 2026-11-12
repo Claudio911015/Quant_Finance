@@ -178,6 +178,7 @@
   border-bottom: 1px dotted var(--text-dim);
   color: var(--text);
   cursor: pointer;
+  text-align: left;
 }
 
 .xva-pick[aria-pressed='true'] {
