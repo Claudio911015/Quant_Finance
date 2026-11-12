@@ -26,6 +26,9 @@ const OpsScreen = lazy(() => import('./screens/ops/OpsScreen'));
 // corte 7
 const ValidationScreen = lazy(() => import('./screens/ValidationScreen'));
 // fin corte 7
+// corte 9
+const XvaScreen = lazy(() => import('./screens/XvaScreen'));
+// fin corte 9
 
 export default function App() {
   return (
@@ -49,6 +52,9 @@ export default function App() {
           {/* corte 7 */}
           <Route path="/validacion" element={<ValidationScreen />} />
           {/* fin corte 7 */}
+          {/* corte 9 */}
+          <Route path="/xva" element={<XvaScreen />} />
+          {/* fin corte 9 */}
         </Routes>
       </Suspense>
     </Shell>

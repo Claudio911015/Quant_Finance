@@ -46,7 +46,7 @@ const RISK_LABELS: Record<string, { label: string; fmt: (v: number) => string }>
 };
 
 /** Texto inicial de un campo: miles con coma en montos, sin ceros de relleno. */
-function initialText(f: FieldSpec): string {
+export function initialText(f: FieldSpec): string {
   if (f.default === null) return '';
   if (typeof f.default === 'string') return f.default;
   return f.default.toLocaleString('en-US', {
@@ -61,7 +61,7 @@ function percentText(dec: number): string {
 }
 
 /** Convierte el texto de los campos en el cuerpo de la petición (percent: % → decimal). */
-function parseParams(spec: ProductSpec, values: Record<string, string>) {
+export function parseParams(spec: ProductSpec, values: Record<string, string>) {
   const params: Record<string, unknown> = {};
   const errors: Record<string, string> = {};
   for (const f of spec.fields) {
@@ -346,7 +346,7 @@ function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
   );
 }
 
-function Field({
+export function Field({
   spec,
   field,
   value,

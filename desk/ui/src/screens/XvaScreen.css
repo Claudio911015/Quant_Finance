@@ -1,0 +1,316 @@
+/* Corte 9: pantalla XVA. Las clases .xva-* las comparten sus paneles (screens/xva/). */
+.xva {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.xva-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.xva-body.is-loading {
+  opacity: 0.6;
+  transition: opacity 120ms;
+}
+
+/* Aviso permanente: va como banda y siempre visible. */
+.xva-notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.xva-collateral {
+  margin: calc(var(--space-2) * -1) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+/* Tarjeta */
+.xva-card {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.xva-card > h2 {
+  margin-bottom: var(--space-3);
+}
+
+.xva-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.xva-card__head > h2 {
+  margin: 0;
+}
+
+.xva-subtitle {
+  margin: 0 0 var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+/* Dos columnas desde 900 px; una debajo de la otra en menos. */
+.xva-grid2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .xva-grid2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Avisos */
+.xva-note {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+
+.xva-note--plain {
+  padding-left: 0;
+  padding-right: 0;
+  color: var(--text-dim);
+}
+
+.xva-note--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.xva-note--error {
+  color: var(--neg);
+}
+
+.xva-foot {
+  margin: var(--space-2) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.xva-list {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+  font-size: var(--fs-sm);
+}
+
+/* Tablas: el contenedor desplaza en horizontal si no caben; la página no. */
+.xva-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.xva-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.xva-table th {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  font-weight: 500;
+  text-align: left;
+}
+
+.xva-table th.num {
+  text-align: right;
+}
+
+.xva-table tbody th {
+  border-bottom: 1px solid var(--border);
+  font-weight: 400;
+}
+
+.xva-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.xva-table td.num,
+.xva-table th.num {
+  white-space: nowrap;
+}
+
+.xva-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.xva-table tr[data-selected='true'] {
+  background: var(--accent-soft);
+}
+
+.xva-total {
+  font-weight: 600;
+}
+
+.xva-sub {
+  display: block;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.xva-pick {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dotted var(--text-dim);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.xva-pick[aria-pressed='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.xva-tag {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-1);
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.xva-tag--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* Formularios */
+.xva-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.xva-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1 1 160px;
+  max-width: 240px;
+}
+
+.xva-field--narrow {
+  max-width: 260px;
+}
+
+.xva-field__head {
+  display: flex;
+  align-items: center;
+}
+
+.xva-field label {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.xva-field input,
+.xva-field select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+}
+
+.xva-field input {
+  text-align: right;
+}
+
+.xva-field input:hover,
+.xva-field select:hover {
+  border-color: var(--text-dim);
+}
+
+.xva-field input[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.xva-field__error {
+  color: var(--neg);
+  font-size: var(--fs-xs);
+}
+
+.xva-field__hint {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.xva-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.xva-btn {
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.xva-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
+.xva-btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.xva-btn--primary {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.xva-btn--ghost {
+  height: 24px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+/* Solo para lectores de pantalla. */
+.xva-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

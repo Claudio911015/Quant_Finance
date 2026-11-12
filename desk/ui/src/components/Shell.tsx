@@ -66,6 +66,18 @@ const NAV_ITEMS = [
       </Icon>
     ),
   },
+  // corte 9
+  {
+    to: '/xva',
+    label: 'XVA',
+    icon: (
+      <Icon>
+        <path d="M2.5 13.5V6.5M6.5 13.5V3M10.5 13.5V8.5M14 13.5H2" />
+        <path d="M2.5 4.5l4-2.5 4 3.5 3.5-2.5" />
+      </Icon>
+    ),
+  },
+  // fin corte 9
   {
     to: '/coberturas',
     label: 'Coberturas',

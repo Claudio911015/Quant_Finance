@@ -1,0 +1,51 @@
+/* Curvas de crédito: editor a la izquierda, resultado a la derecha desde 900 px. */
+.xva-curves {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+  margin-top: var(--space-3);
+}
+
+@media (min-width: 900px) {
+  .xva-curves {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  }
+}
+
+.xva-curves__editor,
+.xva-curves__result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* El campo de recuperación ocupa su alto natural: `.xva-field` fija un flex-basis pensado para filas. */
+.xva-curves__editor > .xva-field {
+  flex: none;
+}
+
+.xva-cell {
+  width: 88px;
+  height: 26px;
+  padding: 0 var(--space-2);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.xva-cell:hover {
+  border-color: var(--text-dim);
+}
+
+.xva-cell[aria-invalid='true'] {
+  border-color: var(--neg);
+}
+
+.is-loading {
+  opacity: 0.6;
+  transition: opacity 120ms;
+}

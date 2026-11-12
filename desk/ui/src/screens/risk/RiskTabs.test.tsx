@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RiskTabs } from './RiskTabs';
 
@@ -6,13 +7,16 @@ import { RiskTabs } from './RiskTabs';
 vi.mock('./VarTab', () => ({ VarTab: () => <section data-testid="var-stub" /> }));
 vi.mock('./PnlExplainTab', () => ({ PnlExplainTab: () => <section data-testid="pnl-stub" /> }));
 vi.mock('./LimitsTab', () => ({ LimitsTab: () => <section data-testid="limites-stub" /> }));
-vi.mock('./CreditTab', () => ({ CreditTab: () => <section data-testid="credito-stub" /> }));
 vi.mock('./ScenarioLibraryTab', () => ({ ScenarioLibraryTab: () => <section data-testid="escenarios-stub" /> }));
 
 const LABELS = ['Sensibilidades', 'VaR', 'P&L explicado', 'Límites', 'Crédito', 'Escenarios'];
 
 function renderTabs() {
-  return render(<RiskTabs sensitivities={<p>contenido de sensibilidades</p>} />);
+  return render(
+    <MemoryRouter>
+      <RiskTabs sensitivities={<p>contenido de sensibilidades</p>} />
+    </MemoryRouter>,
+  );
 }
 
 beforeEach(() => {
@@ -54,7 +58,6 @@ describe('RiskTabs', () => {
     const expected: [string, string][] = [
       ['P&L explicado', 'pnl-stub'],
       ['Límites', 'limites-stub'],
-      ['Crédito', 'credito-stub'],
       ['Escenarios', 'escenarios-stub'],
     ];
     for (const [label, testId] of expected) {
@@ -73,11 +76,20 @@ describe('RiskTabs', () => {
     expect(window.location.hash).toBe('#abajo');
   });
 
-  it('?tab=credito inicial abre Crédito', () => {
+  it('?tab=credito inicial abre Crédito, que remite a la pantalla XVA', () => {
     window.history.replaceState(null, '', '/riesgo?tab=credito');
     renderTabs();
     expect(screen.getByRole('tab', { name: 'Crédito' }).getAttribute('aria-selected')).toBe('true');
-    expect(screen.getByTestId('credito-stub')).toBeTruthy();
+    const panel = screen.getByRole('tabpanel');
+    expect(panel.textContent).toContain('El crédito, la exposición y el XVA están en la pantalla XVA');
+    expect(panel.textContent).toContain('los límites siguen en Límites');
+    expect(within(panel).getByRole('link', { name: 'XVA' }).getAttribute('href')).toBe('/xva');
+  });
+
+  it('la pestaña Crédito ya no monta ninguna pantalla propia', () => {
+    renderTabs();
+    fireEvent.click(screen.getByRole('tab', { name: 'Crédito' }));
+    expect(screen.queryAllByTestId(/-stub$/)).toHaveLength(0);
   });
 
   it('un ?tab= inválido cae en Sensibilidades', () => {

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { CreditTab } from './CreditTab';
+import { Link } from 'react-router-dom';
 import { LimitsTab } from './LimitsTab';
 import { PnlExplainTab } from './PnlExplainTab';
 import { ScenarioLibraryTab } from './ScenarioLibraryTab';
@@ -26,6 +26,19 @@ function writeTab(id: RiskTabId) {
   window.history.replaceState(window.history.state, '', `?${params.toString()}${window.location.hash}`);
 }
 
+/** El crédito y el CVA pasaron a la pantalla XVA: la pestaña queda como señal para quien la busque aquí. */
+function CreditMoved() {
+  return (
+    <section className="radv-card" aria-labelledby="risk-credit-moved">
+      <h2 id="risk-credit-moved">Crédito</h2>
+      <p>
+        El crédito, la exposición y el XVA están en la pantalla <Link to="/xva">XVA</Link>; los límites siguen en
+        Límites.
+      </p>
+    </section>
+  );
+}
+
 function renderTab(id: RiskTabId, sensitivities: ReactNode): ReactNode {
   switch (id) {
     case 'sensibilidades':
@@ -37,7 +50,7 @@ function renderTab(id: RiskTabId, sensitivities: ReactNode): ReactNode {
     case 'limites':
       return <LimitsTab />;
     case 'credito':
-      return <CreditTab />;
+      return <CreditMoved />;
     case 'escenarios':
       return <ScenarioLibraryTab />;
   }

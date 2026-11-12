@@ -266,7 +266,7 @@ describe('Snapshot inicial', () => {
 });
 
 describe('Shell: barra lateral', () => {
-  it('enlaza las ocho pantallas, con Operaciones justo antes de Metodología, y marca la activa', async () => {
+  it('enlaza las nueve pantallas, con XVA justo después de Riesgo y Operaciones justo antes de Metodología, y marca la activa', async () => {
     mockApi([DEMO]);
     renderShell('/riesgo');
     const nav = screen.getByRole('navigation', { name: 'Navegación principal' });
@@ -276,6 +276,7 @@ describe('Shell: barra lateral', () => {
       'Pricers',
       'Portafolio',
       'Riesgo',
+      'XVA',
       'Coberturas',
       'Operaciones',
       'Metodología',
@@ -291,7 +292,7 @@ describe('Paleta de comandos', () => {
   it.each([
     ['Ctrl+K', { ctrlKey: true }],
     ['Cmd+K', { metaKey: true }],
-  ])('%s abre la paleta con las ocho pantallas y los ocho pricers', async (_name, keys) => {
+  ])('%s abre la paleta con las nueve pantallas y los ocho pricers', async (_name, keys) => {
     mockApi([DEMO]);
     renderShell();
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -309,6 +310,7 @@ describe('Paleta de comandos', () => {
       'Pricers',
       'Portafolio',
       'Riesgo',
+      'XVA',
       'Coberturas',
       'Operaciones',
       'Metodología',
