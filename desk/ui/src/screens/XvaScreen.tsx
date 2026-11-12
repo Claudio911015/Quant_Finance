@@ -9,6 +9,7 @@ import { CreditCurvesPanel } from './xva/CreditCurvesPanel';
 import { IncrementalPanel } from './xva/IncrementalPanel';
 import { XvaParamsPanel } from './xva/XvaParamsPanel';
 import { XvaProfileChart } from './xva/XvaProfileChart';
+import { XvaSensitivitiesPanel } from './xva/XvaSensitivitiesPanel';
 import { XvaTable } from './xva/XvaTable';
 import './XvaScreen.css';
 
@@ -161,17 +162,21 @@ export function XvaScreen() {
             </p>
           </section>
           {cp && (
-            <div className="xva-grid2">
-              <section className="xva-card" aria-labelledby="xva-profile-title">
-                <h2 id="xva-profile-title">Perfil de {cp.counterparty}</h2>
-                {cp.profile.length === 0 ? (
-                  <p className="xva-note xva-note--plain">Sin operaciones incluidas: no hay perfil que simular.</p>
-                ) : (
-                  <XvaProfileChart cp={cp} pfeQuantile={data.params.pfe_quantile} />
-                )}
-              </section>
-              <TradesCard cp={cp} />
-            </div>
+            <>
+              <div className="xva-grid2">
+                <section className="xva-card" aria-labelledby="xva-profile-title">
+                  <h2 id="xva-profile-title">Perfil de {cp.counterparty}</h2>
+                  {cp.profile.length === 0 ? (
+                    <p className="xva-note xva-note--plain">Sin operaciones incluidas: no hay perfil que simular.</p>
+                  ) : (
+                    <XvaProfileChart cp={cp} pfeQuantile={data.params.pfe_quantile} />
+                  )}
+                </section>
+                <TradesCard cp={cp} />
+              </div>
+              {/* Con `key`, guardar parámetros o curvas, o pactar, descarta las sensibilidades: ya no son las del XVA. */}
+              <XvaSensitivitiesPanel key={reloadTick} snapshotId={snapshotId} counterparty={cp.counterparty} />
+            </>
           )}
         </div>
       )}

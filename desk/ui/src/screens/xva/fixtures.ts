@@ -13,6 +13,9 @@ import type {
   XvaParams,
   XvaParamsResponse,
   XvaResponse,
+  XvaSensCurve,
+  XvaSensRow,
+  XvaSensitivitiesResponse,
 } from '../../api/xvaTypes';
 
 const NO_WARNINGS: Warning[] = [];
@@ -295,6 +298,115 @@ export const CREDIT_CURVES_FIXTURE: CreditCurvesResponse = {
     BETA_CURVE_ERROR,
     curve('Banco Gamma (sintético)', 'Banco Gamma (sintético)', 'counterparty', 3, Q_GAMMA),
   ],
+};
+
+// --- Sensibilidades por AAD (corte 12): cifras inventadas con la forma del contrato de GET /api/xva/sensitivities. ---
+
+const sensRow = (cva: number, dva: number, fva: number): XvaSensRow => ({
+  cva,
+  dva,
+  fva,
+  total: round(cva - dva + fva, 2),
+});
+
+const sumRows = (rows: XvaSensRow[]): XvaSensRow =>
+  sensRow(
+    round(rows.reduce((a, r) => a + r.cva, 0), 2),
+    round(rows.reduce((a, r) => a + r.dva, 0), 2),
+    round(rows.reduce((a, r) => a + r.fva, 0), 2),
+  );
+
+/** Curva con pilares `[etiqueta, días, cva, dva, fva]` y su DV01 como suma de los pilares. */
+function sensCurve(name: string, pillars: [string, number, number, number, number][]): XvaSensCurve {
+  const rows = pillars.map(([label, days, cva, dva, fva]) => ({ label, days, ...sensRow(cva, dva, fva) }));
+  return { curve: name, pillars: rows, dv01: sumRows(rows) };
+}
+
+const SENS_CDS_TENORS = ['1Y', '2Y', '3Y', '5Y', '7Y', '10Y'];
+const SENS_CDS_YEARS = [1, 2, 3, 5, 7, 10];
+
+export const XVA_SENSITIVITIES_FIXTURE: XvaSensitivitiesResponse = {
+  snapshot: SNAPSHOT,
+  as_of: AS_OF,
+  counterparty: 'Banco Alfa (sintético)',
+  notice: 'XVA informativo: no entra al PV ni a la contabilidad',
+  method: 'Diferenciación adjunta (XAD 2.2.0), cinta por trayectoria, derivadas trayectoria a trayectoria',
+  cds_jacobian: 'Reprecio del bootstrap de CDS (diferencia central de 0.01 pb)',
+  params: PARAMS,
+  paths: 2000,
+  seed: 42,
+  elapsed_s: 3.1,
+  valuation_elapsed_s: 0.42,
+  n_inputs: 48,
+  bump_cost_estimate_s: 40.3,
+  xva: { cva_mxn: 31000, dva_mxn: 4000, fva_mxn: 1500, total_mxn: 28500 },
+  units: {
+    curves: 'MXN por pb',
+    fx: 'MXN por 1 % del spot',
+    vols: 'MXN por punto (vol USDMXN), por pb de vol normal (σ Hull-White), por 0.01 (a)',
+    cds: 'MXN por pb',
+    funding: 'MXN por pb',
+  },
+  curves: [
+    sensCurve('TIIE-F', [
+      ['1D', 1, 0.4, 0.1, 0],
+      ['1x28', 28, 1.2, 0.3, 0.1],
+      ['3x28', 84, 3.5, 0.9, 0.2],
+      ['6x28', 168, 7.8, 1.9, 0.5],
+      ['13x28', 364, 14.6, 3.2, 1.1],
+      ['26x28', 728, 22.4, 4.8, 1.9],
+      ['39x28', 1092, -9.7, -2.1, 0.8],
+      ['65x28', 1820, -41.3, -8.6, -2.4],
+      ['91x28', 2548, -12.5, -2.7, -0.9],
+      ['130x28', 3640, -3.1, -0.6, -0.2],
+    ]),
+    sensCurve('SOFR', [
+      ['1D', 1, -0.2, -0.1, 0],
+      ['1M', 30, -0.9, -0.2, 0],
+      ['3M', 91, -2.6, -0.6, -0.1],
+      ['6M', 182, -5.4, -1.2, -0.3],
+      ['1Y', 365, -9.8, -2.2, -0.6],
+      ['2Y', 730, -14.1, -3.1, -1],
+      ['3Y', 1095, 5.2, 1.1, 0.4],
+      ['5Y', 1825, 18.7, 3.9, 1.3],
+      ['7Y', 2555, 6.3, 1.4, 0.5],
+      ['10Y', 3650, 1.8, 0.4, 0.1],
+    ]),
+    sensCurve('MXN-USD', [
+      ['1M', 28, 0.6, 0.1, 0],
+      ['3M', 84, 1.9, 0.4, 0.1],
+      ['6M', 168, 4.1, 0.9, 0.2],
+      ['1Y', 364, 8.3, 1.8, 0.5],
+      ['2Y', 728, 11.2, 2.4, 0.7],
+      ['3Y', 1092, 6.5, 1.4, 0.4],
+      ['5Y', 1820, -4.8, -1, -0.3],
+      ['7Y', 2548, -2.2, -0.5, -0.1],
+      ['10Y', 3640, -0.7, -0.2, 0],
+    ]),
+  ],
+  fx: { label: 'USDMXN spot', ...sensRow(5200, 900, 310) },
+  vols: [
+    { param: 'fx_vol', label: 'Volatilidad USDMXN', ...sensRow(820, 150, 40) },
+    { param: 'sigma_mxn', label: 'σ Hull-White TIIE-F', ...sensRow(210, 45, 12) },
+    { param: 'a_mxn', label: 'a Hull-White TIIE-F', ...sensRow(-95, -20, -6) },
+    { param: 'sigma_usd', label: 'σ Hull-White SOFR', ...sensRow(160, 33, 9) },
+    { param: 'a_usd', label: 'a Hull-White SOFR', ...sensRow(-70, -15, -4) },
+  ],
+  credit: {
+    counterparty: {
+      kind: 'curve',
+      cds: SENS_CDS_TENORS.map((tenor, i) => ({ tenor, ...sensRow(round(180 - 25 * i, 2), 0, 0) })),
+      hazards: SENS_CDS_YEARS.map((to_years, i) => ({ to_years, ...sensRow(round(95 - 12 * i, 2), 0, round(3 - 0.4 * i, 2)) })),
+    },
+    own: { kind: 'assumed', cds: [], hazards: [{ to_years: null, ...sensRow(0, -38, -11) }] },
+  },
+  funding: sensRow(0, 0, 214),
+  empty_reason: null,
+  assumptions: [
+    'Correlaciones tomadas de los cambios diarios de los factores del snapshot (TIIE-F, SOFR, USDMXN): aproximación de las correlaciones de los brownianos del modelo',
+    'Derivadas parciales: al mover un pilar no se recalibran la curva MXN-USD ni las curvas de crédito (el bootstrap de CDS descuenta con TIIE-F)',
+  ],
+  warnings: NO_WARNINGS,
 };
 
 function round(x: number, digits: number): number {

@@ -220,3 +220,80 @@ export interface CreditCurveBody {
   quotes: CreditCurveQuote[];
   snapshot?: string;
 }
+
+// --- Sensibilidades del XVA por diferenciación adjunta (corte 12) ---
+
+/** Derivadas del CVA, DVA y FVA respecto de un insumo, en MXN y en la unidad que diga `units`; total = cva − dva + fva. */
+export interface XvaSensRow {
+  cva: number;
+  dva: number;
+  fva: number;
+  total: number;
+}
+
+export interface XvaSensPillar extends XvaSensRow {
+  label: string;
+  days: number;
+}
+
+export interface XvaSensCurve {
+  /** `TIIE-F`, `SOFR` o `MXN-USD` (esta última solo si el snapshot la trae). */
+  curve: string;
+  pillars: XvaSensPillar[];
+  /** Suma de los pilares: movimiento paralelo de la curva. */
+  dv01: XvaSensRow;
+}
+
+export interface XvaSensFx extends XvaSensRow {
+  label: string;
+}
+
+export interface XvaSensVol extends XvaSensRow {
+  param: 'fx_vol' | 'sigma_mxn' | 'a_mxn' | 'sigma_usd' | 'a_usd';
+  label: string;
+}
+
+export interface XvaSensCds extends XvaSensRow {
+  tenor: string;
+}
+
+export interface XvaSensHazard extends XvaSensRow {
+  /** Fin del tramo de intensidad en años; `null` en el tramo único de una curva plana o supuesta. */
+  to_years: number | null;
+}
+
+export interface XvaSensCredit {
+  kind: 'curve' | 'flat' | 'assumed';
+  /** Por plazo de CDS; vacío si `kind` no es `curve`. */
+  cds: XvaSensCds[];
+  hazards: XvaSensHazard[];
+}
+
+export interface XvaSensitivitiesResponse {
+  snapshot: string;
+  as_of: string;
+  counterparty: string;
+  notice: string;
+  method: string;
+  cds_jacobian: string;
+  params: XvaParams;
+  paths: number;
+  seed: number;
+  /** Segundos de las sensibilidades, de una valuación del XVA con la misma malla y de las 2 × `n_inputs` valuaciones por choques. */
+  elapsed_s: number;
+  valuation_elapsed_s: number;
+  n_inputs: number;
+  bump_cost_estimate_s: number;
+  /** Idéntico al de `GET /api/xva` para esta contraparte. */
+  xva: Pick<XvaComponents, 'cva_mxn' | 'dva_mxn' | 'fva_mxn' | 'total_mxn'>;
+  units: { curves: string; fx: string; vols: string; cds: string; funding: string };
+  curves: XvaSensCurve[];
+  fx: XvaSensFx;
+  vols: XvaSensVol[];
+  credit: { counterparty: XvaSensCredit; own: XvaSensCredit };
+  funding: XvaSensRow;
+  /** Texto cuando la contraparte no tiene operaciones cubiertas (listas vacías y cifras en cero); si no, `null`. */
+  empty_reason: string | null;
+  assumptions: string[];
+  warnings: Warning[];
+}

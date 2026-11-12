@@ -9,10 +9,18 @@ import type {
   XvaParamsBody,
   XvaParamsResponse,
   XvaResponse,
+  XvaSensitivitiesResponse,
 } from './xvaTypes';
 
 export function getXva(snapshot: string): Promise<XvaResponse> {
   return apiRequest('GET', `/xva?snapshot=${encodeURIComponent(snapshot)}`);
+}
+
+export function getXvaSensitivities(snapshot: string, counterparty: string): Promise<XvaSensitivitiesResponse> {
+  return apiRequest(
+    'GET',
+    `/xva/sensitivities?snapshot=${encodeURIComponent(snapshot)}&counterparty=${encodeURIComponent(counterparty)}`,
+  );
 }
 
 export function getXvaParams(): Promise<XvaParamsResponse> {

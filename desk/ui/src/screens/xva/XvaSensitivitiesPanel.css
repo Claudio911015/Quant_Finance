@@ -1,0 +1,25 @@
+/* Sensibilidades del XVA: el resultado apila tablas y gráfica sin ensanchar la página. */
+.xva-sens__result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-top: var(--space-3);
+}
+
+.xva-sens__chart {
+  min-width: 0;
+}
+
+/* Fila de título de grupo (una curva, un tipo de factor) y fila del DV01 paralelo. */
+.xva-table .xva-sens__group th {
+  padding-top: var(--space-2);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.xva-table .xva-sens__dv01 th,
+.xva-table .xva-sens__dv01 td {
+  border-top: 1px solid var(--border-strong);
+  font-weight: 600;
+}

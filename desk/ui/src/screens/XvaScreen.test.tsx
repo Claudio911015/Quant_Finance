@@ -8,6 +8,7 @@ import {
   INCREMENTAL_FIXTURE,
   XVA_FIXTURE,
   XVA_PARAMS_FIXTURE,
+  XVA_SENSITIVITIES_FIXTURE,
 } from './xva/fixtures';
 import XvaScreen from './XvaScreen';
 
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   createTrade: vi.fn(),
   getXva: vi.fn(),
   getXvaParams: vi.fn(),
+  getXvaSensitivities: vi.fn(),
   putXvaParams: vi.fn(),
   xvaIncremental: vi.fn(),
   getCreditCurves: vi.fn(),
@@ -31,6 +33,7 @@ vi.mock('../api/client', async (importOriginal) => {
 vi.mock('../api/xvaClient', () => ({
   getXva: mocks.getXva,
   getXvaParams: mocks.getXvaParams,
+  getXvaSensitivities: mocks.getXvaSensitivities,
   putXvaParams: mocks.putXvaParams,
   xvaIncremental: mocks.xvaIncremental,
   getCreditCurves: mocks.getCreditCurves,
@@ -66,6 +69,7 @@ beforeEach(() => {
   mocks.getXvaParams.mockResolvedValue(XVA_PARAMS_FIXTURE);
   mocks.putXvaParams.mockImplementation(async (body) => ({ ...XVA_PARAMS_FIXTURE, ...body }));
   mocks.xvaIncremental.mockResolvedValue(INCREMENTAL_FIXTURE);
+  mocks.getXvaSensitivities.mockResolvedValue(XVA_SENSITIVITIES_FIXTURE);
   mocks.getCreditCurves.mockResolvedValue(CREDIT_CURVES_FIXTURE);
   mocks.putCreditCurve.mockResolvedValue(CREDIT_CURVES_FIXTURE.curves[0]);
   mocks.createTrade.mockResolvedValue({ id: 12 });
@@ -115,6 +119,17 @@ describe('XvaScreen: tabla y avisos', () => {
     expect(within(trades).getByText(/Cross currency swap/)).toBeTruthy();
   });
 
+  it('las sensibilidades van bajo el perfil, son de la contraparte elegida y se piden a petición', async () => {
+    renderScreen();
+    await screen.findByRole('table', { name: 'XVA por contraparte' });
+    expect(mocks.getXvaSensitivities).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: BETA.counterparty }));
+    expect(screen.getByRole('heading', { name: `Sensibilidades de ${BETA.counterparty}` })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Calcular sensibilidades' }));
+    await screen.findByRole('table', { name: 'Sensibilidad por curva y pilar' });
+    expect(mocks.getXvaSensitivities).toHaveBeenCalledWith('MX-DEMO', BETA.counterparty);
+  });
+
   it('declara los supuestos y el modelo del snapshot', async () => {
     renderScreen();
     await screen.findByRole('table', { name: 'XVA por contraparte' });
@@ -156,6 +171,16 @@ describe('XvaScreen: edición y recarga', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Guardar parámetros' }));
     await waitFor(() => expect(mocks.getXva).toHaveBeenCalledTimes(2));
     expect(mocks.putXvaParams).toHaveBeenCalledWith(expect.objectContaining({ funding_spread: 0.008 }));
+  });
+
+  it('guardar los parámetros descarta las sensibilidades calculadas, que ya no son las del XVA', async () => {
+    renderScreen();
+    await screen.findByRole('table', { name: 'XVA por contraparte' });
+    fireEvent.click(screen.getByRole('button', { name: 'Calcular sensibilidades' }));
+    await screen.findByRole('table', { name: 'Sensibilidad por curva y pilar' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Guardar parámetros' }));
+    await waitFor(() => expect(mocks.getXva).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('table', { name: 'Sensibilidad por curva y pilar' })).toBeNull();
   });
 
   it('guardar una curva de crédito recalcula el XVA', async () => {
