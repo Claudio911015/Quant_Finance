@@ -1,5 +1,351 @@
-% Capítulo marcador creado por T1: lo sustituye su redactor con la estructura de _plantilla.tex.
-% Conservar \chapter y \label tal cual.
 \chapter{Derivados de FX y opción sobre acción}\label{cap:fx}
 
-Forward de FX y opción de FX (Garman--Kohlhagen), superficie de volatilidad y opción sobre acción.
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:cap04-proposito}
+
+Este capítulo documenta tres productos del desk y la superficie de volatilidad que usa uno de ellos: el
+\emph{forward de FX} USDMXN, la \emph{opción europea de FX} (Garman--Kohlhagen) y la \emph{opción europea
+sobre acción} (Black--Scholes con rendimiento por dividendos continuo). La matemática vive en C++
+(\codigo{include/qf/instruments/fx_forward.hpp}{FxForward},
+\codigo{include/qf/instruments/fx_option.hpp}{FxOption},
+\codigo{src/pricingengines/blackscholes.cpp}{blackScholes} y
+\codigo{include/qf/termstructure/volsurface.hpp}{VolSurface}); el backend solo valida, arma el instrumento y
+serializa (\codigo{desk/api/pricing/fx.py}{PRODUCTS}). Los tres productos se valúan en \MXN{}. El forward y la
+opción de FX leen las curvas, el spot y la superficie del entorno de mercado
+(capítulo~\ref{cap:curvas}); la opción sobre acción no depende del mercado: usa los insumos que se capturan en
+la operación.
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:cap04-notacion}
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. En este capítulo $\Nom$ es el nocional en
+\USD{} del forward y de la opción de FX, $\Spot$ el spot USDMXN (pesos por dólar) y $\K$ el precio pactado
+(strike), en pesos por dólar. Símbolos propios del capítulo:
+$T$ es el plazo en años, $T = d/365$ con $d$ los días naturales a la fecha de vencimiento;
+$s\in\{+1,-1\}$ es el signo del lado (compra $+1$, venta $-1$);
+$d$ y $f$ son subíndices de la moneda \emph{doméstica} (\MXN{}) y \emph{foránea} (\USD{}) del par, y $r_d$, $r_f$
+las tasas cero continuas de sus curvas a $T$;
+$\varphi$ es la densidad normal estándar;
+$d_1$, $d_2$ son los argumentos de Black--Scholes;
+$\sigma_i(\K)$ es la volatilidad del pilar de plazo $T_i$ al strike $\K$ y $w=\sigma^2T$ la varianza total;
+$\Delta$, $\Gamma$, $\nu$ son delta, gamma y vega de la posición;
+en la opción sobre acción, $S_0$ es el precio de la acción, $q$ el rendimiento por dividendos continuo, $r$ la
+tasa libre de riesgo continua y $m$ la cantidad de títulos; $\Theta$ y $\rho_r$ son theta (por día) y rho (por
+1~\%).
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:cap04-modelo}
+
+\subsection{Plazo, factores de descuento y moneda}\label{sec:cap04-tiempo}
+
+El plazo de todo producto de este capítulo es $T=d/365$, con $d$ los días naturales entre la fecha de
+valuación y el vencimiento; no hay calendario de días hábiles, rezago de liquidación spot ni ajuste de fechas
+(el constructor fija \texttt{Instrument(maturityDays/365)},
+\codigo{src/instruments/fx_forward.cpp}{FxForward::FxForward}). El factor de descuento de la curva $c$ es
+\begin{equation}\label{eq:cap04-df}
+  \DF{c}{T} = \exp\bigl(-\zr{c}{T}\,T\bigr),
+\end{equation}
+con $\zr{c}{T}$ la tasa cero con composición continua de la curva, interpolada linealmente entre pilares y
+extrapolada plana fuera de ellos (\codigo{src/termstructure/yieldcurve.cpp}{YieldCurve::discountFactor},
+\codigo{src/math/interpolation.cpp}{Interpolator::operator()}; el origen de los pilares es el
+capítulo~\ref{cap:curvas}). La moneda doméstica es el peso: la curva $d$ es \texttt{TIIE-F} o, bajo colateral
+en dólares, \texttt{MXN-USD} (sección~\ref{sec:cap04-implementacion}); la curva $f$ es \texttt{SOFR}. El spot
+se lee del entorno bajo la clave \texttt{USDMXN}
+(\codigo{src/core/market_environment.cpp}{MarketEnvironment::spot}).
+
+\subsection{Forward de FX}\label{sec:cap04-forward}
+
+Por paridad cubierta de tasas, con $s=+1$ si se compra el dólar a plazo:
+\begin{align}
+  \FxF{T} &= \Spot\,\frac{\DF{f}{T}}{\DF{d}{T}}, \label{eq:cap04-fwd-tasa}\\
+  \PV &= s\,\Nom\,\bigl(\Spot\,\DF{f}{T} - \K\,\DF{d}{T}\bigr) = s\,\Nom\,\DF{d}{T}\,\bigl(\FxF{T}-\K\bigr),
+        \label{eq:cap04-fwd-pv}\\
+  \Delta &= \frac{\partial \PV}{\partial \Spot} = s\,\Nom\,\DF{f}{T}. \label{eq:cap04-fwd-delta}
+\end{align}
+La ecuación~\eqref{eq:cap04-fwd-tasa} es \codigo{src/instruments/fx_forward.cpp}{FxForward::forwardRate} (no
+depende del lado, el nocional ni el strike), la~\eqref{eq:cap04-fwd-pv} es
+\codigo{src/instruments/fx_forward.cpp}{FxForward::npv} y la~\eqref{eq:cap04-fwd-delta}
+\codigo{src/instruments/fx_forward.cpp}{FxForward::delta}. El valor $\PV$ está en pesos y es el del tenedor:
+positivo si el forward vale más que el strike pactado. La delta está en dólares equivalentes (pesos de valor por cada peso por dólar
+de spot).
+
+Al vencimiento la operación no deja un valor residual en el desk: el flujo liquidado es en efectivo,
+$s\,\Nom\,(\mathrm{FIX}-\K)$ en \MXN{}, con el FIX USDMXN de la fecha de vencimiento
+(\codigo{desk/api/settlement.py}{_forward_settlement}; capítulo~\ref{cap:ciclo-vida}).
+
+\begin{diferencia}
+  La referencia \citep{hull2018} presenta el forward como $S_0e^{(r_d-r_f)T}$ con tasas constantes, fechas de
+  liquidación del mercado (spot a dos días hábiles) y entrega física. El código usa los factores de
+  descuento de las curvas del snapshot en el plazo de días naturales $T=d/365$, toma el spot del snapshot como
+  spot de la fecha de valuación (sin rezago de liquidación ni calendario de días hábiles) y liquida en efectivo
+  contra el FIX. Con curvas planas en composición continua las dos expresiones coinciden.
+\end{diferencia}
+
+\subsection{Superficie de volatilidad}\label{sec:cap04-superficie}
+
+La superficie es una rejilla de volatilidades $\sigma_i(K_j)$ en $n$ plazos $T_1<\dots<T_n$ (años) y $J$
+strikes $K_1<\dots<K_J$ (\codigo{src/termstructure/volsurface.cpp}{VolSurface::VolSurface}). El desk la arma
+con $T_i=\text{días}_i/365$ y la interpolación por omisión, lineal en strike
+(\codigo{desk/api/market.py}{_build_context}). La lectura en $(\K,T)$ es
+\codigo{src/termstructure/volsurface.cpp}{VolSurface::vol} y procede en dos pasos:
+\begin{enumerate}
+  \item \emph{Strike.} En cada plazo $T_i$ se interpola linealmente $\sigma_i(\K)$ en strike; fuera de
+        $[K_1,K_J]$ la extrapolación es plana (\codigo{src/math/interpolation.cpp}{Interpolator::operator()}).
+        Se define $w_i(\K)=\sigma_i(\K)^2\,T_i$.
+  \item \emph{Plazo.} Se interpola linealmente en $T$ la varianza total sobre los nodos
+        $(0,0),(T_1,w_1),\dots,(T_n,w_n)$ y se devuelve
+        \begin{equation}\label{eq:cap04-vol}
+          \vol(\K,T)=\sqrt{\frac{w(\K,T)}{T}}\quad (T<T_n),\qquad \vol(\K,T)=\sigma_n(\K)\quad (T\ge T_n).
+        \end{equation}
+\end{enumerate}
+El ancla $(0,0)$ hace que, para $T\le T_1$, $w=w_1\,T/T_1$ y por tanto $\vol(\K,T)=\sigma_1(\K)$: la
+extrapolación es plana \emph{en volatilidad} tanto antes del primer plazo como después del último, no plana
+en varianza. El constructor rechaza volatilidades no positivas, pilares no crecientes, menos de dos plazos o
+dos strikes, y varianza total decreciente en el plazo en algún strike de la rejilla
+(\codigo{src/termstructure/volsurface.cpp}{VolSurface::validate}). El entorno de mercado prefiere la superficie
+al escalar plano cuando hay una registrada
+(\codigo{src/core/market_environment.cpp}{MarketEnvironment::volatility}).
+
+\begin{diferencia}
+  La práctica de mercado en FX cotiza las volatilidades por delta (ATM, \emph{risk reversal} y
+  \emph{butterfly}) y construye de ahí el \emph{smile} \citep{wystup2017}. El código no convierte deltas: su
+  superficie es una rejilla directamente en strike (pesos por dólar) y plazo, y la opción lee la
+  volatilidad en su propio strike $\K$, no en una moneyness a plazo.
+\end{diferencia}
+
+\subsection{Opción de FX: Garman--Kohlhagen}\label{sec:cap04-gk}
+
+La opción europea sobre el dólar es Black--Scholes con la tasa foránea como rendimiento por dividendos
+\citep{garman1983,black1973}. Con $\Spot$, $\K$, $T=d/365$ y
+\begin{equation}\label{eq:cap04-tasas}
+  r_d = -\frac{\ln \DF{d}{T}}{T} = \zr{d}{T},\qquad r_f = -\frac{\ln \DF{f}{T}}{T} = \zr{f}{T},\qquad
+  \vol=\vol(\K,T)\ \text{de la ecuación~\eqref{eq:cap04-vol}},
+\end{equation}
+\begin{equation}\label{eq:cap04-d1d2}
+  d_1=\frac{\ln(\Spot/\K)+\bigl(r_d-r_f+\tfrac12\vol^2\bigr)T}{\vol\sqrt T},\qquad d_2=d_1-\vol\sqrt T,
+\end{equation}
+el valor de la posición es $s\,\Nom$ veces el precio por dólar:
+\begin{align}
+  c &= \Spot\,\DF{f}{T}\,\Ncdf(d_1) - \K\,\DF{d}{T}\,\Ncdf(d_2) \qquad\text{(call sobre el dólar)},
+      \label{eq:cap04-gk-call}\\
+  p &= \K\,\DF{d}{T}\,\Ncdf(-d_2) - \Spot\,\DF{f}{T}\,\Ncdf(-d_1) \qquad\text{(put sobre el dólar)}.
+      \label{eq:cap04-gk-put}
+\end{align}
+Con $\FxF{T}$ de la ecuación~\eqref{eq:cap04-fwd-tasa}, $c=\DF{d}{T}\,[\FxF{T}\Ncdf(d_1)-\K\Ncdf(d_2)]$
+(forma de \citealt{black1976}), y $c-p=\DF{d}{T}(\FxF{T}-\K)$, que es el valor del forward con el mismo strike
+de la ecuación~\eqref{eq:cap04-fwd-pv}. Las medidas de riesgo que devuelve el código, ya multiplicadas por
+$s\,\Nom$ (el forward y la volatilidad no se escalan), son para el call
+\begin{equation}\label{eq:cap04-gk-griegas}
+  \Delta = s\,\Nom\,\DF{f}{T}\,\Ncdf(d_1),\qquad
+  \Gamma = s\,\Nom\,\frac{\DF{f}{T}\,\varphi(d_1)}{\Spot\,\vol\sqrt T},\qquad
+  \nu = s\,\Nom\,\frac{\Spot\,\DF{f}{T}\,\varphi(d_1)\sqrt T}{100},
+\end{equation}
+y para el put $\Delta=-s\,\Nom\,\DF{f}{T}\,\Ncdf(-d_1)$ con la misma gamma y vega. La vega está \emph{por punto
+de volatilidad}: es la derivada analítica entre 100, una aproximación de primer orden al cambio de valor
+cuando $\vol$ sube $0.01$ (no un reprecio con $\vol+0.01$). El código implementa esto en
+\codigo{src/instruments/fx_option.cpp}{FxOption::greeks}, que delega el precio en
+\codigo{src/pricingengines/blackscholes.cpp}{blackScholes}; \codigo{include/qf/instruments/fx_option.hpp}{FxOptionGreeks}
+agrupa precio, delta, gamma, vega, forward y volatilidad usada. No se calculan theta ni rho de la opción de FX.
+
+\subsection{Opción sobre acción: Black--Scholes}\label{sec:cap04-bs}
+
+La opción sobre acción es europea, con precio $S_0$, strike $\K$, plazo $T$, volatilidad plana $\vol$, tasa
+$r$ y rendimiento por dividendos $q$ constantes, todos capturados en la operación
+(\codigo{desk/api/pricing/fx.py}{_equity_validate}). Con $d_1,d_2$ como en la ecuación~\eqref{eq:cap04-d1d2}
+(con $S_0$, $r$ y $q$ en lugar de $\Spot$, $r_d$ y $r_f$) \citep{black1973,merton1973}, el precio de un título es
+\begin{equation}\label{eq:cap04-bs}
+  c = S_0 e^{-qT}\Ncdf(d_1) - \K e^{-rT}\Ncdf(d_2),\qquad
+  p = \K e^{-rT}\Ncdf(-d_2) - S_0 e^{-qT}\Ncdf(-d_1),
+\end{equation}
+(\codigo{src/pricingengines/blackscholes.cpp}{blackScholes}) y el valor de la posición es $m\,c$ o $m\,p$ con
+$m>0$ títulos. Las medidas de riesgo del call, por título, son
+\begin{align}
+  \Delta &= e^{-qT}\Ncdf(d_1), &
+  \Gamma &= \frac{e^{-qT}\varphi(d_1)}{S_0\,\vol\sqrt T}, &
+  \nu &= \frac{S_0 e^{-qT}\varphi(d_1)\sqrt T}{100}, \nonumber\\
+  \Theta &= \frac{1}{365}\Bigl[-\frac{S_0 e^{-qT}\varphi(d_1)\vol}{2\sqrt T} - r\K e^{-rT}\Ncdf(d_2)
+            + q S_0 e^{-qT}\Ncdf(d_1)\Bigr], &
+  \rho_r &= \frac{\K T e^{-rT}\Ncdf(d_2)}{100}, \label{eq:cap04-bs-griegas}
+\end{align}
+y las del put son $\Delta=-e^{-qT}\Ncdf(-d_1)$,
+$\Theta=\frac{1}{365}\bigl[-\tfrac{S_0 e^{-qT}\varphi(d_1)\vol}{2\sqrt T}+r\K e^{-rT}\Ncdf(-d_2)-qS_0e^{-qT}\Ncdf(-d_1)\bigr]$
+y $\rho_r=-\K T e^{-rT}\Ncdf(-d_2)/100$, con la misma gamma y vega. El backend las multiplica por $m$
+(\codigo{desk/api/pricing/fx.py}{_equity_price}).
+
+\begin{diferencia}
+  La referencia \citep{hull2018} define las griegas como derivadas puras. El código usa escalas de mesa:
+  la vega es por punto de volatilidad (entre 100), la rho por punto porcentual de tasa (entre 100) y la theta
+  por día natural (entre 365, con signo: negativa para una opción larga que pierde valor con el tiempo). La
+  delta y la gamma sí son derivadas puras con respecto al spot. En FX, la vega usa la misma escala.
+\end{diferencia}
+
+\subsection{Valuación a una fecha posterior}\label{sec:cap04-aging}
+
+El forward, la opción de FX y la opción sobre acción se envejecen \emph{acortando el plazo}: en la fecha de
+valuación $t$ de un snapshot se vuelve a valuar el mismo contrato con $d=(\text{vencimiento}-t)$ días, o con
+$T=d/365$ años para la acción (\codigo{desk/api/valuation.py}{shortened}). No hay fijaciones ni flujos
+intermedios que acumular. Una opción vencida sin ejercicio registrado vale cero con el aviso
+\texttt{expired\_unexercised} (\codigo{desk/api/valuation.py}{value_trade}); el resto del ciclo de vida está en
+el capítulo~\ref{cap:ciclo-vida}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:cap04-implementacion}
+
+\begin{description}
+  \item[Forward.] \codigo{desk/api/pricing/fx.py}{_fx_forward} arma
+    \codigo{src/python_bindings/qfpy.cpp}{FxForward} con el nocional en dólares, el strike, los días y el lado
+    (\texttt{buy}$=+1$); \codigo{desk/api/pricing/fx.py}{_fx_forward_price} devuelve el valor
+    ecuación~\eqref{eq:cap04-fwd-pv}, la delta~\eqref{eq:cap04-fwd-delta} y el forward~\eqref{eq:cap04-fwd-tasa}.
+  \item[Opción de FX.] \codigo{desk/api/pricing/fx.py}{_fx_option_price} llama a
+    \codigo{src/instruments/fx_option.cpp}{FxOption::greeks} y devuelve valor, delta, gamma, vega, forward y
+    la volatilidad leída en $(\K,T)$.
+  \item[Opción sobre acción.] \codigo{desk/api/pricing/fx.py}{_equity_bs} llena
+    \codigo{src/python_bindings/qfpy.cpp}{OptionParams} y llama al binding \codigo{src/python_bindings/qfpy.cpp}{black_scholes};
+    \codigo{desk/api/pricing/fx.py}{_equity_price} multiplica por la cantidad.
+  \item[Curva doméstica.] \codigo{desk/api/pricing/fx.py}{_domestic} elige la curva MXN con la que se descuenta
+    y se obtiene el forward: \texttt{mxn\_discount} del contexto de mercado,
+    que es \texttt{TIIE-F} con colateral en pesos y \texttt{MXN-USD} con colateral en dólares si el snapshot trae
+    esa curva (\codigo{desk/api/market.py}{MarketContext.with_collateral}).
+\end{description}
+
+\paragraph{Dónde se aplica el colateral.} La valuación de una operación del portafolio sí aplica el colateral
+vigente de su contraparte a la fecha de valuación (\codigo{desk/api/valuation.py}{value_trade} llama a
+\codigo{desk/api/collateral.py}{currency_on} y valúa con ese contexto). El \emph{pricer} (ruta
+\codigo{desk/api/routes/price.py}{price}) carga el contexto del snapshot sin contraparte, con colateral en
+pesos, y por tanto descuenta el forward y la opción con \texttt{TIIE-F}. Con colateral en dólares el forward
+implícito a los plazos cotizados es el forward cotizado del snapshot: la curva \texttt{MXN-USD} se calibra
+(capítulo~\ref{cap:curvas}) precisamente para que $\FxF{T}=\Spot+\text{puntos}$ en esos plazos.
+
+\paragraph{Datos.} Las operaciones de FX leen la superficie y el spot del snapshot; la opción sobre acción no.
+Al dar de alta una opción sobre acción, el plazo en años se convierte a días enteros con
+$\mathrm{round}(\text{años}\times365)$ (\codigo{desk/api/portfolio.py}{_tenor_days}; por ejemplo $0.5$ años son
+182 días) y las valuaciones posteriores usan $T=d/365$ con esos días.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:cap04-ejemplo}
+
+Todos los valores se reproducen con \codigo{docs/tex/verificacion/cap04_fx.py}{entorno}, que llama al código
+del proyecto (no reimplementa las fórmulas); la tolerancia absoluta de cada uno se da entre paréntesis y es
+al menos media unidad del último dígito impreso. Los insumos de los ejemplos 1 a 4 son: curva
+\texttt{TIIE-F} con tasas cero continuas de $9.00\,\%$ a $0.5$ años y $9.20\,\%$ a $1$ año; curva
+\texttt{SOFR} con $4.20\,\%$ y $4.10\,\%$ en los mismos pilares; spot $\Spot=18.60$; superficie USDMXN con
+plazos $0.25$ y $0.5$ años, strikes $18$, $19$ y $20$, y volatilidades $(0.130, 0.120, 0.125)$ y
+$(0.135, 0.125, 0.130)$ respectivamente.
+
+\paragraph{1. Forward a un año, tasa.} Con $d=365$, $T=1$, $\zr{d}{1}=0.0920$ y $\zr{f}{1}=0.0410$, la
+ecuación~\eqref{eq:cap04-fwd-tasa} da $\FxF{1}=18.60\,e^{0.0920-0.0410}=\verif{cap04-fwd-1a}{19.5732058151}$
+pesos por dólar (tolerancia $10^{-9}$).
+
+\paragraph{2. Forward a 273 días, valor.} Compra de $\Nom=10^6$ USD con $\K=19.00$ y $d=273$ días:
+$T=273/365=0.7479452\ldots$ queda entre los pilares, por lo que $\zr{d}{T}=0.0900+0.0020\,(T-0.5)/0.5=0.0909917808$ y
+$\zr{f}{T}=0.0420-0.0010\,(T-0.5)/0.5=0.0415041096$, de modo que $\DF{d}{T}=0.9342073472$, $\DF{f}{T}=0.9694340806$
+y $\FxF{T}=19.3013617$. La ecuación~\eqref{eq:cap04-fwd-pv} da
+$\PV=\verif{cap04-fwd-pv-273}{281534.3021}$ \MXN{} (tolerancia $10^{-3}$).
+
+\paragraph{3. Volatilidad de la superficie.} Se pide $\vol(18.5,\,0.375)$. En $T_1=0.25$ el \emph{smile} en
+$18.5$ es $0.125$ (punto medio de $0.130$ y $0.120$) y en $T_2=0.5$ es $0.130$; las varianzas totales son
+$w_1=0.125^2\cdot0.25=0.00390625$ y $w_2=0.130^2\cdot0.5=0.00845$. A $T=0.375$, punto medio, $w=0.006178125$ y
+la ecuación~\eqref{eq:cap04-vol} da $\vol=\sqrt{0.006178125/0.375}=\verif{cap04-vol-superficie}{0.1283549765}$
+(tolerancia $10^{-9}$). El mismo script comprueba la extrapolación: $\vol(18.5,\,0.125)=0.125$ (antes del primer
+plazo, igual a $\sigma_1$), $\vol(18.5,\,0.7)=0.130$ (después del último), y $\vol(17,\,0.5)=0.135$ y
+$\vol(21,\,0.25)=0.125$ (fuera de los strikes).
+
+\paragraph{4. Call de FX.} Compra de un call sobre $\Nom=10^6$ USD con $\K=19.00$ y $d=182$ días,
+$T=0.4986301\ldots$, menor que el primer pilar, por lo que la extrapolación plana da $r_d=\zr{d}{T}=0.0900$ y
+$r_f=\zr{f}{T}=0.0420$. La volatilidad es $\vol(19,\,T)=\verif{cap04-gk-sigma}{0.1249865377}$ (tolerancia
+$10^{-9}$), $d_1=0.0742321$, $d_2=-0.0140255$ y $\Ncdf(d_1)=0.5295872$, $\Ncdf(d_2)=0.4944048$. La
+ecuación~\eqref{eq:cap04-gk-call} da un precio de $0.66472392$ \MXN{} por dólar, es decir
+$\PV=\verif{cap04-gk-prima}{664723.9181}$ \MXN{} (tolerancia $10^{-3}$). La vega de la
+ecuación~\eqref{eq:cap04-gk-griegas} es $\nu=\verif{cap04-gk-vega}{51170.5993}$ \MXN{} por punto de volatilidad
+(tolerancia $10^{-3}$); la delta es $\Delta=\verif{cap04-gk-delta}{518611.6343}$ dólares equivalentes (tolerancia $10^{-3}$) y el forward a $182$ días que reporta
+la opción es $19.0505472$.
+
+\paragraph{5. Call sobre acción.} Diez títulos, $S_0=100$, $\K=105$, $\vol=0.25$, $r=0.07$, $q=0.02$ y
+$T=0.5$. Entonces $d_1=-0.0461891$, $d_2=-0.2229658$, $\Ncdf(d_1)=0.4815797$ y $\Ncdf(d_2)=0.4117810$. La
+ecuación~\eqref{eq:cap04-bs} da $c=5.9289039$ por título y el valor de la posición es
+$\PV=\verif{cap04-bs-pv}{59.2890394569}$ (tolerancia $10^{-9}$); la delta de la posición,
+$10\,e^{-0.01}\,\Ncdf(d_1)$, es $\verif{cap04-bs-delta}{4.7678794913}$ (tolerancia $10^{-9}$).
+
+\paragraph{6. Snapshot sintético MX-DEMO.} El script siembra \texttt{MX-DEMO} en una base SQLite temporal
+(no usa \texttt{desk/data/desk.db}). Para el spot $18.60$, el forward implícito a $168$ días de la curva
+\texttt{MXN-USD} es $\verif{cap04-fwd-implicito}{18.8637000}$, el spot más los $0.2637$ puntos cotizados
+(tolerancia $10^{-7}$). Un forward de compra de $10^6$ USD con $\K=19.00$ a $182$ días tiene, con colateral en
+pesos (curva doméstica \texttt{TIIE-F}), forward $\verif{cap04-fwd-mxn}{18.8946554}$ y
+$\PV=\verif{cap04-fwd-pv-mxn}{-101772.3486}$ \MXN{}; con colateral en dólares (\texttt{MXN-USD}), forward
+$\verif{cap04-fwd-usd}{18.8861406}$ y $\PV=\verif{cap04-fwd-pv-usd}{-110047.9708}$ \MXN{} (tolerancias $10^{-7}$ y
+$10^{-3}$): una curva doméstica con mayor factor de descuento baja el forward y, como aquí $\FxF{T}<\K$, también el
+valor del comprador.
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:cap04-validacion}
+
+Las pruebas de C++ comparan el valor con la fórmula calculada en la propia prueba: para el forward,
+paridad cubierta con factores de descuento de la curva, tasa forward, delta contra diferencia finita, compra
+igual a menos venta y que un choque al spot o a una curva se propaga al precio
+(casos \texttt{FxForward.NpvMatchesCoveredParityFormulaWithCurveDiscountFactors}, \texttt{ForwardRateIsSpotTimesDfRatio},
+\texttt{DeltaMatchesFiniteDifferenceOfSpot}, \texttt{BuyIsMinusSell} y \texttt{ReadsCurvesAndSpotByNameSoShocksAffectIt} de
+\codigo{tests/test_fx_forward.cpp}{FxForward}); para la opción de FX, que $c-p$ iguala al forward, que el
+precio coincide con Black--Scholes con la tasa foránea como dividendo, que delta y gamma coinciden con
+diferencias finitas y que la vega es por punto (casos \texttt{FxOption.CallMinusPutEqualsForwardNpvAtSameStrike},
+\texttt{PriceMatchesBlackScholesWithForeignRateAsDividendYield},
+\texttt{DeltaAndGammaMatchFiniteDifferencesOfSpot}, \texttt{VegaIsPerOneVolPoint} y
+\texttt{VolIsTakenFromSurfaceWhenPresent} de \codigo{tests/test_fx_option.cpp}{FxOption}). La superficie se prueba en
+\codigo{tests/test_volsurface.cpp}{VolSurface} (recuperación en los pilares, extrapolación plana en volatilidad,
+ancla del extremo corto y rechazo de arbitraje de calendario) y Black--Scholes en
+\codigo{tests/test_pricingengines.cpp}{blackScholes} (paridad put-call, valores conocidos, signos de las griegas).
+En el backend, \codigo{desk/api/tests/test_price_fx.py}{test_fx_forward_matches_interest_parity},
+\codigo{desk/api/tests/test_price_fx.py}{test_fx_option_put_call_parity_against_forward},
+\codigo{desk/api/tests/test_price_fx.py}{test_equity_option_matches_black_scholes_times_quantity} y
+\codigo{desk/api/tests/test_price_fx.py}{test_equity_option_does_not_depend_on_market} cubren la composición con el
+entorno, y \codigo{desk/api/tests/test_collateral_valuation.py}{test_usd_collateral_changes_the_pv_of_every_mxn_product}
+el cambio de curva doméstica por colateral.
+
+Contra QuantLib 1.44 (capítulo~\ref{cap:validacion}), el reporte vigente
+(\codigo{desk/validation/report.json}{fx_forward}) compara 8 forwards, 10 opciones de FX y 8 opciones sobre
+acción con las mismas curvas y el mismo spot en MX-DEMO: todos caen dentro de su tolerancia relativa al
+nocional ($10^{-8}$ para el forward y $10^{-6}$ para las opciones) con diferencias relativas máximas de
+$3.1\times10^{-16}$, $1.1\times10^{-16}$ y $1.1\times10^{-16}$. Los pricers de referencia son
+\codigo{desk/validation/ql_fx.py}{price_fx_forward}, \codigo{desk/validation/ql_fx.py}{price_fx_option} y
+\codigo{desk/validation/ql_fx.py}{price_equity_option}; la opción de FX se compara con volatilidad plana igual a
+la que el desk leyó de su superficie en $(\K,T)$, de modo que se valida la fórmula y no la interpolación de la
+superficie, que solo prueban las pruebas propias de este capítulo.
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:cap04-limites}
+
+\begin{limites}
+  \begin{itemize}
+    \item \emph{Fechas.} Días naturales, $T=d/365$, sin calendario de días hábiles, rezago de liquidación spot ni
+          ajuste de fechas de pago por inhábiles (Metodología, «Fechas»). El spot del snapshot es el spot de la
+          fecha de valuación.
+    \item \emph{Forward.} Se liquida en efectivo al vencimiento contra el FIX USDMXN; si no hay FIX de esa
+          fecha se usa el spot de respaldo con aviso. No modela entrega física, NDF con fijación anticipada
+          ni puntos forward cotizados como insumo del producto (solo en la calibración de \texttt{MXN-USD}).
+    \item \emph{Opción de FX.} Europea. No hay prima inicial ni pago de prima (Metodología, «Estados»: «sin prima ni pago
+          inicial»), ni ejercicio automático: una opción vencida sin ejercicio registrado vale cero con aviso.
+          No se calculan theta ni rho. La superficie está en strike, no en delta, y es lineal en strike con
+          extrapolación plana en strike y en volatilidad.
+    \item \emph{Colateral.} El pricer descuenta con \texttt{TIIE-F}; la valuación del portafolio usa
+          \texttt{MXN-USD} cuando la contraparte tiene colateral en dólares y el snapshot trae la curva;
+          sin la curva, usa \texttt{TIIE-F} con el aviso \texttt{no\_csa\_curve}. Los puntos forward cotizados se
+          mantienen fijos al recalibrar \texttt{MXN-USD}, así que un forward con colateral en dólares apenas
+          reacciona a un choque de SOFR (Metodología, «Efecto del colateral»).
+    \item \emph{Datos.} En MX-DEMO la superficie y las curvas son sintéticas; en MKT-LIVE el spot y las
+          volatilidades USDMXN vienen de fuentes reales y el resto es sintético (Metodología, «Datos»).
+    \item \emph{Opción sobre acción.} Europea, sin lado (la cantidad es positiva, así que la posición es
+          siempre larga), con tasa, rendimiento por dividendos y volatilidad constantes capturados en la
+          operación (no usa las curvas ni la superficie), sin dividendos discretos. La moneda se etiqueta como
+          \MXN{} sin conversión. Su PV entra al portafolio pero aporta cero a DV01, escenarios y VaR
+          (Metodología, «Renta variable»). El plazo se redondea a días enteros al dar de alta la operación.
+    \item \emph{Confirmación.} El forward y la opción de FX tienen exportación e importación FpML; la opción
+          sobre acción no (capítulo~\ref{cap:operaciones}).
+  \end{itemize}
+\end{limites}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:cap04-referencias}
+
+La opción de FX sigue a \citet{garman1983}, que adapta la fórmula de \citet{black1973} y \citet{merton1973} con
+la tasa foránea como rendimiento por dividendos; la forma sobre el forward es la de \citet{black1976}. Las
+relaciones de paridad cubierta, de paridad put-call y las griegas están en \citet{hull2018}, y las convenciones
+de cotización de volatilidad en FX en \citet{wystup2017}.
