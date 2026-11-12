@@ -53,6 +53,10 @@ target_include_directories(qf
 
 target_compile_features(qf PUBLIC cxx_std_17)
 
+# exposure_engine.cpp reparte las trayectorias entre hilos (std::thread)
+find_package(Threads REQUIRED)
+target_link_libraries(qf PRIVATE Threads::Threads)
+
 # Optional Python bindings via pybind11
 find_package(pybind11 QUIET)
 if(pybind11_FOUND)

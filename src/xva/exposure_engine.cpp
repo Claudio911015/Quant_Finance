@@ -3,9 +3,12 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <exception>
+#include <mutex>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 
 namespace qf::xva {
@@ -649,6 +652,33 @@ double paidFlowsDeflated(const CompiledSet& set, int d, const PathData& path, De
     return total;
 }
 
+// Runs body(first, last) over [0, nPaths) cut into one contiguous chunk per hardware thread. A path draws its
+// normals from its own generator and writes only its own rows, so the result does not depend on the number of
+// threads. The first exception a worker throws is rethrown here once every worker has finished.
+template <class Body>
+void forEachPathChunk(std::size_t nPaths, Body body)
+{
+    const std::size_t threads = std::min<std::size_t>(std::max(1u, std::thread::hardware_concurrency()), nPaths);
+    if (threads <= 1) {
+        body(std::size_t{0}, nPaths);
+        return;
+    }
+    std::exception_ptr failure;
+    std::mutex failureMutex;
+    std::vector<std::thread> workers;
+    for (std::size_t w = 0; w < threads; ++w)
+        workers.emplace_back([&, w] {
+            try {
+                body(nPaths * w / threads, nPaths * (w + 1) / threads);
+            } catch (...) {
+                const std::lock_guard<std::mutex> lock(failureMutex);
+                if (!failure) failure = std::current_exception();
+            }
+        });
+    for (std::thread& t : workers) t.join();
+    if (failure) std::rethrow_exception(failure);
+}
+
 } // namespace
 
 namespace detail {
@@ -729,25 +759,27 @@ std::vector<ExposureProfile> ExposureEngine::simulate(const std::vector<NettingS
     std::vector<std::vector<double>> values(nSets, std::vector<double>(nPaths * nDays));
     std::vector<double> invBank(nPaths * nDays);
 
-    PathData path;
-    path.resize(c.grid.horizon);
-    Bonds bonds;
-    bonds.resize(c.days.size());
-    for (std::size_t p = 0; p < nPaths; ++p) {
-        simulatePath(c.grid, config_.seed, p, path);
-        const PathView pv0{{path.I[kMxn].data(), path.I[kUsd].data()}, 0.0};
-        for (std::size_t j = 0; j < nDays; ++j) {
-            const int d = report[j];
-            const std::size_t dd = static_cast<std::size_t>(d);
-            computeBonds(c, d, path.x[kMxn][dd], path.x[kUsd][dd], bonds);
-            PathView pv = pv0;
-            pv.X = path.X[dd];
-            const double qd = c.grid.q[dd];
-            for (std::size_t s = 0; s < nSets; ++s)
-                values[s][p * nDays + j] = setValue(c.sets[s], c, d, bonds, qd, pv);
-            invBank[p * nDays + j] = std::exp(-path.I[kMxn][dd]);
+    forEachPathChunk(nPaths, [&](std::size_t first, std::size_t last) {
+        PathData path;
+        path.resize(c.grid.horizon);
+        Bonds bonds;
+        bonds.resize(c.days.size());
+        for (std::size_t p = first; p < last; ++p) {
+            simulatePath(c.grid, config_.seed, p, path);
+            const PathView pv0{{path.I[kMxn].data(), path.I[kUsd].data()}, 0.0};
+            for (std::size_t j = 0; j < nDays; ++j) {
+                const int d = report[j];
+                const std::size_t dd = static_cast<std::size_t>(d);
+                computeBonds(c, d, path.x[kMxn][dd], path.x[kUsd][dd], bonds);
+                PathView pv = pv0;
+                pv.X = path.X[dd];
+                const double qd = c.grid.q[dd];
+                for (std::size_t s = 0; s < nSets; ++s)
+                    values[s][p * nDays + j] = setValue(c.sets[s], c, d, bonds, qd, pv);
+                invBank[p * nDays + j] = std::exp(-path.I[kMxn][dd]);
+            }
         }
-    }
+    });
 
     // Quantile index: ceil(q n) - 1, clamped, with the same rounding guard as simulateExposure.
     const double scaled = std::round(config_.pfeQuantile * static_cast<double>(nPaths) * 1e9) / 1e9;

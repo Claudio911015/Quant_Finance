@@ -510,6 +510,27 @@ TEST(ExposureEngine, AnExtraSetDoesNotChangeAnotherSetsProfile) {
     EXPECT_EQ(alone.pathDiscNeg, together.pathDiscNeg);
 }
 
+TEST(ExposureEngine, ThePathRowsDoNotDependOnHowPathsAreSplitAcrossThreads) {
+    // simulate() cuts the paths into one chunk per hardware thread. A path draws from its own generator and writes
+    // its own row, so row p must be the same whether 7, 11 or 64 paths are run (different chunk boundaries) and
+    // with one path (the serial branch).
+    const NettingSetSpec a = setOf({s0(), s1()}, {x0()});
+    const std::vector<int> report = schedule(0, 17, 30);
+    const auto rows = [&](std::size_t nPaths) {
+        const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(nPaths, report));
+        return engine.simulate({a})[0];
+    };
+    const std::size_t nDays = report.size();
+    const auto big = rows(64);
+    for (const std::size_t n : {std::size_t{1}, std::size_t{7}, std::size_t{11}}) {
+        const auto small = rows(n);
+        for (std::size_t i = 0; i < n * nDays; ++i) {
+            ASSERT_EQ(small.pathDiscPos[i], big.pathDiscPos[i]) << "n = " << n << ", i = " << i;
+            ASSERT_EQ(small.pathDiscNeg[i], big.pathDiscNeg[i]) << "n = " << n << ", i = " << i;
+        }
+    }
+}
+
 TEST(ExposureEngine, DifferentSeedsGiveDifferentPaths) {
     const NettingSetSpec a = setOf({s0()});
     const ExposureEngine e1(makeMarket(), demoModel(), makeConfig(200, schedule(0, 30, 20), 1u));
