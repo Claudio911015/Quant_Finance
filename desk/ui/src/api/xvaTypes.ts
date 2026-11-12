@@ -223,12 +223,18 @@ export interface CreditCurveBody {
 
 // --- Sensibilidades del XVA por diferenciación adjunta (corte 12) ---
 
-/** Derivadas del CVA, DVA y FVA respecto de un insumo, en MXN y en la unidad que diga `units`; total = cva − dva + fva. */
-export interface XvaSensRow {
+/** Derivadas del CVA, DVA y FVA respecto de un insumo, en MXN (por pb, por 1 % del spot, por punto…); total = cva − dva + fva. */
+export interface XvaSensNumbers {
   cva: number;
   dva: number;
   fva: number;
   total: number;
+}
+
+/** Derivada parcial (la curva MXN-USD queda fija). En los pilares de TIIE-F y SOFR y en el spot, `recalibrated` es la
+ * total: con MXN-USD recalibrada con sus puntos forward y su base fijos. MXN-USD, que es lo que se recalibra, no la trae. */
+export interface XvaSensRow extends XvaSensNumbers {
+  recalibrated?: XvaSensNumbers;
 }
 
 export interface XvaSensPillar extends XvaSensRow {
@@ -240,7 +246,7 @@ export interface XvaSensCurve {
   /** `TIIE-F`, `SOFR` o `MXN-USD` (esta última solo si el snapshot la trae). */
   curve: string;
   pillars: XvaSensPillar[];
-  /** Suma de los pilares: movimiento paralelo de la curva. */
+  /** Suma de los pilares: movimiento paralelo de la curva (con `recalibrated` en TIIE-F y SOFR). */
   dv01: XvaSensRow;
 }
 
@@ -286,7 +292,6 @@ export interface XvaSensitivitiesResponse {
   bump_cost_estimate_s: number;
   /** Idéntico al de `GET /api/xva` para esta contraparte. */
   xva: Pick<XvaComponents, 'cva_mxn' | 'dva_mxn' | 'fva_mxn' | 'total_mxn'>;
-  units: { curves: string; fx: string; vols: string; cds: string; funding: string };
   curves: XvaSensCurve[];
   fx: XvaSensFx;
   vols: XvaSensVol[];

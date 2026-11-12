@@ -5,6 +5,7 @@ import { getXvaSensitivities } from '../../api/xvaClient';
 import type {
   XvaSensCredit,
   XvaSensCurve,
+  XvaSensNumbers,
   XvaSensRow,
   XvaSensitivitiesResponse,
 } from '../../api/xvaTypes';
@@ -15,6 +16,14 @@ import './XvaSensitivitiesPanel.css';
 
 // `EChart` solo registra líneas y mapas de calor; el CVA por pilar necesita barras.
 use([BarChart]);
+
+// Las unidades viven aquí (la API devuelve MXN por esa unidad, ver `desk/api/risk/xva_sens.py`).
+const UNIT_CURVES = 'MXN por pb';
+const UNIT_FX = 'MXN por 1 % del spot';
+const UNIT_VOLS = 'MXN por punto (vol USDMXN), por pb de vol normal (σ Hull-White), por 0.01 (a)';
+const UNIT_FUNDING = 'MXN por pb';
+const PARTIAL = 'Parcial (MXN-USD fija)';
+const TOTAL = 'Total (MXN-USD recalibrada)';
 
 /** Pilares de todas las curvas por plazo en días (pilares con los mismos días comparten categoría). */
 function pillarCategories(curves: XvaSensCurve[]): { days: number; name: string }[] {
@@ -28,8 +37,10 @@ function pillarCategories(curves: XvaSensCurve[]): { days: number; name: string 
     .map(([days, labels]) => ({ days, name: `${[...labels].join(' / ')} (${days} d)` }));
 }
 
-/** CVA por pilar, una serie de barras por curva; donde una curva no tiene pilar, sin barra. */
-export function sensitivityOption(curves: XvaSensCurve[]): EChartsCoreOption {
+/** CVA total (MXN-USD recalibrada) por pilar, una serie de barras por curva; donde una curva no tiene pilar, sin barra.
+ * MXN-USD no se grafica: es lo que se recalibra, su riesgo ya está en la total de TIIE-F, SOFR y el spot. */
+export function sensitivityOption(allCurves: XvaSensCurve[]): EChartsCoreOption {
+  const curves = allCurves.filter((c) => c.pillars.every((p) => p.recalibrated));
   const cats = pillarCategories(curves);
   const dim = cssColor('--text-dim');
   const colors = [cssColor('--accent'), cssColor('--pos'), cssColor('--warn')];
@@ -52,14 +63,14 @@ export function sensitivityOption(curves: XvaSensCurve[]): EChartsCoreOption {
     },
     yAxis: {
       type: 'value',
-      name: 'CVA, MXN por pb',
+      name: 'CVA total, MXN por pb',
       nameTextStyle: { color: dim },
       axisLabel: { color: dim, formatter: (v: number) => fmtNumber(v, 0) },
       axisLine: { lineStyle: { color: cssColor('--border-strong') } },
       splitLine: { lineStyle: { color: cssColor('--border') } },
     },
     series: curves.map((c, i) => {
-      const cvaAt = new Map(c.pillars.map((p) => [p.days, p.cva]));
+      const cvaAt = new Map(c.pillars.map((p) => [p.days, p.recalibrated?.cva ?? p.cva]));
       return {
         name: c.curve,
         type: 'bar',
@@ -70,36 +81,63 @@ export function sensitivityOption(curves: XvaSensCurve[]): EChartsCoreOption {
   };
 }
 
-function Cells({ row }: { row: XvaSensRow }) {
+const money = (v: number) => fmtMoney(v, 'MXN');
+const plain = (v: number) => fmtNumber(v, 2);
+
+function Cells({ row, fmt = money }: { row: XvaSensNumbers; fmt?: (v: number) => string }) {
   return (
     <>
-      <td className="num">{fmtMoney(row.cva, 'MXN')}</td>
-      <td className="num">{fmtMoney(row.dva, 'MXN')}</td>
-      <td className="num">{fmtMoney(row.fva, 'MXN')}</td>
-      <td className="num">{fmtMoney(row.total, 'MXN')}</td>
+      <td className="num">{fmt(row.cva)}</td>
+      <td className="num">{fmt(row.dva)}</td>
+      <td className="num">{fmt(row.fva)}</td>
+      <td className="num">{fmt(row.total)}</td>
     </>
   );
 }
+
+const MEASURES = ['CVA', 'DVA', 'FVA', 'Total'].map((m) => (
+  <th key={m} className="num" scope="col">
+    {m}
+  </th>
+));
 
 function Head({ first }: { first: string }) {
   return (
     <thead>
       <tr>
         <th>{first}</th>
-        <th className="num">CVA</th>
-        <th className="num">DVA</th>
-        <th className="num">FVA</th>
-        <th className="num">Total</th>
+        {MEASURES}
       </tr>
     </thead>
   );
 }
 
-function Group({ title, unit, children }: { title: string; unit?: string; children: React.ReactNode }) {
+/** Dos grupos de columnas: la derivada parcial y la total (MXN-USD recalibrada). */
+function CurvesHead() {
+  return (
+    <thead>
+      <tr>
+        <th rowSpan={2}>Pilar</th>
+        <th className="num" colSpan={4} scope="colgroup">
+          {PARTIAL}
+        </th>
+        <th className="num" colSpan={4} scope="colgroup">
+          {TOTAL}
+        </th>
+      </tr>
+      <tr>
+        {MEASURES}
+        {MEASURES}
+      </tr>
+    </thead>
+  );
+}
+
+function Group({ title, unit, cols = 5, children }: { title: string; unit?: string; cols?: number; children: React.ReactNode }) {
   return (
     <tbody>
       <tr className="xva-sens__group">
-        <th colSpan={5} scope="rowgroup">
+        <th colSpan={cols} scope="rowgroup">
           {title}
           {unit && <span className="xva-sens__unit"> · {unit}</span>}
         </th>
@@ -109,11 +147,28 @@ function Group({ title, unit, children }: { title: string; unit?: string; childr
   );
 }
 
-function Line({ label, row, strong }: { label: string; row: XvaSensRow; strong?: boolean }) {
+function Line({ label, row, strong }: { label: string; row: XvaSensNumbers; strong?: boolean }) {
   return (
     <tr className={strong ? 'xva-sens__dv01' : undefined}>
       <th scope="row">{label}</th>
       <Cells row={row} />
+    </tr>
+  );
+}
+
+/** Fila de curva: la parcial y la total; MXN-USD, que es lo que se recalibra, no tiene total. */
+function CurveLine({ label, row, strong }: { label: string; row: XvaSensRow; strong?: boolean }) {
+  return (
+    <tr className={strong ? 'xva-sens__dv01' : undefined}>
+      <th scope="row">{label}</th>
+      <Cells row={row} fmt={plain} />
+      {row.recalibrated ? (
+        <Cells row={row.recalibrated} fmt={plain} />
+      ) : (
+        <td className="num" colSpan={4} aria-label="sin total">
+          —
+        </td>
+      )}
     </tr>
   );
 }
@@ -136,13 +191,13 @@ function CurvesTable({ curves }: { curves: XvaSensCurve[] }) {
   return (
     <div className="xva-scroll">
       <table className="xva-table" aria-label="Sensibilidad por curva y pilar">
-        <Head first="Pilar" />
+        <CurvesHead />
         {curves.map((c) => (
-          <Group key={c.curve} title={c.curve}>
+          <Group key={c.curve} title={c.curve} cols={9}>
             {c.pillars.map((p) => (
-              <Line key={p.days} label={p.label} row={p} />
+              <CurveLine key={p.days} label={p.label} row={p} />
             ))}
-            <Line label="DV01 paralelo" row={c.dv01} strong />
+            <CurveLine label="DV01 paralelo" row={c.dv01} strong />
           </Group>
         ))}
       </table>
@@ -159,10 +214,11 @@ function FactorsTable({ r }: { r: XvaSensitivitiesResponse }) {
     <div className="xva-scroll">
       <table className="xva-table" aria-label="Sensibilidad a tipo de cambio, volatilidades, crédito y fondeo">
         <Head first="Factor" />
-        <Group title="Tipo de cambio" unit={r.units.fx}>
-          <Line label={r.fx.label} row={r.fx} />
+        <Group title="Tipo de cambio" unit={UNIT_FX}>
+          <Line label={`${r.fx.label}, parcial (MXN-USD fija)`} row={r.fx} />
+          {r.fx.recalibrated && <Line label={`${r.fx.label}, total (MXN-USD recalibrada)`} row={r.fx.recalibrated} />}
         </Group>
-        <Group title="Volatilidades" unit={r.units.vols}>
+        <Group title="Volatilidades" unit={UNIT_VOLS}>
           {r.vols.map((v) => (
             <Line key={v.param} label={v.label} row={v} />
           ))}
@@ -174,7 +230,7 @@ function FactorsTable({ r }: { r: XvaSensitivitiesResponse }) {
             ))}
           </Group>
         ))}
-        <Group title="Fondeo" unit={r.units.funding}>
+        <Group title="Fondeo" unit={UNIT_FUNDING}>
           <Line label="Diferencial de fondeo" row={r.funding} />
         </Group>
       </table>
@@ -207,15 +263,22 @@ function Result({ r }: { r: XvaSensitivitiesResponse }) {
           </p>
           <p className="xva-note xva-note--plain">
             Calculado en {fmtNumber(r.elapsed_s, 1)} s (una valuación del XVA tarda {fmtNumber(r.valuation_elapsed_s, 2)} s).
-            Por choques sobre los {fmtNumber(r.n_inputs, 0)} insumos tardaría unos {fmtNumber(r.bump_cost_estimate_s, 1)} s.
+            Por choques sobre los {fmtNumber(r.n_inputs, 0)} insumos (con la valuación en todos los hilos) tardaría unos{' '}
+            {fmtNumber(r.bump_cost_estimate_s, 1)} s.
           </p>
-          <h3 className="xva-subtitle">Curvas de tasas ({r.units.curves})</h3>
+          <h3 className="xva-subtitle">Curvas de tasas ({UNIT_CURVES})</h3>
+          <p className="xva-note xva-note--plain">
+            Para cubrir con instrumentos de TIIE-F, de SOFR o del tipo de cambio, use la total: dice cuánto cambia el XVA
+            cuando esa tasa se mueve y la curva MXN-USD se recalibra con sus puntos forward y su base fijos, que es lo que
+            pasa en el mercado. La parcial deja MXN-USD quieta, sirve para ver de dónde viene el riesgo y puede salir con el
+            signo contrario. MXN-USD no tiene total: se recalibra a partir de las otras curvas y del spot.
+          </p>
           <CurvesTable curves={r.curves} />
           <div className="xva-sens__chart">
             <EChart
               option={sensitivityOption(r.curves)}
               height={320}
-              ariaLabel="CVA por pilar de cada curva, en MXN por pb"
+              ariaLabel="CVA total por pilar de TIIE-F y SOFR, en MXN por pb"
             />
           </div>
           <h3 className="xva-subtitle">Otros factores de riesgo</h3>

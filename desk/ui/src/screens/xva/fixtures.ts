@@ -14,6 +14,7 @@ import type {
   XvaParamsResponse,
   XvaResponse,
   XvaSensCurve,
+  XvaSensNumbers,
   XvaSensRow,
   XvaSensitivitiesResponse,
 } from '../../api/xvaTypes';
@@ -302,28 +303,43 @@ export const CREDIT_CURVES_FIXTURE: CreditCurvesResponse = {
 
 // --- Sensibilidades por AAD (corte 12): cifras inventadas con la forma del contrato de GET /api/xva/sensitivities. ---
 
-const sensRow = (cva: number, dva: number, fva: number): XvaSensRow => ({
+const sensRow = (cva: number, dva: number, fva: number, recalibrated?: XvaSensNumbers): XvaSensRow => ({
   cva,
   dva,
   fva,
   total: round(cva - dva + fva, 2),
+  ...(recalibrated && { recalibrated }),
 });
 
-const sumRows = (rows: XvaSensRow[]): XvaSensRow =>
-  sensRow(
-    round(rows.reduce((a, r) => a + r.cva, 0), 2),
-    round(rows.reduce((a, r) => a + r.dva, 0), 2),
-    round(rows.reduce((a, r) => a + r.fva, 0), 2),
-  );
+const sumOf = (rows: XvaSensNumbers[]): XvaSensNumbers => {
+  const sum = (k: 'cva' | 'dva' | 'fva') => round(rows.reduce((a, r) => a + r[k], 0), 2);
+  return { cva: sum('cva'), dva: sum('dva'), fva: sum('fva'), total: round(sum('cva') - sum('dva') + sum('fva'), 2) };
+};
 
-/** Curva con pilares `[etiqueta, días, cva, dva, fva]` y su DV01 como suma de los pilares. */
-function sensCurve(name: string, pillars: [string, number, number, number, number][]): XvaSensCurve {
-  const rows = pillars.map(([label, days, cva, dva, fva]) => ({ label, days, ...sensRow(cva, dva, fva) }));
+const sumRows = (rows: XvaSensRow[]): XvaSensRow => ({
+  ...sumOf(rows),
+  ...(rows.every((r) => r.recalibrated) && { recalibrated: sumOf(rows.map((r) => r.recalibrated as XvaSensNumbers)) }),
+});
+
+/** Un renglón con su derivada total inventada a partir de la parcial: `[cva, dva, fva].map(recal)`. */
+const withTotal = (cva: number, dva: number, fva: number, recal: (v: number) => number): XvaSensRow =>
+  sensRow(cva, dva, fva, { cva: recal(cva), dva: recal(dva), fva: recal(fva), total: round(recal(cva) - recal(dva) + recal(fva), 2) });
+
+/** Curva con pilares `[etiqueta, días, cva, dva, fva]` y su DV01 como suma de los pilares; con `recal`, también la total. */
+function sensCurve(
+  name: string,
+  pillars: [string, number, number, number, number][],
+  recal?: (v: number) => number,
+): XvaSensCurve {
+  const rows = pillars.map(([label, days, cva, dva, fva]) => ({
+    label,
+    days,
+    ...(recal ? withTotal(cva, dva, fva, recal) : sensRow(cva, dva, fva)),
+  }));
   return { curve: name, pillars: rows, dv01: sumRows(rows) };
 }
 
 const SENS_CDS_TENORS = ['1Y', '2Y', '3Y', '5Y', '7Y', '10Y'];
-const SENS_CDS_YEARS = [1, 2, 3, 5, 7, 10];
 
 export const XVA_SENSITIVITIES_FIXTURE: XvaSensitivitiesResponse = {
   snapshot: SNAPSHOT,
@@ -340,13 +356,6 @@ export const XVA_SENSITIVITIES_FIXTURE: XvaSensitivitiesResponse = {
   n_inputs: 48,
   bump_cost_estimate_s: 40.3,
   xva: { cva_mxn: 31000, dva_mxn: 4000, fva_mxn: 1500, total_mxn: 28500 },
-  units: {
-    curves: 'MXN por pb',
-    fx: 'MXN por 1 % del spot',
-    vols: 'MXN por punto (vol USDMXN), por pb de vol normal (σ Hull-White), por 0.01 (a)',
-    cds: 'MXN por pb (de cotización de CDS o, sin curva, de intensidad)',
-    funding: 'MXN por pb',
-  },
   curves: [
     sensCurve('TIIE-F', [
       ['1D', 1, 0.4, 0.1, 0],
@@ -359,7 +368,7 @@ export const XVA_SENSITIVITIES_FIXTURE: XvaSensitivitiesResponse = {
       ['65x28', 1820, -41.3, -8.6, -2.4],
       ['91x28', 2548, -12.5, -2.7, -0.9],
       ['130x28', 3640, -3.1, -0.6, -0.2],
-    ]),
+    ], (v) => round(0.4 * v + 0.8, 2)),
     sensCurve('SOFR', [
       ['1D', 1, -0.2, -0.1, 0],
       ['1M', 30, -0.9, -0.2, 0],
@@ -371,7 +380,7 @@ export const XVA_SENSITIVITIES_FIXTURE: XvaSensitivitiesResponse = {
       ['5Y', 1825, 18.7, 3.9, 1.3],
       ['7Y', 2555, 6.3, 1.4, 0.5],
       ['10Y', 3650, 1.8, 0.4, 0.1],
-    ]),
+    ], (v) => round(1.1 * v, 2)),
     sensCurve('MXN-USD', [
       ['1M', 28, 0.6, 0.1, 0],
       ['3M', 84, 1.9, 0.4, 0.1],
@@ -384,7 +393,7 @@ export const XVA_SENSITIVITIES_FIXTURE: XvaSensitivitiesResponse = {
       ['10Y', 3640, -0.7, -0.2, 0],
     ]),
   ],
-  fx: { label: 'USDMXN spot', ...sensRow(5200, 900, 310) },
+  fx: { label: 'USDMXN spot', ...withTotal(5200, 900, 310, (v) => round(0.97 * v, 2)) },
   vols: [
     { param: 'fx_vol', label: 'Volatilidad USDMXN', ...sensRow(820, 150, 40) },
     { param: 'sigma_mxn', label: 'σ Hull-White TIIE-F', ...sensRow(210, 45, 12) },
@@ -396,7 +405,7 @@ export const XVA_SENSITIVITIES_FIXTURE: XvaSensitivitiesResponse = {
     counterparty: {
       kind: 'curve',
       cds: SENS_CDS_TENORS.map((tenor, i) => ({ tenor, ...sensRow(round(180 - 25 * i, 2), 0, 0) })),
-      hazards: SENS_CDS_YEARS.map((to_years, i) => ({ to_years, ...sensRow(round(95 - 12 * i, 2), 0, round(3 - 0.4 * i, 2)) })),
+      hazards: [], // con cotizaciones de CDS la intensidad por tramo no se repite
     },
     own: { kind: 'assumed', cds: [], hazards: [{ to_years: null, ...sensRow(0, -38, -11) }] },
   },
@@ -404,7 +413,8 @@ export const XVA_SENSITIVITIES_FIXTURE: XvaSensitivitiesResponse = {
   empty_reason: null,
   assumptions: [
     'Correlaciones tomadas de los cambios diarios de los factores del snapshot (TIIE-F, SOFR, USDMXN): aproximación de las correlaciones de los brownianos del modelo',
-    'Derivadas parciales: al mover un pilar no se recalibran la curva MXN-USD ni las curvas de crédito (el bootstrap de CDS descuenta con TIIE-F)',
+    'Cada fila trae la derivada parcial (la curva MXN-USD queda fija) y, en TIIE-F, SOFR y el spot, `recalibrated`: la total, con MXN-USD recalibrada con sus puntos forward y su base fijos (regla de la cadena con el jacobiano de la calibración, sin simular más). En ninguna se recalibran las curvas de crédito (el bootstrap de CDS descuenta con TIIE-F)',
+    'bump_cost_estimate_s = 2 × insumos × una valuación del XVA, que corre en todos los hilos; la adjunta usa 2',
   ],
   warnings: NO_WARNINGS,
 };
