@@ -11,20 +11,24 @@ la curva de crédito de la contraparte y de la propia, y el diferencial de fonde
 adjunta} (AAD, \emph{adjoint algorithmic differentiation}) salen todas juntas por el costo de unas pocas
 valuaciones, que es lo que este capítulo documenta.
 
-El código calcula tres cosas. Primero, las derivadas de CVA, DVA y FVA (y, por combinación lineal, del total) respecto
+El código calcula cuatro cosas. Primero, las derivadas de CVA, DVA y FVA (y, por combinación lineal, del total) respecto
 de los 48 insumos, con la biblioteca XAD, sobre \emph{las mismas trayectorias, malla y semilla} que el XVA del
 capítulo~\ref{cap:xva} (secciones~\ref{sec:cap16-insumos}--\ref{sec:cap16-cinta}). Segundo, el paso de las
 intensidades de crédito a la sensibilidad a \emph{cada cotización de CDS} con el jacobiano del bootstrap
-(sección~\ref{sec:cap16-credito}). Tercero, la conversión de unidades que publica la ruta
+(sección~\ref{sec:cap16-credito}). Tercero, la derivada \emph{total} respecto de TIIE-F, SOFR y el spot, con la curva
+MXN-USD recalibrada, por regla de la cadena con las parciales que la AAD ya entrega
+(sección~\ref{sec:cap16-parcial}). Cuarto, la conversión de escalas que hace la ruta
 \texttt{GET /api/xva/sensitivities} (sección~\ref{sec:cap16-implementacion}) y que alimenta la sección
 «Sensibilidades» de la pantalla XVA. El cálculo es informativo, como todo el XVA: no entra al valor presente ni a
 la contabilidad.
 
-Lo que \emph{no} hace importa tanto como lo que hace, y se repite en la sección~\ref{sec:cap16-limites}: las
-derivadas son \textbf{parciales} (al mover un pilar no se recalibran ni la curva MXN-USD ni el crédito;
-sección~\ref{sec:cap16-parcial}), de primer orden, sin sensibilidad a correlaciones ni al PFE, y su costo
-(sección~\ref{sec:cap16-costo}) es de unas 9 valuaciones con un hilo y de decenas de segundos en conjuntos largos
-con los dos hilos que usa la API.
+Lo que \emph{no} hace importa tanto como lo que hace, y se repite en la sección~\ref{sec:cap16-limites}: la AAD entrega
+derivadas \textbf{parciales} (al mover un pilar no se recalibra ni la curva MXN-USD ni el crédito) y la ruta añade la
+\textbf{total} con MXN-USD recalibrada, que es la que sirve para cubrir y puede tener el signo contrario
+(sección~\ref{sec:cap16-parcial}); el crédito no se recalibra en ninguna. Son derivadas de primer orden, sin sensibilidad
+a correlaciones ni al PFE y sin error estándar, y su costo (sección~\ref{sec:cap16-costo}) es de unas 7 a 9
+valuaciones a igual número de hilos, de 15 a 23 veces el tiempo de una valuación en la ruta (la valuación usa todos
+los hilos y la adjunta dos) y de decenas de segundos en conjuntos largos.
 
 % -------------------------------------------------------------------------------------------------
 \section{Notación}\label{sec:cap16-notacion}
@@ -116,8 +120,8 @@ con $X\in\{\mathrm{CVA},\mathrm{DVA},\mathrm{FVA}\}$ y $\widetilde D^{\mathrm{To
 la suma de sus pilares, $\DVO^{\mathrm{par}}_X=\sum_k\widetilde D^{X}_{z_k}$, porque con interpolación lineal y
 extrapolación plana desplazar todos los pilares la misma cantidad desplaza toda la curva esa cantidad. Las
 conversiones están en \codigo{desk/api/risk/xva_sens.py}{_row}, \codigo{desk/api/risk/xva_sens.py}{_curves} y
-\codigo{desk/api/risk/xva_sens.py}{VOLS}, y las unidades que publica la ruta en
-\codigo{desk/api/risk/xva_sens.py}{UNITS}.
+\codigo{desk/api/risk/xva_sens.py}{VOLS}; los rótulos de unidad los pone la interfaz
+(\codigo{desk/ui/src/screens/xva/XvaSensitivitiesPanel.tsx}{UNIT_VOLS}) y la respuesta no los repite.
 
 \subsection{Modo adjunto}\label{sec:cap16-adjunto}
 
@@ -294,12 +298,12 @@ que cuesta $2J$ bootstraps por entidad. La respuesta de la ruta declara el méto
 Con una curva plana o supuesta (sin cotizaciones) no hay cotizaciones que derivar: la ruta devuelve un solo tramo, con
 \texttt{to\_years} nulo, y la derivada es respecto de esa intensidad.
 
-\subsection{Derivadas parciales, y qué sería la derivada total}\label{sec:cap16-parcial}
+\subsection{Derivadas parciales y derivada total con MXN-USD recalibrada}\label{sec:cap16-parcial}
 
 Los insumos $\boldsymbol\vartheta$ son los del \emph{motor}; los datos de mercado son otros. La curva MXN-USD se calibra
 (\codigo{desk/api/market.py}{_calibrate_csa}) con \texttt{bootstrap\_xccy\_discount} a partir de puntos forward, cotizaciones de base, el spot y las curvas
 SOFR y TIIE-F; las intensidades salen de las cotizaciones de CDS descontadas con la curva TIIE-F; y las curvas de tasa
-son ceros de pilares que a su vez salen de cotizaciones de depósito y OIS. La derivada de la API es la parcial
+son ceros de pilares que a su vez salen de cotizaciones de depósito y OIS. La derivada que entrega la AAD es la parcial
 $\partial X/\partial\vartheta_i$ \emph{sin recalibrar nada}: al mover un pilar de TIIE-F, las tasas cero de MXN-USD
 y las intensidades de crédito se quedan donde estaban. La derivada \emph{total} respecto de ese pilar sumaría los
 efectos de la recalibración,
@@ -309,17 +313,42 @@ efectos de la recalibración,
   +\sum_{i}\frac{\partial X}{\partial h^{\mathrm c}_i}\,\frac{\partial h^{\mathrm c}_i}{\partial z^{\mathrm M}_k}
   +\sum_{i}\frac{\partial X}{\partial h^{\mathrm o}_i}\,\frac{\partial h^{\mathrm o}_i}{\partial z^{\mathrm M}_k},
 \end{equation}
-donde el primer sumando es lo que entrega la AAD, y los demás exigen los jacobianos de la calibración de MXN-USD y del
-bootstrap de CDS respecto de la curva de descuento. Esos jacobianos \emph{no} se calculan en la ruta (el de CDS respecto
-de las cotizaciones sí, ecuación~\eqref{eq:cap16-jacobiano-reprecio}, pero no respecto de TIIE-F). La
+donde el primer sumando es lo que entrega la AAD, el segundo (la recalibración de MXN-USD) usa las parciales respecto de
+los pilares de MXN-USD que la AAD \emph{también} entrega, y los dos últimos (el crédito) exigen el jacobiano del
+bootstrap de CDS respecto de la curva de descuento.
+
+La ruta calcula la total con los dos primeros sumandos, \emph{sin simulación adicional}, para cada pilar de TIIE-F y de
+SOFR y para el spot (\codigo{desk/api/risk/xva_sens.py}{_total}):
+\begin{equation}\label{eq:cap16-total-api}
+  \frac{dX}{d\vartheta_i}\bigg|_{\mathrm{MXN\text{-}USD}}=\frac{\partial X}{\partial\vartheta_i}
+  +\sum_{l}\frac{\partial X}{\partial z^{\mathrm{col}}_l}\,\frac{\partial z^{\mathrm{col}}_l}{\partial\vartheta_i},\qquad
+  \frac{\partial z^{\mathrm{col}}_l}{\partial\vartheta_i}\approx
+  \frac{z^{\mathrm{col}}_l(\vartheta_i+\epsilon_i)-z^{\mathrm{col}}_l(\vartheta_i-\epsilon_i)}{2\epsilon_i},
+\end{equation}
+con $\vartheta_i\in\{z^{\mathrm M}_k,z^{\mathrm U}_k,\Spot\}$, $\epsilon_i$ igual a 1~\pb\ de tasa o a $0.1\,\%$ del spot,
+y $z^{\mathrm{col}}_l(\cdot)$ la tasa del pilar $l$ de MXN-USD que resulta de recalibrarla con sus puntos forward y su
+base \emph{fijos} sobre las curvas y el spot chocados: es la función que el desk ya usa para escenarios
+(\codigo{desk/api/market.py}{MarketContext.shifted}), no una calibración nueva. Las derivadas
+$\partial X/\partial\vartheta_i$ y $\partial X/\partial z^{\mathrm{col}}_l$ son las de la AAD, sin escalar; el reporte las
+lleva a su unidad con la ecuación~\eqref{eq:cap16-unidades}. El jacobiano cuesta $2\times(10+10+1)=42$ recalibraciones
+(unos 1.6~ms cada una, 0.07~s en total frente a los 5--12 s de la AAD) y ninguna simulación. Cada fila de TIIE-F, de SOFR
+y del spot trae entonces las dos derivadas: la parcial (\texttt{cva}, \texttt{dva}, \texttt{fva}, \texttt{total}, con
+MXN-USD fija) y la total (\texttt{recalibrated}, con MXN-USD recalibrada), y el DV01 paralelo de cada curva las trae
+también, como suma de sus pilares. MXN-USD no tiene total: sus tasas cero son lo que se recalibra, así que su riesgo de
+mercado ya está en la total de TIIE-F, SOFR y el spot (y en las cotizaciones de puntos forward y de base, que se
+mantienen fijas y no se derivan); para el resto de los insumos (volatilidades, crédito, fondeo) la calibración de
+MXN-USD no interviene y la total es la parcial, y sin MXN-USD las dos coinciden. Los dos últimos sumandos de la
+ecuación~\eqref{eq:cap16-total} \emph{no} se calculan: no se recalibra el bootstrap de CDS al mover TIIE-F. La
 sección~\ref{sec:cap16-ej-parcial} mide qué tan distinta es la total de la parcial en un cross currency swap: tiene
-incluso el signo contrario.
+incluso el signo contrario. Para cubrir con instrumentos de TIIE-F, de SOFR o del tipo de cambio es la total la que
+dice cuánto cambia el XVA cuando esa tasa se mueve en el mercado; la parcial sirve para ver de dónde viene el riesgo.
 
 \begin{diferencia}
   Una sensibilidad de mercado completa derivaría la cadena
   $\text{cotizaciones}\to\text{curvas}\to\text{parámetros del modelo}\to\text{XVA}$ entera, incluida la calibración (la
   AAD lo permite, por ejemplo con el teorema de la función implícita en cada paso de calibración). Aquí se deriva el motor (que recibe pilares, parámetros e intensidades ya
-  calibrados) y se declara qué falta: (i) la derivada es \emph{parcial}, ecuación~\eqref{eq:cap16-total}; (ii) las curvas de tasa se
+  calibrados) y se declara qué falta: (i) la AAD entrega la derivada \emph{parcial} y la ruta añade la total con MXN-USD recalibrada, ecuación~\eqref{eq:cap16-total-api},
+pero no la del crédito (los dos últimos sumandos de la ecuación~\eqref{eq:cap16-total}); (ii) las curvas de tasa se
   derivan por tasa cero del pilar, no por cotización de depósito u OIS (para el crédito sí se pasa a cotizaciones, con
   el jacobiano del bootstrap por reprecio y no por AAD del bootstrap); (iii) $a_c$, $\sigma_c$ y $\sigma_X$ son
   insumos, no resultados de una calibración, y no se deriva respecto de la superficie de volatilidad de la que
@@ -401,18 +430,25 @@ está en \codigo{desk/api/risk/xva_sens.py}{compute}, que \emph{no contiene fór
   \item llama a \texttt{xva\_sensitivities} sobre la malla de integración $\mathcal G$ (\texttt{elapsed\_s}) y
         convierte las unidades con la ecuación~\eqref{eq:cap16-unidades};
   \item compone las intensidades con el jacobiano de la ecuación~\eqref{eq:cap16-jacobiano-reprecio}
-        (\codigo{desk/api/risk/xva_sens.py}{_credit});
-  \item estima el costo por choques como $2\times n_{\mathrm{insumos}}\times\texttt{valuation\_elapsed\_s}$
-        (\texttt{bump\_cost\_estimate\_s}: es una estimación, no una medición), y añade la nota
-        \codigo{desk/api/risk/xva_sens.py}{PARTIAL_NOTE} a \texttt{assumptions} («Derivadas parciales: al mover un pilar no
-        se recalibran la curva MXN-USD ni las curvas de crédito»).
+        (\codigo{desk/api/risk/xva_sens.py}{_credit}) y las parciales con el jacobiano de la calibración de MXN-USD,
+        ecuación~\eqref{eq:cap16-total-api} (\codigo{desk/api/risk/xva_sens.py}{_total});
+  \item cuenta los insumos de verdad (\texttt{n\_inputs}: las derivadas que entrega \texttt{qfxva}, 48 en MX-DEMO) y
+        estima el costo por choques como $2\times n_{\mathrm{insumos}}\times\texttt{valuation\_elapsed\_s}$
+        (\texttt{bump\_cost\_estimate\_s}: es una estimación, no una medición, y supone los choques con la valuación en
+        todos los hilos), y añade a \texttt{assumptions} las notas \codigo{desk/api/risk/xva_sens.py}{PARTIAL_NOTE}
+        (qué es la parcial y qué la total, y que el crédito no se recalibra en ninguna) y
+        \codigo{desk/api/risk/xva_sens.py}{COST_NOTE}.
 \end{enumerate}
 La ruta es \codigo{desk/api/routes/xva.py}{xva_sensitivities_get}:
 \texttt{GET /api/xva/sensitivities?snapshot=<id>\&counterparty=<nombre>}. Falta un parámetro $\to$ 400 con \texttt{field};
 snapshot o contraparte inexistentes $\to$ 404; \texttt{HAS\_XAD} falso $\to$ 501; una contraparte sin swaps de tasa ni
 cross currency swaps vivos $\to$ 200 con listas vacías y \texttt{empty\_reason}. La respuesta trae el DV01 paralelo por
 curva, las filas por pilar, spot, volatilidades, CDS por plazo y fondeo, cada una con \texttt{cva}, \texttt{dva},
-\texttt{fva} y \texttt{total} en \MXN\ por la unidad de la tabla~\ref{tab:cap16-insumos}.
+\texttt{fva} y \texttt{total} (la parcial) en \MXN\ por la unidad de la tabla~\ref{tab:cap16-insumos}, y los pilares de
+TIIE-F y de SOFR, el spot y los DV01 paralelos de esas dos curvas con la misma fila en \texttt{recalibrated} (la total).
+Con cotizaciones de CDS la respuesta trae la sensibilidad a cada cotización y no repite la intensidad por tramo
+(\texttt{hazards} queda vacía); sin curva de CDS trae solo la del tramo único. La respuesta no lleva las unidades: las
+pone la interfaz.
 
 \subsection{Compilación, licencia y versión de XAD}\label{sec:cap16-licencia}
 
@@ -616,17 +652,21 @@ DV01 de TIIE-F & CVA & Total ($\mathrm{CVA}-\mathrm{DVA}+\mathrm{FVA}$) \\
 Parcial por AAD (suma de los 10 pilares) & \verif{cap16-parcial-aad-cva}{111.858} & \verif{cap16-parcial-aad-total}{470.996} \\
 Parcial por choque (MXN-USD fija) & \verif{cap16-parcial-choque-cva}{111.855} & \verif{cap16-parcial-choque-total}{470.995} \\
 Total por choque (MXN-USD recalibrada) & \verif{cap16-total-choque-cva}{-145.508} & \verif{cap16-total-choque-total}{-458.339} \\
+Total por la API (\texttt{recalibrated}, sin simular más) & \verif{cap16-total-api-cva}{-145.507} & \verif{cap16-total-api-total}{-458.339} \\
 \bottomrule
 \end{tabular}
 \end{center}
-La AAD reproduce la derivada \emph{parcial}; la total tiene el signo contrario. La diferencia es exactamente el segundo
+La AAD por sí sola reproduce la derivada \emph{parcial}; la total tiene el signo contrario. La diferencia es exactamente el segundo
 sumando de la ecuación~\eqref{eq:cap16-total}: los pilares de MXN-USD de 2 años en adelante se mueven $\verif{cap16-mueve-2a}{1.0400}$~\pb\ (el de 2 años) a
 $\verif{cap16-mueve-10a}{1.0054}$~\pb\ (el de 10 años) por cada punto base de TIIE-F, y los cuatro primeros no se mueven; sumando
 a la parcial los productos de las sensibilidades \emph{por AAD} a los pilares de MXN-USD por esos movimientos se
-reconstruye la total del CVA, $\verif{cap16-total-reconstruida-cva}{-145.507}$ (a menos de $10^{-5}$ relativo de la medida por choque y recalibración; el script exige $1\,\%$). El crédito se mantuvo fijo en los
-tres renglones (no se recalibró el bootstrap de CDS, que también descuenta con TIIE-F). Para una cartera cuyas
-operaciones se descuentan con MXN-USD, el DV01 de TIIE-F de la API \textbf{no es el cambio del XVA ante un movimiento
-de 1~\pb\ de TIIE-F en el mercado}.
+reconstruye la total del CVA, $\verif{cap16-total-reconstruida-cva}{-145.507}$ (a menos de $10^{-5}$ relativo de la medida por choque y recalibración; el script exige $1\,\%$). Eso es
+lo que hace la ruta, con el jacobiano por pilar en lugar del del desplazamiento paralelo: su fila \texttt{recalibrated}
+(última de la tabla) coincide con el choque con recalibración a menos del $1\,\%$ que exige el script, y con la
+reconstrucción a menos de $10^{-3}$ relativo. El crédito se mantuvo fijo en los
+cuatro renglones (no se recalibró el bootstrap de CDS, que también descuenta con TIIE-F). Para una cartera cuyas
+operaciones se descuentan con MXN-USD, el DV01 \emph{parcial} de TIIE-F \textbf{no es el cambio del XVA ante un movimiento
+de 1~\pb\ de TIIE-F en el mercado}: ese es el total, y es el que sirve para cubrir.
 \end{sloppypar}
 
 % -------------------------------------------------------------------------------------------------
@@ -664,7 +704,13 @@ acota las cintas y el resultado cambia solo por redondeo, $10^{-9}$). Sin XAD,
 repite la comparación sobre el conjunto sembrado de una contraparte, a través de la ruta, para un insumo de cada
 clase: el pilar de mayor sensibilidad de TIIE-F, SOFR y MXN-USD, el spot, la volatilidad de \USD/\MXN, el fondeo y
 una cotización de CDS (con el bootstrap vuelto a correr); \codigo{desk/api/tests/test_xva_sens.py}{test_xva_is_exactly_the_one_of_get_xva_and_dv01_sums_the_pillars}
-exige que el XVA de referencia sea el de \texttt{GET /api/xva} y que cada DV01 sea la suma de sus pilares; los
+exige que el XVA de referencia sea el de \texttt{GET /api/xva} y que cada DV01 (parcial y total) sea la suma de sus pilares;
+\codigo{desk/api/tests/test_xva_sens.py}{test_total_matches_bump_recalibrate_and_reprice} compara la total con el
+choque del insumo, la recalibración de MXN-USD con \texttt{MarketContext.shifted} y el reprecio completo con las mismas
+500 trayectorias, para un pilar de TIIE-F, uno de SOFR y el spot (dentro de $\max(1\,\%,\,1~\MXN\text{ por }\pb)$), y exige
+además que lo que la recalibración aporta (total menos parcial) coincida con el de ese reprecio dentro del $2\,\%$, lo que
+delata un jacobiano mal escalado (tres mutaciones hechas a mano y revertidas, el ancho del jacobiano de TIIE-F, la escala
+del spot y la omisión de la recalibración de TIIE-F, hacen fallar la prueba); los
 tipos, longitudes y totales, en \codigo{desk/api/tests/test_xva_sens.py}{test_shape_lengths_and_totals}; los
 errores, en \codigo{desk/api/tests/test_xva_sens.py}{test_unknown_counterparty_is_404_and_missing_parameters_are_400},
 \codigo{desk/api/tests/test_xva_sens.py}{test_without_xad_the_route_answers_501},
@@ -683,8 +729,9 @@ revertida.
 \subsection{Costo y memoria medidos}\label{sec:cap16-costo}
 
 Las cifras de esta sección son \textbf{mediciones de una sola máquina} (un portátil i7-10510U de 4 núcleos y 8 hilos,
-con carga ajena de 1 a 7 tareas durante las corridas): son órdenes de magnitud, con unos $\pm20\,\%$; no se verifican
-en el script (varían). Se citan las cifras medidas durante el desarrollo con la prueba desactivada
+con carga ajena de 1 a 7 tareas durante las corridas) \textbf{y de la compilación de depuración} (\texttt{CMAKE\_BUILD\_TYPE=Debug}
+de \texttt{build/}), que es la que sirve la API: con una compilación optimizada los tiempos absolutos y las razones serían
+otros, y no se midieron. Son órdenes de magnitud, con unos $\pm20\,\%$; no se verifican en el script (varían). Se citan las cifras medidas durante el desarrollo con la prueba desactivada
 \codigo{tests/test_ExposureEngine.cpp}{DISABLED_AadTiming} (se corre a mano), con un conjunto pesado: tres operaciones
 (IRS TIIE-F pagador a 10 años con 130 periodos, IRS SOFR a 5 años, cross currency swap a 5 años), malla de integración de
 1407 fechas y 2000 trayectorias.
@@ -710,9 +757,11 @@ conjunto, con la misma malla; filas superiores, el mismo número de hilos en las
 razón con un solo núcleo para ambas (el criterio de aceptación del corte) y la que ve el usuario de la API.}\label{tab:cap16-costo}
 \end{table}
 
-\paragraph{La razón es de unas 9 valuaciones con un hilo.} Con un núcleo para ambas, la AAD cuesta
+\paragraph{A igual número de hilos la razón es de 7 a 9 valuaciones.} Con un núcleo para ambas, la AAD cuesta
 \textbf{9.27 valuaciones} con 2000 trayectorias (9.1 en la primera medición, 9.85 con 500 trayectorias: el margen
-frente al objetivo de 10 es corto). Con los 48 insumos del snapshot, los choques serían $2\times48=96$ valuaciones
+frente al objetivo de 10 es corto) en el conjunto pesado; una medición independiente sobre las tres contrapartes
+sembradas, con un núcleo para ambas (el mejor de tres corridas), dio 7.4, 8.0 y 6.5 en Banco Alfa, Beta y Gamma. De 6.5 a
+9.9, es decir, \textbf{de 7 a 9 valuaciones} según el conjunto. Con los 48 insumos del snapshot, los choques serían $2\times48=96$ valuaciones
 ($\approx10$ veces más). La razón \textbf{no se mantiene al repartir en hilos}: la valuación en \texttt{double} escala
 (3.7 veces con 8 hilos) y la AAD no pasa de 1.7 veces (de unos 44 s a unos 26 s): es una carga limitada por el ancho de banda
 de memoria, no por cómputo. El barrido de adjuntos de un hilo pasa de 17.8 a 115 s de CPU con 8 hilos (6.5 veces) y la
@@ -736,7 +785,8 @@ original medían solo la parte común, después del reinicio.)
 
 \paragraph{Tiempo real por la API.} La tabla~\ref{tab:cap16-api} da los tiempos de las tres contrapartes sembradas de
 MX-DEMO (2000 trayectorias, 48 insumos). \texttt{valuation\_elapsed\_s} incluye armar el conjunto, el bootstrap de crédito y el
-perfil publicado, de modo que sobreestima un poco la valuación pura.
+perfil publicado, de modo que sobreestima un poco la valuación pura, y la estimación por choques
+(\texttt{bump\_cost\_estimate\_s}) supone los choques con esa valuación, es decir, en todos los hilos.
 \begin{table}[ht]
 \centering\small
 \begin{tabular}{@{}lrrrrr@{}}
@@ -759,7 +809,9 @@ Banco Gamma & 9.43 & 0.52 & 18.1 & 50.0 & 10.0 \\
 estimación (no se corrieron).}\label{tab:cap16-api}
 \end{table}
 Con la malla fina y 2000 trayectorias los conjuntos sembrados tardan de unos 5 a 15 s, no los 26 s del conjunto pesado,
-y la AAD de las tres es de 5 a 6 veces más barata que la estimación por choques. La razón que ve el usuario (15 a 23) es mayor que
+y la AAD de las tres es de 5 a 6 veces más barata que la estimación por choques. Repetido al añadir la derivada total
+(que suma unos 0.07~s de recalibraciones al \texttt{elapsed\_s}): Alfa 5.76~s contra 0.31 (razón 18.7), Beta 11.81 contra
+0.61 (19.4) y Gamma 5.23 contra 0.34 (15.5), con choques estimados de 29.5, 58.3 y 32.5~s. La razón que ve el usuario (15 a 23) es mayor que
 la de 9 a 10 de la tabla~\ref{tab:cap16-costo} porque la valuación corre en todos los hilos y la AAD en dos (hallazgo H25).
 \end{sloppypar}
 
@@ -768,9 +820,12 @@ la de 9 a 10 de la tabla~\ref{tab:cap16-costo} porque la valuación corre en tod
 
 \begin{limites}
   \begin{itemize}
-    \item \textbf{Derivadas parciales.} Al mover un pilar no se recalibran la curva MXN-USD ni las curvas de crédito
-          (el bootstrap de CDS descuenta con TIIE-F). La derivada total es otra cosa y puede tener otro signo
-          (sección~\ref{sec:cap16-ej-parcial}). Las curvas de tasa se derivan por tasa cero del pilar, no por
+    \item \textbf{Parcial y total.} La AAD entrega la derivada parcial (MXN-USD y crédito fijos). La ruta añade la total
+          con MXN-USD recalibrada, con sus puntos forward y su base fijos (que no se derivan), para los pilares de TIIE-F y de
+          SOFR y el spot, y es la que sirve para cubrir: puede tener el signo contrario al de la parcial
+          (sección~\ref{sec:cap16-ej-parcial}). \emph{Ninguna} recalibra las curvas de crédito (el bootstrap de CDS
+          descuenta con TIIE-F): faltan los dos últimos sumandos de la ecuación~\eqref{eq:cap16-total}. MXN-USD no tiene
+          total (es lo que se recalibra), y la de las volatilidades, el crédito y el fondeo es la parcial. Las curvas de tasa se derivan por tasa cero del pilar, no por
           cotización de depósito u OIS; solo el crédito pasa a cotizaciones (por el jacobiano del bootstrap
           obtenido por reprecio, no por AAD del bootstrap).
     \item \textbf{Primer orden, sin correlaciones y sin PFE.} No hay segundo orden (gamma cruzada), ni sensibilidad a
@@ -781,16 +836,21 @@ la de 9 a 10 de la tabla~\ref{tab:cap16-costo} porque la valuación corre en tod
           bastante más (11\,\% entre corridas de 3000 trayectorias en el ejemplo de la
           sección~\ref{sec:cap16-ej-vega}, contra cerca de $1\,\%$ del CVA). La ruta \emph{no informa el error estándar de las derivadas}. Son las de la malla $\mathcal G$ con
           extremo derecho (capítulo~\ref{cap:xva}), no las del XVA en tiempo continuo.
-    \item \textbf{Tiempo.} Con un hilo, unas 9 valuaciones; con los dos hilos de la API, unas 15 a 23 veces el tiempo
-          de la valuación (que usa todos los hilos), y decenas de segundos en conjuntos largos (26 s el conjunto de 3
-          operaciones a 10 años). Es 5 veces más barata que los choques ($2m$ valuaciones) con 48 insumos, pero no
-          instantánea; por eso se calcula a petición.
+    \item \textbf{Tiempo.} A igual número de hilos, de 7 a 9 valuaciones; en la ruta, con la valuación en todos los
+          hilos y la adjunta en dos, de 15 a 23 veces el tiempo de una valuación, y decenas de segundos en conjuntos
+          largos (26 s el conjunto de 3 operaciones a 10 años). Es 5 veces más barata que los choques ($2m$
+          valuaciones, que se estiman con la valuación en todos los hilos y no se corrieron) con 48 insumos, pero no
+          instantánea; por eso se calcula a petición. Todas las cifras son de la compilación de depuración que sirve
+          la API.
     \item \textbf{Memoria.} Unos 48 MB de cinta por hilo con la malla fina (4.96 MB de parte común y 43 MB por la
           trayectoria en curso), independientes del número de trayectorias, pero proporcionales al tamaño del conjunto y
           a la malla; con más hilos, proporcionalmente más. El tope de 2 hilos acota la memoria.
     \item \textbf{Curvas admitidas.} Solo curvas de tasa con interpolación \texttt{Linear} y solo curvas de crédito
-          \texttt{PiecewiseHazardCurve} o \texttt{FlatHazardRate} (otras lanzan \texttt{std::invalid\_argument}). Con una
-          volatilidad exactamente cero las derivadas respecto de las volatilidades no se documentan.
+          \texttt{PiecewiseHazardCurve} o \texttt{FlatHazardRate} (otras lanzan \texttt{std::invalid\_argument}).
+    \item \textbf{Volatilidad exactamente cero.} Con $\sigma_X$ o $\sigma_c$ exactamente en cero su sensibilidad sale
+          \emph{cero}, porque la factorización de Cholesky semidefinida
+          (\codigo{src/xva/exposure_engine.cpp}{choleskySemidefinite}) anula la columna correspondiente: no es la derivada
+          lateral. No afecta a los snapshots reales, cuyas volatilidades son positivas.
     \item \textbf{Licencia.} XAD es AGPL-3.0 (con licencia comercial aparte). Un producto que se ofrezca a un cliente sin
           publicar su código necesita esa licencia o compilar con \texttt{QF\_WITH\_XAD=OFF}, que deja la ruta en 501.
           Es una decisión de negocio pendiente.

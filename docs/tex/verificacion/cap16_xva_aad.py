@@ -257,7 +257,10 @@ def credito_y_api(conn):
     c = Contraparte(conn, CP)
     fila = credit_curves.current(conn)[CP]
     cds = {r["tenor"]: r for r in cuerpo["credit"]["counterparty"]["cds"]}
-    haz = cuerpo["credit"]["counterparty"]["hazards"]
+    assert cuerpo["credit"]["counterparty"]["hazards"] == []  # con cotizaciones de CDS la respuesta no repite las intensidades
+    # dCVA/dh_i por pb de intensidad: la derivada del motor, la misma que `_credit` compone con el jacobiano
+    haz = [{"cva": BP * d} for d in xva.engine(c.mkt, c.modelo, c.params, c.dias).xva_sensitivities(
+        c.spec, c.cp, c.lgd_c, c.propia, c.lgd_o, c.params["funding_spread"]).cva.counterparty_hazard]
 
     def curva_con(k, delta):  # el bootstrap vuelto a correr con la cotización k movida `delta`
         movidas = [dict(q, spread=q["spread"] + (delta if j == k else 0.0)) for j, q in enumerate(fila["quotes"])]
@@ -329,6 +332,13 @@ def parcial_frente_a_total(conn):
     verificar("cap16-parcial-choque-cva", parcial[0], 3)
     verificar("cap16-total-choque-cva", total[0], 3)
     verificar("cap16-total-reconstruida-cva", reconstruida, 3)
+    # la total que entrega la API (`recalibrated`, regla de la cadena con el jacobiano por pilar, sin simular más) contra
+    # el choque con recalibración y contra la reconstrucción de arriba (que usa el jacobiano del desplazamiento paralelo)
+    api = cuerpo["curves"][0]["dv01"]["recalibrated"]
+    assert abs(api["cva"] - total[0]) <= 0.01 * abs(total[0])
+    assert abs(api["cva"] - reconstruida) <= 1e-3 * abs(reconstruida)
+    verificar("cap16-total-api-cva", api["cva"], 3)
+    verificar("cap16-total-api-total", api["total"], 3)
     verificar("cap16-parcial-aad-total", aad["total"], 3)
     verificar("cap16-parcial-choque-total", parcial[0] - parcial[1] + parcial[2], 3)
     verificar("cap16-total-choque-total", total[0] - total[1] + total[2], 3)
