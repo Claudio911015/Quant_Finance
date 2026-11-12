@@ -83,6 +83,36 @@ const PRODUCT_SECTIONS: Section[] = [
       { label: 'Modelo', text: 'Black-Scholes con insumos capturados en la operación.' },
     ],
   },
+  {
+    id: 'fx-exoticos',
+    title: 'Exóticos de FX',
+    items: [
+      {
+        label: 'Qué paga',
+        text: 'No touch: monto fijo en MXN al vencimiento si el USDMXN nunca toca la barrera. Double no touch: si nunca sale del corredor.',
+      },
+      {
+        label: 'Barrera',
+        text: 'Americana, vigilada de forma continua toda la vida: entre nodos de la malla se usa la probabilidad de cruce del puente browniano.',
+      },
+      {
+        label: 'Modelos',
+        text: 'Plano = vol de la superficie en spot y vencimiento. Con sonrisa = volatilidad local de Dupire calculada por QuantLib desde la superficie del snapshot (bicúbica, extrapolación constante), tabulada en la malla del Monte Carlo; donde la varianza local sale negativa se usa la vol plana. Diferencia frente a Dupire al vuelo: del orden de 0.3–0.8 % del pago.',
+      },
+      {
+        label: 'Cálculo',
+        text: 'QuantLib 1.42: trayectorias de GaussianPathGenerator; referencia analítica con AnalyticBinaryBarrierEngine y AnalyticDoubleBarrierBinaryEngine. La fórmula del puente es la única matemática propia.',
+      },
+      {
+        label: 'Error de Monte Carlo',
+        text: '20 000 trayectorias, 10 pasos, semilla fija 42: resultados reproducibles. Error estándar en MXN; delta (+1 % de spot) y vega (+1 punto de vol) por reprecio con la misma semilla.',
+      },
+      {
+        label: 'Límites',
+        text: 'Pago solo en MXN; volatilidad local, no estocástica ni vanna-volga; superficie sintética; sin rebate ni one touch; no se registran como operaciones del portafolio. El snapshot siempre trae superficie, no hay caso «sin superficie».',
+      },
+    ],
+  },
 ];
 
 const GENERAL_SECTIONS: Section[] = [
