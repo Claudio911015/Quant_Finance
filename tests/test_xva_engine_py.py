@@ -214,8 +214,11 @@ class ExposureEngineBindings(unittest.TestCase):
         GIL held it does not tick during the call, with it released it ticks hundreds of times.
         Measured as the longest gap between ticks, which has to be far below the call's duration.
         (compute_xva also releases it, but one call takes about a millisecond, so no timing can tell.)
+
+        simulate splits the paths among the hardware threads, so the work scales with the number of cores to keep the
+        call near 1.5 s on any machine; at 4000 paths it took 0.29-0.31 s here, right at the 0.3 s floor below.
         """
-        engine = _engine(n_paths=4000, report_days=list(range(0, 1100, 30)))
+        engine = _engine(n_paths=2500 * (os.cpu_count() or 1), report_days=list(range(0, 1100, 30)))
         stop = threading.Event()
         gaps = []
 
