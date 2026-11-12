@@ -222,6 +222,11 @@ describe('MethodologyScreen', () => {
       expect(riskRow('Historia sintética de MX-DEMO')).toContain('20261110');
       expect(riskRow('CVA informativo')).toContain('no entra al PV');
       expect(riskRow('Coherencia con la valuación')).toContain('PV del desk');
+      expect(riskRow('Coherencia con la valuación')).toContain('términos envejecidos');
+      expect(riskRow('Coherencia con la valuación')).toContain('cross currency');
+      for (const stale of ['tasa fija efectiva', 'pagos diarios', 'escalón en el primer mes', '86 mil']) {
+        expect(riskRow('Coherencia con la valuación'), stale).not.toContain(stale);
+      }
       expect(riskRow('Crédito y XVA')).toContain('sección XVA');
       expect(riskRow('Crédito y XVA')).not.toContain('500 trayectorias');
     });
@@ -300,6 +305,13 @@ describe('MethodologyScreen', () => {
       renderScreen();
       expect(xvaRow('XVA incremental')).toContain('con y sin');
       expect(xvaRow('XVA incremental')).toContain('mismas trayectorias');
+    });
+
+    it('declara que el CVACalculator anterior quedó fuera de uso por un sesgo medido', () => {
+      renderScreen();
+      expect(xvaRow('Motor anterior retirado')).toContain('CVACalculator');
+      expect(xvaRow('Motor anterior retirado')).toContain('+7 %');
+      expect(xvaRow('Motor anterior retirado')).toContain('curva con pendiente');
     });
 
     it('declara que las curvas de crédito son sintéticas y su método', () => {

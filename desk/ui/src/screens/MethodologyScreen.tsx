@@ -385,7 +385,7 @@ const RISK_ADV_SECTIONS: Section[] = [
       },
       {
         label: 'Coherencia con la valuación',
-        text: 'El modelo de exposición revalúa un swap de pagos regulares, distinto del swap del desk (base de días ACT/360, calendario por fechas, periodo en curso con su devengo). Para que ambos coincidan, cada swap se entrega al modelo con pagos diarios, que aproximan la acumulación continua, y con una tasa fija efectiva calibrada para que valga hoy exactamente el PV del desk. Así el modelo vale el PV del desk exactamente en t = 0 y el perfil no tiene escalón en el primer mes. Un instante después el modelo pierde el cupón diario en curso: el valor simulado queda hasta un cupón diario (nocional × tasa / 365) por debajo del PV, en la cartera de ejemplo unos 86 mil MXN en Alfa (0.017 % del nocional, 9 % de su PV), y cada punto mensual carga un error de ese orden.',
+        text: 'El motor de exposición no arma un swap aproximado: usa los mismos términos envejecidos que la valuación del desk (calendario real de pagos, base ACT/360, periodo en curso con su devengo, fijaciones), una pata por moneda en los swaps y en los cross currency swaps, y descuenta como la operación (TIIE-F, o la curva con colateral USD). En t = 0 su valor coincide con el PV del desk a 1e-6 del nocional por operación, así que el perfil arranca en el PV y no tiene escalón. Después de hoy el periodo en curso se compone en continuo con la tasa simulada, mientras el desk capitaliza diario: diferencia de segundo orden.',
       },
       {
         label: 'CVA informativo',
@@ -425,6 +425,10 @@ const XVA_SECTIONS: Section[] = [
       {
         label: 'XVA incremental',
         text: 'Es la diferencia del XVA con y sin la operación, calculada sobre las mismas trayectorias, para que el ruido de Monte Carlo no contamine la diferencia.',
+      },
+      {
+        label: 'Motor anterior retirado',
+        text: 'El CVACalculator anterior (swaps frescos de pagos regulares en una sola moneda, con la deriva del Hull-White sacada de una derivada numérica del forward) quedó fuera de uso en el desk por un sesgo medido: con una curva con pendiente su CVA queda +7 % sobre el valor exacto (+3.5 % con curva plana), porque la tasa corta media simulada sube por encima de la del modelo. Sigue en la biblioteca C++, sin cambios, y ya no alimenta ninguna cifra del desk.',
       },
       {
         label: 'Curvas de crédito',
