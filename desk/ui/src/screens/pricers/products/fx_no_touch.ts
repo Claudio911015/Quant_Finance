@@ -41,7 +41,7 @@ export const spec: ProductSpec = {
   product: 'fx_no_touch',
   title: 'No touch USDMXN',
   fields: exoticFields([
-    { name: 'barrier', label: 'Barrera', kind: 'number', default: 19.5, help: 'MXN por USD.' },
+    { name: 'barrier', label: 'Barrera', kind: 'number', default: 19.5 },
     {
       name: 'barrier_type',
       label: 'Tipo de barrera',

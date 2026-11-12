@@ -50,7 +50,6 @@ const DETAIL_LABELS: Record<string, { label: string; fmt: (v: unknown) => string
   price_pct: { label: 'Precio (% del pago)', fmt: (v) => `${fmtNumber(Number(v), 2)} %` },
   no_touch_probability: { label: 'Probabilidad de no tocar', fmt: (v) => `${fmtNumber(Number(v) * 100, 2)} %` },
   analytic_flat_pv: { label: 'Referencia analítica (plano)', fmt: (v) => fmtMoney(Number(v), 'MXN') },
-  smile_adjustment: { label: 'Ajuste por sonrisa', fmt: (v) => fmtMoney(Number(v), 'MXN') },
   paths: { label: 'Trayectorias', fmt: (v) => fmtNumber(Number(v), 0) },
   model: { label: 'Modelo', fmt: (v) => (v === 'flat' ? 'Plano' : 'Con sonrisa (vol local)') },
   method: { label: 'Método', fmt: (v) => (v === 'analytic' ? 'Analítico' : 'Monte Carlo') },

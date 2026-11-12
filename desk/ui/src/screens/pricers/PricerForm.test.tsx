@@ -614,7 +614,6 @@ describe('exóticos de FX', () => {
       model: 'smile',
       method: 'mc',
       analytic_flat_pv: 400000,
-      smile_adjustment: 12345.678,
       chart: { strike: null, barriers, spots: [18.5, 19, 19.4], pnl: [1, 2, 3] },
       ...over,
     },
@@ -670,7 +669,6 @@ describe('exóticos de FX', () => {
     expect(row('Probabilidad de no tocar')).toContain('41.75 %');
     expect(row('Precio (% del pago)')).toContain('41.23 %');
     expect(row('Referencia analítica (plano)')).toContain('MXN 400,000.00');
-    expect(row('Ajuste por sonrisa')).toContain('MXN 12,345.68');
     expect(row('Trayectorias')).toContain('20,000');
     expect(row('Modelo')).toContain('Con sonrisa (vol local)');
     expect(row('Método')).toContain('Monte Carlo');
@@ -692,9 +690,7 @@ describe('exóticos de FX', () => {
 
   it('sin referencia analítica (la serie no converge con corredores muy anchos) muestra «—» en vez de cero', async () => {
     mockApi({
-      'POST /price/fx_double_no_touch': json(
-        exotic('fx_double_no_touch', [0.01, 1000000], { analytic_flat_pv: null, smile_adjustment: null }),
-      ),
+      'POST /price/fx_double_no_touch': json(exotic('fx_double_no_touch', [0.01, 1000000], { analytic_flat_pv: null })),
     });
     renderForm('fx_double_no_touch');
 
@@ -703,7 +699,6 @@ describe('exóticos de FX', () => {
     const block = (await screen.findByText('Detalle del cálculo')).closest('section') as HTMLElement;
     const row = (label: string) => (within(block).getByText(label).closest('tr') as HTMLElement).textContent;
     expect(row('Referencia analítica (plano)')).toBe('Referencia analítica (plano)—');
-    expect(row('Ajuste por sonrisa')).toBe('Ajuste por sonrisa—');
     expect(row('Trayectorias')).toContain('20,000');
   });
 

@@ -1,14 +1,18 @@
 """No touch y double no touch USDMXN: Monte Carlo con barrera continua sobre trayectorias de QuantLib."""
+import threading
+
 import numpy as np
 import QuantLib as ql
 
 from desk.api.errors import ApiError
 from desk.api.pricing.base import MAX_DAYS, Product
 from desk.api.validation import MAX_AMOUNT, MAX_PRICE, choice, integer, number
+from desk.validation.ql_curves import build_curve
 
 PATHS, STEPS, SEED, LV_STRIKES = 20000, 10, 42, 41
 CHART_POINTS, CHART_PATHS = 21, 2000
 SPOT_BUMP = VOL_BUMP = 0.01
+_LOCK = threading.Lock()  # la fecha de valuación de QuantLib es global al proceso: un precio a la vez
 
 
 def _common(d):
@@ -35,10 +39,10 @@ def _dnt_validate(d):
 
 
 def _sides(p):
-    """(campo, +1 si la barrera queda arriba del spot) de cada barrera del producto."""
+    """(campo, +1 si la barrera queda arriba del spot, rótulo) de cada barrera del producto."""
     if "barrier" in p:
-        return [("barrier", 1 if p["barrier_type"] == "up" else -1)]
-    return [("lower", -1), ("upper", 1)]
+        return [("barrier", 1 if p["barrier_type"] == "up" else -1, "barrera")]
+    return [("lower", -1, "barrera inferior"), ("upper", 1, "barrera superior")]
 
 
 def _build(p, mkt, spot, dvol):
@@ -47,15 +51,12 @@ def _build(p, mkt, spot, dvol):
     today, dc = ql.Date(a.day, a.month, a.year), ql.Actual365Fixed()
     ql.Settings.instance().evaluationDate = today
 
-    def curve(c):
-        ts = list(c.maturities())
-        dates = [today] + [today + int(round(t * 365)) for t in ts]
-        k = ql.DiscountCurve(dates, [1.0] + [c.discount_factor(t) for t in ts], dc)
-        k.enableExtrapolation()  # los pilares llegan a ~10 años y los plazos válidos a 50
-        return ql.YieldTermStructureHandle(k)
+    def curve(c):  # la ZeroCurve del arnés de validación (cero lineal, plana fuera de los pilares): idéntica a la del desk
+        pillars = [{"days": q["days"], "df": mkt.curves[c].discount_factor(q["days"] / 365.0)} for q in mkt.pillars[c]]
+        return build_curve({"pillars": pillars}, today)
 
-    dom, fgn = curve(mkt.curves[mkt.mxn_discount]), curve(mkt.curves["SOFR"])
-    q, sigma = ql.QuoteHandle(ql.SimpleQuote(spot)), mkt.surface.vol(spot, T) + dvol
+    dom, fgn = curve(mkt.mxn_discount), curve("SOFR")
+    q, sigma = ql.QuoteHandle(ql.SimpleQuote(spot)), mkt.surface.vol(mkt.spot, T) + dvol  # vol fija: la del spot sin chocar
     if p["model"] == "flat":
         vol = ql.BlackVolTermStructureHandle(ql.BlackConstantVol(today, ql.NullCalendar(), sigma, dc))
         return dom, ql.GarmanKohlagenProcess(q, fgn, dom, vol), sigma, None, None
@@ -83,13 +84,14 @@ def _mc(proc, sigma, ks, tab, bars, T, n):
     pg = ql.GaussianPathGenerator(proc, T, STEPS, rsg, False)
     X = np.array([list(pg.next().value()) for _ in range(n)])  # copia: el Path es un búfer reutilizado
     sig = sigma if tab is None else np.column_stack([np.interp(X[:, i], ks, tab[:, i]) for i in range(STEPS)])
-    s2, surv, alive = sig ** 2 * T / STEPS, 1.0, True
+    s2, surv = sig ** 2 * T / STEPS, 1.0
     for b in bars:
         lb = np.log(X / b)
         # Única matemática propia: P(cruzar b entre nodos) = exp(-2 ln(X_i/b) ln(X_i+1/b) / (s^2 dt)), puente browniano
-        # (Beaglehole-Dybvig-Zhou 1997; Glasserman 2004, 6.4); QuantLib no trae Monte Carlo de barrera en efectivo
-        surv, alive = surv - np.exp(-2 * lb[:, :-1] * lb[:, 1:] / s2), alive & (lb * lb[:, :1] > 0).all(axis=1)
-    v = alive * np.clip(surv, 0, 1).prod(axis=1)
+        # (Beaglehole-Dybvig-Zhou 1997; Glasserman 2004, 6.4). Un nodo al otro lado da probabilidad > 1 y supervivencia < 0.
+        # QuantLib 1.42 (Python) no da la probabilidad de cruce ni Monte Carlo de doble barrera; el no touch de una barrera podría replicarse con MCBarrierEngine y un diferencial de knock-outs, y se eligió un solo motor para los dos productos.
+        surv = surv - np.exp(-2 * lb[:, :-1] * lb[:, 1:] / s2)
+    v = np.maximum(surv, 0).prod(axis=1)
     return v.mean(), v.std(ddof=1) / n ** 0.5
 
 
@@ -119,10 +121,8 @@ def _value(p, mkt, spot, dvol, n):
     k, T = p["payout_mxn"] * (1 if p["side"] == "buy" else -1), p["days"] / 365.0
     dom, proc, sigma, ks, tab = _build(p, mkt, spot, dvol)
     df = dom.discount(T)
-    if p["method"] == "analytic":
-        u, se = _analytic(p, proc) / df, 0.0
-    else:
-        u, se = _mc(proc, sigma, ks, tab, [p[f] for f, _ in _sides(p)], T, n)
+    u, se = (_analytic(p, proc) / df, 0.0) if p["method"] == "analytic" else _mc(
+        proc, sigma, ks, tab, [p[f] for f, *_ in _sides(p)], T, n)
     return k * df * u, abs(k) * df * se, u
 
 
@@ -130,7 +130,7 @@ def _result(p, mkt):
     spot = mkt.spot
     pv, se, u = _value(p, mkt, spot, 0.0, PATHS)
     try:
-        ref = _value(dict(p, model="flat", method="analytic"), mkt, spot, 0.0, 0)[0]
+        ref = pv if p["method"] == "analytic" else _value(dict(p, model="flat", method="analytic"), mkt, spot, 0.0, 0)[0]
     except ApiError:  # sin referencia; con method=analytic ya falló arriba
         ref = None
     delta = (_value(p, mkt, spot * (1 + SPOT_BUMP), 0.0, PATHS)[0] - pv) / (SPOT_BUMP * spot)
@@ -141,24 +141,25 @@ def _result(p, mkt):
         "details": {
             "price_pct": 100 * abs(pv) / p["payout_mxn"], "no_touch_probability": u, "std_error": se,
             "paths": 0 if p["method"] == "analytic" else PATHS, "model": p["model"], "method": p["method"],
-            "analytic_flat_pv": ref, "smile_adjustment": None if ref is None else (pv - ref if p["model"] == "smile" else 0.0),
+            "analytic_flat_pv": ref,
         },
     }
 
 
 def _price(p, mkt):
     sides, spot = _sides(p), mkt.spot
-    for f, s in sides:
+    for f, s, label in sides:
         if s * (spot - p[f]) >= 0:
-            raise ApiError(400, "El spot %.4f ya tocó la barrera '%s'" % (spot, f), f)
-    out = _result(p, mkt)
-    bars = [p[f] for f, _ in sides]
-    lo, hi = sorted(bars if len(bars) == 2 else [bars[0], bars[0] * (0.85 if sides[0][1] > 0 else 1.15)])
-    spots = np.linspace(lo, hi, CHART_POINTS + 2)[1:-1]
-    out["details"]["chart"] = {
-        "strike": None, "barriers": bars, "spots": spots.tolist(),
-        "pnl": [_value(p, mkt, float(s), 0.0, CHART_PATHS)[0] for s in spots],
-    }
+            raise ApiError(400, "El spot %.4f ya tocó la %s" % (spot, label), f)
+    bars = [p[f] for f, *_ in sides]
+    # de barrera a barrera; con una sola, hasta el espejo del spot (en logaritmo), que lo deja al centro
+    spots = np.linspace(*sorted(bars if len(bars) == 2 else [bars[0], spot * spot / bars[0]]), CHART_POINTS)
+    with _LOCK:
+        out = _result(p, mkt)
+        out["details"]["chart"] = {
+            "strike": None, "barriers": bars, "spots": spots.tolist(),
+            "pnl": [_value(p, mkt, float(s), 0.0, CHART_PATHS)[0] for s in spots],
+        }
     return out
 
 

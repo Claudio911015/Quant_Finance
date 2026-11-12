@@ -1,9 +1,14 @@
 """No touch y double no touch USDMXN: Monte Carlo contra los motores analíticos de QuantLib (R1-R6)."""
+import copy
 import json
 import math
+import sys
+import threading
 import time
+from datetime import timedelta
 
 import pytest
+import QuantLib as ql
 
 from desk.api import db, market
 from desk.api.pricing import PRODUCT_LABEL, PRODUCTS, fx_exotics
@@ -111,18 +116,18 @@ def test_contract_over_http(client, name, params):
     d = body["details"]
     assert set(d) == {
         "price_pct", "no_touch_probability", "std_error", "paths", "model", "method",
-        "analytic_flat_pv", "smile_adjustment", "chart",
+        "analytic_flat_pv", "chart",
     }
     assert (d["model"], d["method"], d["paths"]) == ("smile", "mc", fx_exotics.PATHS)
     assert d["price_pct"] == pytest.approx(100 * body["pv"] / 1_000_000.0)
     assert 0 < d["no_touch_probability"] < 1 and d["std_error"] > 0
-    assert d["smile_adjustment"] == pytest.approx(body["pv"] - d["analytic_flat_pv"])
     chart = d["chart"]
     assert set(chart) == {"strike", "barriers", "spots", "pnl"} and chart["strike"] is None
     assert chart["barriers"] == ([19.5] if name == NT else [17.5, 19.8])
     assert len(chart["spots"]) == len(chart["pnl"]) == fx_exotics.CHART_POINTS
-    lo, hi = (0.85 * 19.5, 19.5) if name == NT else (17.5, 19.8)  # lado vivo, sin la barrera
-    assert all(lo < s < hi for s in chart["spots"]) and chart["spots"] == sorted(chart["spots"])
+    lo, hi = (SPOT ** 2 / 19.5, 19.5) if name == NT else (17.5, 19.8)  # del espejo del spot a la barrera
+    assert chart["spots"][0] == pytest.approx(lo) and chart["spots"][-1] == pytest.approx(hi)
+    assert chart["spots"] == sorted(chart["spots"])
     assert all(0 <= v <= 1_000_000 for v in chart["pnl"])
     assert not has_non_finite(body)
 
@@ -202,7 +207,7 @@ def test_analytic_method(ctx):
     for name, params in ((NT, _nt(91, 19.5, "up")), (DNT, _dnt(91, 17.5, 19.8))):
         r = _res(name, dict(params, method="analytic"), ctx)
         d = r["details"]
-        assert (d["paths"], d["std_error"], d["smile_adjustment"]) == (0, 0, 0)
+        assert (d["paths"], d["std_error"]) == (0, 0)
         assert r["pv"] == pytest.approx(d["analytic_flat_pv"], rel=1e-12)
         assert 0 < d["no_touch_probability"] < 1 and r["risk"]["vega"] < 0
 
@@ -219,7 +224,6 @@ def test_smile_on_flat_surface_reproduces_flat(flat, name, params):
     a = _res(name, params, mkt)
     b = _res(name, dict(params, model="smile"), mkt)
     assert abs(a["pv"] - b["pv"]) <= _tol(a, b)
-    assert a["details"]["smile_adjustment"] == 0
 
 
 @pytest.mark.parametrize("name,params", [(NT, _nt(91, 19.5, "up")), (DNT, _dnt(182, 17.5, 19.8))])
@@ -228,7 +232,6 @@ def test_smile_on_demo_surface(ctx, name, params):
     d = r["details"]
     assert math.isfinite(r["pv"]) and 0 <= r["pv"] <= params["payout_mxn"]
     assert 0 <= d["no_touch_probability"] <= 1
-    assert d["smile_adjustment"] != 0 and d["smile_adjustment"] == pytest.approx(r["pv"] - d["analytic_flat_pv"])
 
 
 # ----------------------------------------------------------------------------- R5: identidades
@@ -240,7 +243,27 @@ def test_value_is_between_zero_and_discounted_payout(ctx):
             r = _res(name, dict(params, model=model), ctx)
             df = r["pv"] / (params["payout_mxn"] * r["details"]["no_touch_probability"])
             assert 0 <= r["pv"] <= params["payout_mxn"] * df
-            assert df == pytest.approx(ctx.curves["TIIE-F"].discount_factor(91 / 365.0), rel=1e-4)
+            assert df == pytest.approx(ctx.curves["TIIE-F"].discount_factor(91 / 365.0), rel=1e-6)
+
+
+@pytest.mark.parametrize("days", [91, 182, 3650])
+@pytest.mark.parametrize("method", ["mc", "analytic"])
+def test_barrier_that_cannot_be_touched_pays_the_payout_discounted_with_the_desk_curve(ctx, days, method):
+    """R5(c): el pago descontado con la curva TIIE-F del desk, a 1e-6 relativo."""
+    r = _res(NT, _nt(days, 900_000.0, "up", method=method), ctx)
+    assert r["pv"] == pytest.approx(1_000_000.0 * ctx.curves["TIIE-F"].discount_factor(days / 365.0), rel=1e-6)
+
+
+def test_quantlib_curves_give_the_discount_factors_of_the_desk_curves(ctx):
+    """Pilares, entre pilares, antes del primero y más allá del último (30 años), en MXN y en USD."""
+    dom, proc, *_ = fx_exotics._build({"days": 91, "model": "flat"}, ctx, ctx.spot, 0.0)
+    today = ql.Settings.instance().evaluationDate
+    for handle, name in ((dom, ctx.mxn_discount), (proc.dividendYield(), "SOFR")):
+        pillars = [p["days"] for p in ctx.pillars[name]]
+        mids = [(a + b) // 2 for a, b in zip(pillars, pillars[1:])]
+        for d in pillars + mids + [1, 30 * 365]:
+            ref = ctx.curves[name].discount_factor(d / 365.0)
+            assert handle.discount(today + d) == pytest.approx(ref, abs=1e-9, rel=0), (name, d)
 
 
 @pytest.mark.parametrize("model", ["flat", "smile"])
@@ -280,7 +303,7 @@ def test_corridor_where_the_analytic_series_fails_is_still_priced_by_mc(client, 
     resp = _post(client, DNT, _dnt(91, 0.01, 1e6, model=model))
     assert resp.status_code == 200, resp.get_json()
     d = resp.get_json()["details"]
-    assert d["analytic_flat_pv"] is None and d["smile_adjustment"] is None
+    assert d["analytic_flat_pv"] is None
     assert abs(d["no_touch_probability"] - 1) <= 1e-6 and d["paths"] > 0
 
 
@@ -326,6 +349,61 @@ def test_delta_and_vega_are_bumped_repricings(flat, monkeypatch):
             assert base["risk"]["delta"] == pytest.approx((spot_up - base["pv"]) / (0.01 * SPOT), rel=1e-9, abs=1e-6)
     ref = _res(NT, _nt(91, 19.5, "up", method="analytic"), flat(0.12))["risk"]
     assert ref["delta"] < 0 and ref["vega"] < 0  # comprador de no touch arriba: pierde si sube el spot o la vol
+
+
+def test_flat_model_delta_keeps_the_volatility_of_the_unbumped_spot(ctx, flat):
+    """La superficie del demo tiene sonrisa: la delta plana no debe leer otra vol en el spot chocado."""
+    p = _nt(91, 19.5, "up", method="analytic")
+    sigma = ctx.surface.vol(ctx.spot, 91 / 365.0)
+    assert _res(NT, p, ctx)["risk"]["delta"] == pytest.approx(_res(NT, p, flat(sigma))["risk"]["delta"], rel=1e-9)
+
+
+def test_prices_at_once_with_different_valuation_dates_equal_the_serial_ones(ctx):
+    """La fecha de valuación de QuantLib es global: dos hilos con fechas distintas no deben pisarse."""
+    other = copy.copy(ctx)
+    other.as_of = ctx.as_of + timedelta(days=400)
+    prod = fx_exotics.PRODUCTS[NT]
+    p = prod.validate(_nt(91, 19.5, "up", method="analytic"))
+    serial = [prod.price(p, m)["pv"] for m in (ctx, other)]
+    out = [[], []]
+
+    def work(i, m):
+        out[i] = [prod.price(p, m)["pv"] for _ in range(5)]
+
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        threads = [threading.Thread(target=work, args=(i, m)) for i, m in enumerate((ctx, other))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        sys.setswitchinterval(old)
+    assert out == [[serial[0]] * 5, [serial[1]] * 5]
+
+
+@pytest.mark.parametrize("name,params,field,label", [
+    (NT, _nt(91, 18.0, "up"), "barrier", "la barrera"),
+    (NT, _nt(91, 19.5, "down"), "barrier", "la barrera"),
+    (DNT, _dnt(91, 18.9, 19.8), "lower", "la barrera inferior"),
+    (DNT, _dnt(91, 17.5, 18.0), "upper", "la barrera superior"),
+])
+def test_touched_barrier_message_names_the_field_in_spanish(client, name, params, field, label):
+    body = _post(client, name, params).get_json()
+    assert body["field"] == field and body["error"].endswith("ya tocó " + label)
+
+
+@pytest.mark.parametrize("name,params,bars", [
+    (NT, _nt(91, 19.5, "up", model="smile"), [19.5]), (NT, _nt(91, 17.5, "down"), [17.5]),
+    (NT, _nt(91, 40.0, "up"), [40.0]), (NT, _nt(91, 19.5, "up", method="analytic"), [19.5]),
+    (DNT, _dnt(91, 17.5, 19.8, model="smile"), [17.5, 19.8]),
+])
+def test_chart_reaches_every_barrier_with_zero_value_and_contains_the_spot(ctx, name, params, bars):
+    chart = _full(name, params, ctx)["details"]["chart"]
+    assert chart["spots"][0] <= SPOT <= chart["spots"][-1]
+    for b in bars:
+        assert chart["pnl"][chart["spots"].index(b)] == 0
 
 
 # ----------------------------------------------------------------------------- R6: eficiencia
