@@ -1,0 +1,173 @@
+% referencias.bib -- bibliografía única de la documentación técnica de QF Desk.
+%
+% Reglas (README.md y plan del corte 11):
+%  * Solo obras reales. Libros y artículos: autores, año, título, editorial o revista y `doi` o `isbn`
+%    confirmados contra crossref.org / openlibrary.org / la editorial. Nunca completar un DOI o ISBN de memoria.
+%  * Excepción declarada: normas y documentación institucional sin DOI ni ISBN van como manual (entrada de tipo «manual») con el
+%    organismo emisor como autor entre llaves dobles, `year`, `title`, `url` oficial y
+%    `note = {Consultado el AAAA-MM-DD}`.
+%  * Claves `apellidoAAAA` en minúsculas sin acentos (sufijo a, b si chocan). Archivo compartido: añadir
+%    solo AL FINAL, releer antes de editar, no reordenar ni reformatear entradas ajenas.
+
+% ---- Artículos -----------------------------------------------------------------------------------
+
+@article{hull1990,
+  author  = {Hull, John and White, Alan},
+  title   = {Pricing Interest-Rate-Derivative Securities},
+  journal = {Review of Financial Studies},
+  year    = {1990},
+  volume  = {3},
+  number  = {4},
+  pages   = {573--592},
+  doi     = {10.1093/rfs/3.4.573}
+}
+
+@article{jamshidian1989,
+  author  = {Jamshidian, Farshid},
+  title   = {An Exact Bond Option Formula},
+  journal = {The Journal of Finance},
+  year    = {1989},
+  volume  = {44},
+  number  = {1},
+  pages   = {205--209},
+  doi     = {10.1111/j.1540-6261.1989.tb02413.x}
+}
+
+@article{garman1983,
+  author  = {Garman, Mark B. and Kohlhagen, Steven W.},
+  title   = {Foreign Currency Option Values},
+  journal = {Journal of International Money and Finance},
+  year    = {1983},
+  volume  = {2},
+  number  = {3},
+  pages   = {231--237},
+  doi     = {10.1016/S0261-5606(83)80001-1}
+}
+
+@article{black1976,
+  author  = {Black, Fischer},
+  title   = {The Pricing of Commodity Contracts},
+  journal = {Journal of Financial Economics},
+  year    = {1976},
+  volume  = {3},
+  number  = {1--2},
+  pages   = {167--179},
+  doi     = {10.1016/0304-405X(76)90024-6}
+}
+
+@article{black1973,
+  author  = {Black, Fischer and Scholes, Myron},
+  title   = {The Pricing of Options and Corporate Liabilities},
+  journal = {Journal of Political Economy},
+  year    = {1973},
+  volume  = {81},
+  number  = {3},
+  pages   = {637--654},
+  doi     = {10.1086/260062}
+}
+
+@article{hagan2006,
+  author  = {Hagan, Patrick S. and West, Graeme},
+  title   = {Interpolation Methods for Curve Construction},
+  journal = {Applied Mathematical Finance},
+  year    = {2006},
+  volume  = {13},
+  number  = {2},
+  pages   = {89--129},
+  doi     = {10.1080/13504860500396032}
+}
+
+% ---- Libros --------------------------------------------------------------------------------------
+
+@book{brigo2006,
+  author    = {Brigo, Damiano and Mercurio, Fabio},
+  title     = {Interest Rate Models --- Theory and Practice: With Smile, Inflation and Credit},
+  series    = {Springer Finance},
+  edition   = {segunda},
+  publisher = {Springer},
+  address   = {Berlin, Heidelberg},
+  year      = {2006},
+  isbn      = {978-3-540-22149-4},
+  doi       = {10.1007/978-3-540-34604-3}
+}
+
+@book{andersen2010,
+  author    = {Andersen, Leif B. G. and Piterbarg, Vladimir V.},
+  title     = {Interest Rate Modeling, Volume 1: Foundations and Vanilla Models},
+  publisher = {Atlantic Financial Press},
+  year      = {2010},
+  isbn      = {978-0-9844221-0-4}
+}
+
+@book{hull2018,
+  author    = {Hull, John C.},
+  title     = {Options, Futures, and Other Derivatives},
+  edition   = {d{\'e}cima},
+  publisher = {Pearson},
+  year      = {2018},
+  isbn      = {978-0-13-447208-9}
+}
+
+@book{gregory2015,
+  author    = {Gregory, Jon},
+  title     = {The {xVA} Challenge: Counterparty Credit Risk, Funding, Collateral, and Capital},
+  edition   = {tercera},
+  publisher = {Wiley},
+  year      = {2015},
+  isbn      = {978-1-119-10941-9}
+}
+
+@book{glasserman2003,
+  author    = {Glasserman, Paul},
+  title     = {Monte Carlo Methods in Financial Engineering},
+  series    = {Stochastic Modelling and Applied Probability},
+  publisher = {Springer},
+  address   = {New York},
+  year      = {2003},
+  isbn      = {978-0-387-00451-8},
+  doi       = {10.1007/978-0-387-21617-1}
+}
+
+@book{jorion2007,
+  author    = {Jorion, Philippe},
+  title     = {Value at Risk: The New Benchmark for Managing Financial Risk},
+  edition   = {tercera},
+  publisher = {McGraw-Hill},
+  year      = {2007},
+  isbn      = {978-0-07-146495-6}
+}
+
+@book{mcneil2015,
+  author    = {McNeil, Alexander J. and Frey, R{\"u}diger and Embrechts, Paul},
+  title     = {Quantitative Risk Management: Concepts, Techniques and Tools},
+  publisher = {Princeton University Press},
+  year      = {2015},
+  isbn      = {978-0-691-16627-8},
+  note      = {Edici{\'o}n revisada}
+}
+
+% ---- Normas y documentación institucional (excepción declarada en README.md) ---------------------
+
+@manual{iasb2014,
+  author = {{International Accounting Standards Board}},
+  title  = {{IFRS} 9 {Financial Instruments}},
+  year   = {2014},
+  url    = {https://www.ifrs.org/issued-standards/list-of-standards/ifrs-9-financial-instruments/},
+  note   = {Versi{\'o}n completa emitida en julio de 2014. Consultado el 2026-11-11}
+}
+
+@manual{nyfed2026,
+  author = {{Federal Reserve Bank of New York}},
+  title  = {Secured Overnight Financing Rate Data},
+  year   = {2026},
+  url    = {https://www.newyorkfed.org/markets/reference-rates/sofr},
+  note   = {P{\'a}gina de datos y metodolog{\'\i}a de {SOFR}. Consultado el 2026-11-11}
+}
+
+@manual{banxico2021,
+  author = {{Banco de M{\'e}xico}},
+  title  = {Determinaci{\'o}n de la tasa {TIIE} de Fondeo},
+  year   = {2021},
+  url    = {https://www.banxico.org.mx/mercados/d/%7B3F620274-54CA-0261-E055-775AFEDB0A0F%7D.pdf},
+  note   = {Nota t{\'e}cnica sin fecha impresa; 2021 es el a{\~n}o de creaci{\'o}n del PDF. Consultado el 2026-11-11}
+}

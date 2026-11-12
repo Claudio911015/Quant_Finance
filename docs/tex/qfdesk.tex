@@ -1,0 +1,40 @@
+% qfdesk.tex -- documento maestro de la documentación técnica de QF Desk.
+% Compilar (desde docs/tex): latexmk -pdf -interaction=nonstopmode -halt-on-error qfdesk.tex
+\documentclass[11pt,a4paper]{report}
+\input{preambulo}
+
+\title{QF Desk --- Documentación técnica\\[1.2ex]\large Rama \texttt{feat/qf-desk}}
+\author{}
+\date{\today}
+
+\begin{document}
+
+% T1: \nocite provisional, lo quita T11 (mientras los capítulos no citan las entradas base del .bib)
+\nocite{hull1990,jamshidian1989,garman1983,black1976,black1973,brigo2006,andersen2010,hull2018,gregory2015,glasserman2003,jorion2007,mcneil2015,hagan2006,iasb2014,nyfed2026,banxico2021}
+
+\maketitle
+\tableofcontents
+
+\include{capitulos/cap01_introduccion}
+\include{capitulos/cap02_curvas}
+\include{capitulos/cap03_swaps_ois}
+\include{capitulos/cap04_fx}
+\include{capitulos/cap05_hull_white}
+\include{capitulos/cap06_bonos}
+\include{capitulos/cap07_xccy}
+\include{capitulos/cap08_ciclo_vida}
+\include{capitulos/cap09_riesgo}
+\include{capitulos/cap10_coberturas}
+\include{capitulos/cap11_operaciones}
+\include{capitulos/cap12_validacion}
+\include{capitulos/cap13_datos}
+\include{capitulos/cap14_xva}
+\include{capitulos/cap15_exoticos_fx}
+
+\appendix
+\include{capitulos/apendice_simbolos}
+
+\bibliographystyle{plainnat-es}
+\bibliography{referencias}
+
+\end{document}

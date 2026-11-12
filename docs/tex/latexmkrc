@@ -1,0 +1,6 @@
+# latexmkrc -- bibtex corre en el directorio de salida (latexmk -outdir=...): que encuentre
+# plainnat-es.bst y referencias.bib junto al .tex. Solo aplica al ejecutar latexmk desde docs/tex.
+use Cwd;
+my $aqui = getcwd();
+$ENV{'BSTINPUTS'} = $aqui . ':' . ($ENV{'BSTINPUTS'} // '');
+$ENV{'BIBINPUTS'} = $aqui . ':' . ($ENV{'BIBINPUTS'} // '');

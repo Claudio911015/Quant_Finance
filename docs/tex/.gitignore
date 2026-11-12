@@ -1,0 +1,17 @@
+# Productos de compilación (R1): el PDF no se versiona
+*.aux
+*.log
+*.toc
+*.out
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.lof
+*.lot
+*.synctex.gz
+*.run.xml
+*.bcf
+qfdesk.pdf
+capitulos/*.aux
+__pycache__/

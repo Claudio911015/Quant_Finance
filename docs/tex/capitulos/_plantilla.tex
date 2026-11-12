@@ -1,0 +1,110 @@
+% _plantilla.tex -- plantilla OBLIGATORIA de capítulo (R7). NO se incluye en qfdesk.tex.
+%
+% Uso: copiar a capitulos/capNN_<tema>.tex, sustituir los textos entre «<…>» y borrar estos comentarios.
+%  * Un capítulo = un archivo. Empieza con \chapter{<título>}\label{cap:<etiqueta>} (las etiquetas de los
+%    capítulos 1-15 están fijadas en qfdesk.tex / README.md; los demás capítulos solo se referencian
+%    con \ref{cap:...}, nunca con etiquetas internas de otro capítulo).
+%  * Etiquetas internas con prefijo del capítulo: eq:capNN-…, sec:capNN-…, tab:capNN-….
+%  * NO definir macros (\newcommand, \renewcommand, \def, \DeclareMathOperator): se usan las de
+%    preambulo.tex (apéndice A). Un símbolo propio se escribe en LaTeX explícito, se declara en la sección
+%    «Notación» y se añade a simbolos/capNN.tex.
+%  * \todo solo en los capítulos marcador. Documentar lo que el código HACE, no la teoría del libro.
+%  * Cuotas: >= 11 \codigo en cada capítulo 2-12 (>= 5 en 1 y 13), >= 2 \verif (capítulos 2-12, cada uno
+%    con su script en verificacion/capNN_<tema>.py), >= 2 citas distintas (capítulos 2-12).
+%
+\chapter{<Título del capítulo>}\label{cap:<etiqueta>}
+
+% -------------------------------------------------------------------------------------------------
+\section{Propósito}\label{sec:capNN-proposito}
+% 1. Qué calcula el código de este tema y para qué se usa en la aplicación (2-4 frases). Remitir a otros
+%    capítulos con \ref{cap:curvas}, \ref{cap:swaps-ois}, etc.
+
+<Qué calcula el código y para qué.>
+
+% -------------------------------------------------------------------------------------------------
+\section{Notación}\label{sec:capNN-notacion}
+% 2. Solo los símbolos NUEVOS del capítulo (cada uno con su unidad); los símbolos comunes ($\DF{c}{T}$,
+%    $\yf{t_1}{t_2}$, $\Nom$, $\K$, ...) remiten al apéndice \ref{ap:simbolos}. Añadir la fila de cada
+%    símbolo nuevo a simbolos/capNN.tex.
+
+Los símbolos comunes están en el apéndice~\ref{ap:simbolos}. En este capítulo, $w_k$ es el peso del vértice~$k$
+(adimensional) y $\tau_i = \yf{t_{i-1}}{t_i}$ la fracción de año del periodo~$i$ (años).
+
+% -------------------------------------------------------------------------------------------------
+\section{Modelo y fórmulas}\label{sec:capNN-modelo}
+% 3. Fórmulas numeradas (equation / align) con TODAS las convenciones explícitas: base de días,
+%    composición, interpolación, signo, unidades, fecha de valuación. Cada fórmula corresponde a una
+%    función concreta: pegar el \codigo junto a la fórmula. Dos ecuaciones de ejemplo (formato, no
+%    contenido de ningún capítulo):
+
+La tasa par de un swap OIS con fechas de pago $T_1,\dots,T_n$ y fecha de inicio $T_0$ es
+\begin{equation}\label{eq:capNN-tasa-par}
+  \Spar = \frac{\DF{c}{T_0} - \DF{c}{T_n}}{\Ann}, \qquad
+  \Ann = \sum_{i=1}^{n} \yf{T_{i-1}}{T_i}\,\DF{c}{T_i},
+\end{equation}
+con $\yf{\cdot}{\cdot}$ en base Actual/360. Implementación:
+\codigo{include/qf/instruments/ois_swap.hpp}{OisSwap}.
+
+% Recuadro obligatorio cuando el código se aparta del libro (R3). Si no hay diferencia, decirlo en una
+% frase («No hay diferencia con la referencia en este capítulo.»):
+\begin{diferencia}
+  <Qué hace el código distinto de la referencia: por ejemplo, el cupón del bono, la composición continua del
+  periodo en curso o la base determinista. Citar la fuente con \citet{clave}.>
+\end{diferencia}
+
+% -------------------------------------------------------------------------------------------------
+\section{Implementación}\label{sec:capNN-implementacion}
+% 4. Mapa fórmula $\to$ función. Cada cálculo con al menos un \codigo{ruta}{símbolo}: la ruta es relativa
+%    a la raíz del repositorio, el símbolo es una función, clase o constante (sin números de línea). Se
+%    escribe con `_` normal (NO \_ ). referencias_codigo.py comprueba que la ruta existe y que el símbolo
+%    está definido en el archivo.
+
+La ecuación~\eqref{eq:capNN-tasa-par} se evalúa en C++ en
+\codigo{include/qf/instruments/ois_swap.hpp}{OisSwap}; el binding Python está en
+\codigo{src/python_bindings/qfpy.cpp}{par_rate} y el backend lo orquesta en
+\codigo{desk/api/pricing/rates.py}{_irs_price}.
+
+% -------------------------------------------------------------------------------------------------
+\section{Ejemplo numérico verificable}\label{sec:capNN-ejemplo}
+% 5. (>= 2 por capítulo 2-12.) Insumos concretos, fórmula aplicada y resultado con \verif{id}{valor}:
+%    `id` = capNN-nombre, único en TODO el documento; `valor` en decimal con punto, sin separadores de
+%    miles, con signo y exponente `e` opcionales y los dígitos suficientes. La tolerancia va en el texto y
+%    es >= media unidad del último dígito impreso. Cada id se comprueba en exactamente un script
+%    verificacion/capNN_<tema>.py que llama al código del proyecto (README.md, sección «Ejemplos»).
+
+Con $c$ plana a $\K = 0.04$ (composición continua), $T_0 = 0$ y $T_n = 1$ año, $\DF{c}{T_n} = e^{-0.04} =
+\verif{capNN-ejemplo-df}{0.9607894392}$; el resultado se reproduce con
+\codigo{docs/tex/verificacion/capNN_<tema>.py}{<función>} con tolerancia absoluta $10^{-9}$.
+
+% -------------------------------------------------------------------------------------------------
+\section{Validación}\label{sec:capNN-validacion}
+% 6. Pruebas del repositorio que cubren el capítulo (se citan por ruta con \codigo; símbolo = nombre de la
+%    función de prueba) y, si aplica, los casos contra QuantLib del capítulo~\ref{cap:validacion}.
+
+<Pruebas del repositorio y casos contra QuantLib que cubren este tema.>
+
+% -------------------------------------------------------------------------------------------------
+\section{Límites y supuestos}\label{sec:capNN-limites}
+% 7. Los límites y supuestos que ya declara la Metodología de la aplicación (datos sintéticos,
+%    aproximaciones, lo no modelado) y lo que el código no hace (R6). Nada se describe como hecho si el
+%    código no lo hace. Discrepancias código <-> Metodología: NO se corrigen; van a HALLAZGOS.md.
+\begin{limites}
+  \begin{itemize}
+    \item <Supuesto o límite 1.>
+    \item <Supuesto o límite 2.>
+  \end{itemize}
+\end{limites}
+
+% Solo capítulo 10 (coberturas): aviso de revisión pendiente por un contador IFRS 9.
+% \begin{aviso}[Aviso IFRS 9]
+%   <Texto del aviso.>
+% \end{aviso}
+
+% -------------------------------------------------------------------------------------------------
+\section{Referencias}\label{sec:capNN-referencias}
+% 8. Las citas viven dentro del texto (\citet{clave}, \citep{clave}); la bibliografía es única, al final
+%    del documento (referencias.bib). Aquí, una frase que oriente al lector sobre las fuentes del capítulo.
+%    Antes de añadir una obra nueva al .bib: confirmarla contra crossref.org u openlibrary.org
+%    (libros y artículos con DOI o ISBN; normas e instituciones como @manual con URL oficial).
+
+El tratamiento de las curvas sigue a \citet{hagan2006} y el modelo de tasas a \citet{brigo2006}.

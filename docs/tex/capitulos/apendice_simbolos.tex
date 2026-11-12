@@ -1,0 +1,88 @@
+% apendice_simbolos.tex -- Apéndice A: tabla de símbolos.
+% Primero los símbolos comunes (macros de preambulo.tex); después, por capítulo, las filas de
+% simbolos/capNN.tex. Cada fila de capNN.tex: «símbolo & significado & unidad \\» (la 4.ª columna, macro,
+% puede quedar vacía; una fila con menos celdas es válida). Toda fila termina en \\ (también la última) y
+% el archivo nunca queda sin filas: si no hay símbolos propios, deja la fila «Sin símbolos propios».
+\chapter{Tabla de símbolos}\label{ap:simbolos}
+
+Los símbolos comunes se definen una sola vez en \texttt{preambulo.tex}; los capítulos no los redefinen. Cada capítulo declara además, en su sección «Notación», los símbolos propios, que se recogen aquí por capítulo. Las macros sin argumento se usan en modo matemático (por ejemplo \texttt{\$\textbackslash Nom\$}).
+
+{\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.19\textwidth}>{\raggedright\arraybackslash}p{0.38\textwidth}>{\raggedright\arraybackslash}p{0.18\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}@{}}
+\toprule
+Símbolo & Significado & Unidad & Macro \\
+\midrule
+\endfirsthead
+\toprule
+Símbolo & Significado & Unidad & Macro \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\multicolumn{4}{@{}l}{\textit{Símbolos comunes}} \\
+\midrule
+$\DF{c}{T}$ & factor de descuento de la curva $c$, del valor (fecha $t_0$) a $T$ & adimensional & \texttt{\textbackslash{}DF} \\
+$\DFt{c}{t}{T}$ & factor de descuento de la curva $c$ de $t$ a $T$ & adimensional & \texttt{\textbackslash{}DFt} \\
+$\zr{c}{T}$ & tasa cero de la curva $c$ a $T$ (la composición la fija cada capítulo según el código) & tasa anual & \texttt{\textbackslash{}zr} \\
+$\fwd{c}{t_1}{t_2}$ & tasa forward simple de la curva $c$ entre $t_1$ y $t_2$ & tasa anual & \texttt{\textbackslash{}fwd} \\
+$\yf{t_1}{t_2}$ & fracción de año entre $t_1$ y $t_2$ (base de días explícita en el texto) & años & \texttt{\textbackslash{}yf} \\
+$\Nom$ & nocional & moneda de la pata & \texttt{\textbackslash{}Nom} \\
+$\K$ & tasa fija o precio de ejercicio & tasa anual o precio & \texttt{\textbackslash{}K} \\
+$\ON{j}$ & fijación overnight del día hábil $j$ & tasa anual & \texttt{\textbackslash{}ON} \\
+$\Rcomp{i}$ & tasa compuesta del periodo $i$ & tasa anual & \texttt{\textbackslash{}Rcomp} \\
+$\Ann$ & anualidad (PV01 sin escalar) & años & \texttt{\textbackslash{}Ann} \\
+$\Spar$ & tasa par & tasa anual & \texttt{\textbackslash{}Spar} \\
+$\Spot$ & tipo de cambio spot USDMXN & MXN por USD & \texttt{\textbackslash{}Spot} \\
+$\FxF{T}$ & tipo de cambio forward USDMXN a $T$ & MXN por USD & \texttt{\textbackslash{}FxF} \\
+$\vol$ & volatilidad & anualizada & \texttt{\textbackslash{}vol} \\
+$\Ncdf$ & distribución normal estándar acumulada & adimensional & \texttt{\textbackslash{}Ncdf} \\
+$\PV$ & valor presente & moneda & \texttt{\textbackslash{}PV} \\
+$\PnL$ & resultado & moneda & \texttt{\textbackslash{}PnL} \\
+$\DVO$ & sensibilidad del valor a 1~\pb & moneda por \pb & \texttt{\textbackslash{}DVO} \\
+$\VaR{\alpha}$ & valor en riesgo al nivel $\alpha$ & moneda & \texttt{\textbackslash{}VaR} \\
+$\ES{\alpha}$ & déficit esperado al nivel $\alpha$ & moneda & \texttt{\textbackslash{}ES} \\
+$\hwa$ & velocidad de reversión a la media de Hull--White & año$^{-1}$ & \texttt{\textbackslash{}hwa} \\
+$\hwsig$ & volatilidad de Hull--White & tasa anual$/\sqrt{\text{año}}$ & \texttt{\textbackslash{}hwsig} \\
+$\hwtheta$ & deriva dependiente del tiempo de Hull--White & tasa anual por año & \texttt{\textbackslash{}hwtheta} \\
+$\basis$ & base de cross currency & \pb & \texttt{\textbackslash{}basis} \\
+$\E$ & esperanza & --- & \texttt{\textbackslash{}E} \\
+$\Q$ & medida de probabilidad & --- & \texttt{\textbackslash{}Q} \\
+$\mathrm{TIIE}$ & etiqueta (subíndice) de la curva OIS TIIE-F & --- & \texttt{\textbackslash{}cTIIE} \\
+$\mathrm{SOFR}$ & etiqueta de la curva OIS SOFR & --- & \texttt{\textbackslash{}cSOFR} \\
+$\mathrm{MXN|USD}$ & etiqueta de la curva de descuento MXN colateralizada en USD & --- & \texttt{\textbackslash{}cMXNcol} \\
+\MXN & peso mexicano (texto) & --- & \texttt{\textbackslash{}MXN} \\
+\USD & dólar estadounidense (texto) & --- & \texttt{\textbackslash{}USD} \\
+\pb & punto base ($10^{-4}$); se escribe «1~\texttt{\textbackslash pb}» & --- & \texttt{\textbackslash{}pb} \\
+\midrule
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:introduccion}. Introducción, arquitectura y convenciones}} \\
+\simbolosinput{cap01}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:curvas}. Curvas}} \\
+\simbolosinput{cap02}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:swaps-ois}. Swaps de tasa OIS}} \\
+\simbolosinput{cap03}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:fx}. Derivados de FX y opción sobre acción}} \\
+\simbolosinput{cap04}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:hull-white}. Hull--White}} \\
+\simbolosinput{cap05}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:bonos}. Bonos}} \\
+\simbolosinput{cap06}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:xccy}. Cross currency swap}} \\
+\simbolosinput{cap07}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:ciclo-vida}. Ciclo de vida, liquidaciones y P\&L}} \\
+\simbolosinput{cap08}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:riesgo}. Riesgo}} \\
+\simbolosinput{cap09}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:coberturas}. Contabilidad de coberturas IFRS 9}} \\
+\simbolosinput{cap10}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:operaciones}. Operaciones: conciliación}} \\
+\simbolosinput{cap11}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:validacion}. Validación contra QuantLib}} \\
+\simbolosinput{cap12}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:datos}. Fuentes de datos y procedencia}} \\
+\simbolosinput{cap13}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:xva}. XVA y curvas de crédito}} \\
+\simbolosinput{cap14}%
+\multicolumn{4}{@{}l}{\rule{0pt}{3.6ex}\textbf{Capítulo~\ref{cap:exoticos-fx}. Exóticos de FX}} \\
+\simbolosinput{cap15}%
+\end{longtable}
+}
