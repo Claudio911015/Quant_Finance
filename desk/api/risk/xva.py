@@ -390,7 +390,7 @@ def compute_detailed(conn: sqlite3.Connection, snapshot_id: str) -> Tuple[Dict[s
 
 # ------------------------------------------------------------------ XVA incremental
 
-_CANDIDATE_NOT_COVERED = "El XVA incremental solo cubre swaps de tasa y cross currency swaps: %s no"
+_CANDIDATE_NOT_COVERED = "El XVA incremental solo cubre swaps de tasas y cross currency swaps; %s no está cubierto"
 _CANDIDATE_NOT_LIVE = "La operación candidata no está viva en la fecha de valuación del snapshot (%s)"
 
 

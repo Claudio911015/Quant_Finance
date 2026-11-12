@@ -24,7 +24,7 @@ TOP_KEYS = {
     "snapshot", "as_of", "counterparty", "notice", "candidate", "before", "after", "delta", "delta_bp", "profile",
     "warnings",
 }
-NOT_COVERED = "El XVA incremental solo cubre swaps de tasa y cross currency swaps: %s no"
+NOT_COVERED = "El XVA incremental solo cubre swaps de tasas y cross currency swaps; %s no está cubierto"
 
 
 # ---------------------------------------------------------------- ayudas
