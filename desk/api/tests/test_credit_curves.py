@@ -61,11 +61,20 @@ def test_seed_inserts_four_synthetic_entities_once(app):
     for r in rows:
         assert r["source"] == "synthetic"
         assert r["recovery"] == 0.4
-        assert r["as_of"] == r["created_at"][:10]
+        assert r["as_of"] == "2026-11-10"  # el del snapshot MX-DEMO, no la fecha UTC de hoy
         quotes = json.loads(r["quotes"])
         assert [q["tenor_years"] for q in quotes] == TENORS
         assert [round(q["spread"] * 1e4) for q in quotes] == SPREADS_PB[r["entity"]]
     assert _rows(app, "SELECT value FROM settings WHERE key = 'seed.credit_curves_v1'") == [{"value": "1"}]
+
+
+def test_seed_as_of_is_the_snapshot_date_whatever_the_clock_says(tmp_path, monkeypatch):
+    monkeypatch.setattr(credit_curves, "now_iso", lambda: "2031-05-06T07:08:09+00:00")
+    seeded = create_app(db_path=tmp_path / "reloj.db")
+    rows = _rows(seeded)
+    assert len(rows) == 4
+    for r in rows:
+        assert r["as_of"] == "2026-11-10" and r["created_at"].startswith("2031-05-06")
 
 
 def test_restart_does_not_reseed(app):
@@ -231,10 +240,22 @@ def test_put_valid_inserts_a_second_row_and_returns_the_element(app, client):
     assert [g["year"] for g in element["grid"]] == list(range(1, 11))
     rows = [r for r in _rows(app) if r["entity"] == ALFA]
     assert [r["id"] for r in rows] == [1, 5] and rows[1]["source"] == "synthetic"
-    assert rows[1]["as_of"] == rows[1]["created_at"][:10]
+    assert rows[1]["as_of"] == "2026-11-10"  # el del snapshot de la petición (MX-DEMO por omisión)
+    assert element["history"][0]["as_of"] == "2026-11-10"
     assert _curves(client)[ALFA] == element
     # sus otras curvas no cambian
     assert len(_rows(app)) == 5
+
+
+def test_put_as_of_is_the_as_of_of_the_requested_snapshot_not_the_clock(app, client, monkeypatch):
+    monkeypatch.setattr(credit_curves, "now_iso", lambda: "2031-05-06T07:08:09+00:00")
+    rolled = client.post("/api/market/MX-DEMO/roll", json={"id": "ROLL-CC", "as_of": "2026-12-31"})
+    assert rolled.status_code in (200, 201), rolled.get_json()
+    resp = _put(client, BETA, _valid_body(snapshot="ROLL-CC"))
+    assert resp.status_code == 200, resp.get_json()
+    assert [r["as_of"] for r in _rows(app, "SELECT as_of FROM credit_curves WHERE id = 5")] == ["2026-12-31"]
+    assert resp.get_json()["history"][0]["as_of"] == "2026-12-31"
+    assert _rows(app, "SELECT created_at FROM credit_curves WHERE id = 5")[0]["created_at"].startswith("2031-05-06")
 
 
 def test_put_accepts_propia_and_an_explicit_snapshot(client):

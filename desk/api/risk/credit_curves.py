@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 from desk.api import market
 from desk.api.db import now_iso
 from desk.api.errors import ApiError
-from desk.api.seed_market import SNAPSHOT_ID
+from desk.api.seed_market import AS_OF as SEED_AS_OF, SNAPSHOT_ID
 from desk.api.seed_trades import _ALFA, _BETA, _GAMMA
 from desk.api.validation import finite_number, number, text
 
@@ -59,7 +59,7 @@ def seed_synthetic(conn: sqlite3.Connection) -> None:
         quotes = [{"tenor_years": t, "spread": pb / 1e4} for t, pb in zip(SEED_TENORS, spreads_pb)]
         conn.execute(
             "INSERT INTO credit_curves (entity, as_of, recovery, quotes, source, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (entity, now[:10], SEED_RECOVERY, json.dumps(quotes), SYNTHETIC, now),
+            (entity, SEED_AS_OF, SEED_RECOVERY, json.dumps(quotes), SYNTHETIC, now),
         )
     conn.execute("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)", (SEED_KEY, "1", now))
 
@@ -226,7 +226,7 @@ def put_curve(conn: sqlite3.Connection, entity: str, body: Dict[str, Any]) -> Di
     now = now_iso()
     conn.execute(
         "INSERT INTO credit_curves (entity, as_of, recovery, quotes, source, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (entity, now[:10], recovery, json.dumps(quotes), SYNTHETIC, now),
+        (entity, mkt.as_of.isoformat(), recovery, json.dumps(quotes), SYNTHETIC, now),
     )
     label, kind = known[entity]
     return _element(qfxva, entity, label, kind, _history(conn).get(entity, []), mkt)
