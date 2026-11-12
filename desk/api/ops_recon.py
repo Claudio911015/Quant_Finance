@@ -28,6 +28,8 @@ TERMS_CURVE_BP = 25.0             # sin explicación dentro de ±25 pb …
 TERMS_FX_PCT = 2.0                # … o ±2 % de spot → bandera de términos
 CURVE_PRODUCTS = ("irs", "cap_floor", "swaption", "bond")
 FX_PRODUCTS = ("fx_forward", "fx_option")
+# H17: sin factor de descomposición (curva o spot) no se probó nada: la bandera de términos no se levanta.
+NO_FACTORS_REASON = "sin descomposición para este producto"
 RECON_STATUSES = ("conciliada", "explicable", "revisar")
 MAX_CSV_ROWS = 5000
 CURRENCIES = ("MXN", "USD")
@@ -161,6 +163,7 @@ def reconcile_trade(
         "status": "revisar",
         "decomposition": None,
         "terms_flag": False,  # Hueco: con error no se sabe si son los términos; no se levanta la bandera.
+        "terms_reason": None,  # solo con `terms_flag` nulo: por qué no hay veredicto de términos
         "error": None,
     }  # type: Dict[str, Any]
     try:
@@ -208,6 +211,7 @@ def reconcile_trade(
         status = "explicable"
     else:
         status = "revisar"
+    has_factors = name in CURVE_PRODUCTS or name in FX_PRODUCTS
     row.update(
         own_pv_mxn=own,
         difference_mxn=diff,
@@ -218,6 +222,8 @@ def reconcile_trade(
         and (bp is None or abs(bp) > TERMS_CURVE_BP)
         and (pct is None or abs(pct) > TERMS_FX_PCT),
     )
+    if status == "revisar" and not has_factors:
+        row["terms_flag"], row["terms_reason"] = None, NO_FACTORS_REASON
     return row
 
 
@@ -383,6 +389,7 @@ def create_run(conn: sqlite3.Connection, body: Dict[str, Any]) -> Dict[str, Any]
             "status": result["status"],
             "decomposition": result["decomposition"],
             "terms_flag": result["terms_flag"],
+            "terms_reason": result["terms_reason"],
             "error": result["error"],
         })
 
@@ -491,7 +498,7 @@ def run_csv(run: Dict[str, Any]) -> str:
             _fmt(r["difference_rel"], "%.10f"),
             _yes_no(date_factor["attributed"] if date_factor else None),
             _fmt(curve["bp"] if curve else None, "%.4f"), _fmt(fx["spot"] if fx else None, "%.6f"),
-            _yes_no(r["terms_flag"]), r["error"] or "",
+            _yes_no(r["terms_flag"]), r["error"] or r.get("terms_reason") or "",
         ])
     for b in run["bank_only"]:
         writer.writerow([

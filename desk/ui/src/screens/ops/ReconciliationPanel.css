@@ -235,6 +235,7 @@
 }
 
 .ops-recon__flag,
+.ops-recon__nofactors,
 .ops-recon__row-error {
   display: block;
   margin-top: var(--space-1);
@@ -244,6 +245,10 @@
 
 .ops-recon__flag {
   color: var(--warn);
+}
+
+.ops-recon__nofactors {
+  color: var(--text-dim);
 }
 
 .ops-recon__row-error {

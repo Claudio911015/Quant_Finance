@@ -358,6 +358,9 @@ function RunResult({ run }: { run: Reconciliation }) {
                     {RECON_STATUS_LABEL[r.status]}
                   </span>
                   {r.terms_flag && <span className="ops-recon__flag">Revisar términos</span>}
+                  {r.terms_flag === null && (
+                    <span className="ops-recon__nofactors">Sin descomposición para este producto</span>
+                  )}
                   {r.error && <span className="ops-recon__row-error">{r.error}</span>}
                 </td>
                 <td title={dateTitle(r)}>{r.decomposition?.date?.attributed ? 'Atribuible' : '—'}</td>

@@ -169,7 +169,10 @@ export interface ReconRow {
   difference_rel: number | null;
   status: ReconStatus;
   decomposition: ReconDecomposition | null;
-  terms_flag: boolean;
+  /** `null` en `revisar` de un producto sin factores de descomposición (xccy_swap, equity_option): no se probó nada. */
+  terms_flag: boolean | null;
+  /** Por qué `terms_flag` es `null` («sin descomposición para este producto»); ausente en conciliaciones antiguas. */
+  terms_reason?: string | null;
   error: string | null;
 }
 

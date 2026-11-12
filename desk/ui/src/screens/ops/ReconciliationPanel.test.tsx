@@ -283,6 +283,23 @@ describe('ReconciliationPanel', () => {
     expect(screen.getByTestId('recon-row-4').contains(flagged[0])).toBe(true);
   });
 
+  it('rotula «Sin descomposición» en vez de la bandera de términos cuando el producto no tiene factores (H17)', async () => {
+    const xccy = {
+      ...RUN.rows[2],
+      product: 'xccy_swap' as const,
+      decomposition: { date: null, curve: null, fx: null },
+      terms_flag: null,
+      terms_reason: 'sin descomposición para este producto',
+    };
+    mocks.createReconciliation.mockResolvedValue({ ...RUN, rows: [xccy] });
+    renderPanel();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'Conciliar' }));
+    const result = await screen.findByRole('region', { name: 'Resultado de la conciliación' });
+    expect(within(result).getByText('Sin descomposición para este producto')).toBeTruthy();
+    expect(within(result).queryByText('Revisar términos')).toBeNull();
+  });
+
   it('muestra fecha, curva y tipo de cambio de la descomposición', async () => {
     renderPanel();
     await ready();

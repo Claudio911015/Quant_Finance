@@ -203,14 +203,16 @@ def _reconcile(client, trade_id, bank_pv):
     return r.get_json()["rows"][0]
 
 
-def test_reconciling_a_xccy_works_and_flags_a_large_difference_for_review(client, desk):
+def test_reconciling_a_xccy_works_and_reviews_a_large_difference_without_a_terms_flag(client, desk):
     own = {r["id"]: r for r in _get(client, "/api/portfolio/valuation?snapshot=MX-DEMO")["rows"]}[
         desk["xccy"]]["pv_mxn"]
     same = _reconcile(client, desk["xccy"], own)
     assert same["error"] is None and same["status"] == "conciliada" and same["own_pv_mxn"] == pytest.approx(own)
     assert same["product"] == "xccy_swap" and same["notional_mxn"] == pytest.approx(10_000_000.0 * _spot(client))
     far = _reconcile(client, desk["xccy"], own + 5_000_000.0)
-    assert far["error"] is None and far["status"] == "revisar" and far["terms_flag"] is True
+    # H17: sin factores de descomposición (solo hay fecha) no se probó ni la curva ni el spot: no hay bandera de términos
+    assert far["error"] is None and far["status"] == "revisar" and far["terms_flag"] is None
+    assert far["terms_reason"] == "sin descomposición para este producto"
     assert far["decomposition"]["curve"] is None and far["decomposition"]["fx"] is None  # solo hay fecha
 
 

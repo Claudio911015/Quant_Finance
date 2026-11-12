@@ -26,7 +26,7 @@ export const OPS_SECTIONS: {
       },
       {
         label: 'Conciliación',
-        text: 'Compara el PV propio contra el del banco, con la convención de signo de la empresa y el USD al spot del snapshot. Queda conciliada si la diferencia es menor o igual a 0.01 % del nocional (configurable); es explicable si la atribuyen la fecha (±1 día hábil), un desplazamiento paralelo de la curva de hasta ±10 pb o un movimiento de spot de hasta ±1 %; en otro caso se marca para revisar, con bandera de términos si ni ±25 pb ni ±2 % la explican.',
+        text: 'Compara el PV propio contra el del banco, con la convención de signo de la empresa y el USD al spot del snapshot. Queda conciliada si la diferencia es menor o igual a 0.01 % del nocional (configurable); es explicable si la atribuyen la fecha (±1 día hábil), un desplazamiento paralelo de la curva de hasta ±10 pb o un movimiento de spot de hasta ±1 %; en otro caso se marca para revisar, con bandera de términos si ni ±25 pb ni ±2 % la explican. En el cross currency swap y la opción sobre acción no hay factor de curva ni de spot que probar: la fila a revisar sale sin bandera de términos (ni verdadera ni falsa) y con la razón «sin descomposición para este producto».',
       },
       {
         label: 'Descomposición indicativa',

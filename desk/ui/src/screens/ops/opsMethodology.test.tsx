@@ -51,6 +51,17 @@ describe('Metodología de operaciones', () => {
     expect(row('Conciliación')).toContain('0.01 %');
   });
 
+  it('Conciliación declara que sin factores de descomposición no hay bandera de términos (H17)', () => {
+    render(
+      <MemoryRouter>
+        <MethodologyScreen />
+      </MemoryRouter>,
+    );
+    const text = row('Conciliación');
+    expect(text).toContain('cross currency swap y la opción sobre acción');
+    expect(text).toContain('sin descomposición para este producto');
+  });
+
   it('Descomposición indicativa declara que una operación cerca de la par no delata un nocional distinto', () => {
     render(
       <MemoryRouter>

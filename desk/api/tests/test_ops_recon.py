@@ -99,7 +99,7 @@ def test_row_shape_and_roles(app, client):
     assert set(r) == {  # jsonify ordena las claves: se compara el conjunto
         "line", "trade_id", "bank_ref", "product", "currency", "notional_mxn", "own_pv_mxn", "bank_pv",
         "bank_currency", "bank_pv_mxn", "difference_mxn", "difference_rel", "status", "decomposition",
-        "terms_flag", "error",
+        "terms_flag", "terms_reason", "error",
     }
     assert r["line"] == 2 and r["product"] == "irs" and r["currency"] == "MXN" and r["bank_ref"] == "X-1"
     assert r["notional_mxn"] == 500e6
@@ -194,6 +194,43 @@ def test_unreachable_bank_pv_leaves_the_factors_null_and_flags_the_terms(app, cl
     assert r["decomposition"]["curve"] == {"curve": "TIIE-F", "bp": None}
     r = _run(client, _csv((4, 9e12)))["rows"][0]
     assert r["decomposition"]["fx"] == {"spot": None, "pct": None} and r["terms_flag"] is True
+
+
+# ---------------------------------------------------- H17: productos sin factores de descomposición
+
+NO_FACTORS = "sin descomposición para este producto"
+EQUITY = {"option_type": "call", "spot": 100.0, "strike": 100.0, "volatility": 0.2, "rate": 0.05,
+          "dividend_yield": 0.0, "maturity_years": 1.0, "quantity": 10}
+XCCY = {"side": "pay_usd", "notional_usd": 5e6, "periods": 26}
+
+
+def _no_factor_trade(client, product):
+    from desk.api.tests.csa_fixture import trade_with
+    return trade_with(client, product, ALFA, XCCY if product == "xccy_swap" else EQUITY)
+
+
+@pytest.mark.parametrize("product", ["xccy_swap", "equity_option"])
+def test_revisar_without_curve_or_spot_factors_has_a_null_terms_flag_and_says_why(app, client, product):
+    tid = _no_factor_trade(client, product)["id"]
+    run = _run(client, _csv((tid, own_pv(app, tid) + 5e6)))
+    r = run["rows"][0]
+    assert r["status"] == "revisar" and r["error"] is None
+    assert r["terms_flag"] is None and r["terms_reason"] == NO_FACTORS
+    assert r["decomposition"]["curve"] is None and r["decomposition"]["fx"] is None
+    csv_rows = list(csv.DictReader(io.StringIO(client.get("/api/reconciliations/%d?format=csv" % run["id"]).get_data(as_text=True))))
+    assert csv_rows[0]["terms_flag"] == "" and csv_rows[0]["reason"] == NO_FACTORS
+
+
+@pytest.mark.parametrize("product", ["xccy_swap", "equity_option"])
+def test_products_without_factors_that_reconcile_keep_a_false_flag_and_no_reason(app, client, product):
+    tid = _no_factor_trade(client, product)["id"]
+    r = _run(client, _csv((tid, own_pv(app, tid))))["rows"][0]
+    assert r["status"] == "conciliada" and r["terms_flag"] is False and r["terms_reason"] is None
+
+
+def test_products_with_factors_still_raise_the_terms_flag_and_carry_no_reason(app, client):
+    r = _run(client, _csv((1, 9e12)))["rows"][0]
+    assert r["status"] == "revisar" and r["terms_flag"] is True and r["terms_reason"] is None
 
 
 def test_a_matured_trade_has_zero_slope_and_is_not_an_own_only(app, client):
@@ -544,6 +581,6 @@ def test_reconcile_trade_directly_returns_the_row_without_line_or_bank_fields(ap
         conn.close()
     assert set(row) == {
         "trade_id", "product", "currency", "notional_mxn", "own_pv_mxn", "difference_mxn", "difference_rel",
-        "status", "decomposition", "terms_flag", "error",
+        "status", "decomposition", "terms_flag", "terms_reason", "error",
     }
     assert row["status"] == "conciliada" and row["difference_mxn"] == 0.0
