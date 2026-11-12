@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { MethodologyScreen } from './MethodologyScreen';
@@ -417,4 +417,28 @@ describe('MethodologyScreen', () => {
     });
   });
   // fin corte 7
+  describe('exóticos de FX', () => {
+    /** Texto de la fila `label` de la sección «Exóticos de FX». */
+    const exo = (label: string) => {
+      const section = screen.getByRole('region', { name: 'Exóticos de FX' });
+      return within(section).getByText(label, { selector: 'dt' }).nextElementSibling?.textContent ?? '';
+    };
+
+    it('el efecto de la sonrisa se lee contra la referencia analítica plana, sin un ajuste aparte', () => {
+      const { container } = renderScreen();
+      expect(exo('Modelos')).toContain('comparando el valor (± error estándar) con la referencia analítica plana');
+      expect(container.textContent).not.toContain('Ajuste por sonrisa');
+    });
+
+    it('declara el reprecio de vainillas con sonrisa, los corredores anchos y la vigilancia del double', () => {
+      renderScreen();
+      const text = exo('Límites');
+      expect(text).toContain('vainillas');
+      expect(text).toContain('−0.25 a 1 año');
+      expect(text).toContain('la fórmula cerrada no converge');
+      expect(text).toContain('el método analítico responde con error');
+      expect(text).toContain('10 pasos');
+      expect(text).toContain('σ√T');
+    });
+  });
 });

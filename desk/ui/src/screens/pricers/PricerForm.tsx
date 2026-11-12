@@ -9,11 +9,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, createTrade, price } from '../../api/client';
-import type { Cashflow, PriceResponse, Trade, XccyCashflow } from '../../api/types';
+import type { Cashflow, PriceResponse, ProductId, Trade, XccyCashflow } from '../../api/types';
 import { FLOW_KIND_EXTRA_LABEL, LEG_LABEL, NO_CSA_TEXT } from '../../lib/csaLabels';
 import { fmtDate, fmtMoney, fmtNumber, fmtRate } from '../../lib/format';
 import { useSnapshot } from '../../state/SnapshotContext';
-import { PricerChart, cashflowsByLeg, payoffText, type ChartData } from './PricerChart';
+import { PricerChart, cashflowsByLeg, payoffText, type ChartData, type PayoffSeries } from './PricerChart';
 import type { FieldSpec, ProductSpec } from './types';
 import './PricerForm.css';
 
@@ -44,6 +44,19 @@ const RISK_LABELS: Record<string, { label: string; fmt: (v: number) => string }>
   dv01_sofr: { label: 'DV01 SOFR', fmt: (v) => fmtNumber(v, 2) },
   // --- fin corte 3 ---
 };
+
+/** Datos del cálculo de los exóticos de FX (`details` del backend); solo se muestran los que vengan. */
+const DETAIL_LABELS: Record<string, { label: string; fmt: (v: unknown) => string }> = {
+  price_pct: { label: 'Precio (% del pago)', fmt: (v) => `${fmtNumber(Number(v), 2)} %` },
+  no_touch_probability: { label: 'Probabilidad de no tocar', fmt: (v) => `${fmtNumber(Number(v) * 100, 2)} %` },
+  analytic_flat_pv: { label: 'Referencia analítica (plano)', fmt: (v) => fmtMoney(Number(v), 'MXN') },
+  paths: { label: 'Trayectorias', fmt: (v) => fmtNumber(Number(v), 0) },
+  model: { label: 'Modelo', fmt: (v) => (v === 'flat' ? 'Plano' : 'Con sonrisa (vol local)') },
+  method: { label: 'Método', fmt: (v) => (v === 'analytic' ? 'Analítico' : 'Monte Carlo') },
+};
+
+/** Productos que solo se valúan: no se agregan al portafolio. */
+const NOT_TRADABLE: ProductId[] = ['fx_no_touch', 'fx_double_no_touch'];
 
 /** Texto inicial de un campo: miles con coma en montos, sin ceros de relleno. */
 export function initialText(f: FieldSpec): string {
@@ -269,7 +282,7 @@ function XccyDetails({ details }: { details: Record<string, unknown> }) {
 
 function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
   const { response, params } = result;
-  const { currency, pv, pv_mxn: pvMxn, risk, cashflows } = response;
+  const { currency, pv, pv_mxn: pvMxn, risk, cashflows, details } = response;
   const { snapshot } = useSnapshot();
   // Cap/floor y swaption necesitan el periodo de pago de su curva para la gráfica de payoff.
   const periodDays = snapshot?.curves[String(params.curve)]?.period_days;
@@ -278,12 +291,17 @@ function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
     if (spec.chart === 'cashflows' && cashflows && cashflows.length > 0) {
       return { kind: 'cashflows', cashflows, currency };
     }
-    if (spec.chart === 'payoff') return { kind: 'payoff', product: spec.product, params, pv, currency, periodDays };
+    if (spec.chart === 'payoff') {
+      const series = details?.chart as PayoffSeries | undefined; // solo los exóticos con barrera la traen
+      return { kind: 'payoff', product: spec.product, params, pv, currency, periodDays, series };
+    }
     return null;
-  }, [spec.chart, spec.product, cashflows, params, pv, currency, periodDays]);
+  }, [spec.chart, spec.product, cashflows, params, pv, currency, periodDays, details]);
   const note = chart?.kind === 'payoff' ? payoffText(chart.product).note : undefined;
 
   const riskRows = Object.entries(risk ?? {});
+  const detailRows = Object.entries(DETAIL_LABELS).filter(([key]) => details?.[key] !== undefined);
+  const stdError = Number(details?.std_error);
   const byLeg = chart?.kind === 'cashflows' && cashflowsByLeg(chart.cashflows) !== null; // corte 3
 
   return (
@@ -292,6 +310,7 @@ function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
         <div className="pricer__stat">
           <span className="pricer__caption">Valor presente</span>
           <span className={`num pricer__pv${pv < 0 ? ' pricer__pv--neg' : ''}`}>{fmtMoney(pv, currency)}</span>
+          {stdError > 0 && <span className="pricer__note">{`± ${fmtMoney(stdError, 'MXN')} (error estándar)`}</span>}
         </div>
         <div className="pricer__stat">
           <span className="pricer__caption">Valor presente en MXN</span>
@@ -317,6 +336,22 @@ function ResultView({ spec, result }: { spec: ProductSpec; result: Result }) {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      {detailRows.length > 0 && (
+        <section className="pricer__block">
+          <h2 className="pricer__caption">Detalle del cálculo</h2>
+          <table className="pricer__table">
+            <tbody>
+              {detailRows.map(([key, meta]) => (
+                <tr key={key}>
+                  <th scope="row">{meta.label}</th>
+                  <td className="num">{details[key] === null ? '—' : meta.fmt(details[key])}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </section>
@@ -601,68 +636,70 @@ export function PricerForm({ spec }: { spec: ProductSpec }) {
           </button>
         </form>
 
-        <form className="pricer__panel" onSubmit={onAdd} noValidate aria-label="Portafolio">
-          <div className="pricer__field">
-            <label htmlFor="pricer-counterparty">Contraparte</label>
-            <input
-              id="pricer-counterparty"
-              type="text"
-              autoComplete="off"
-              className="pricer__input"
-              value={counterparty}
-              aria-invalid={fieldErrors.counterparty ? true : undefined}
-              aria-describedby={fieldErrors.counterparty ? 'pricer-counterparty-note' : undefined}
-              onChange={(e) => {
-                setCounterparty(e.target.value);
-                setFieldErrors(({ counterparty: _gone, ...rest }) => rest);
-              }}
+        {!NOT_TRADABLE.includes(spec.product) && (
+          <form className="pricer__panel" onSubmit={onAdd} noValidate aria-label="Portafolio">
+            <div className="pricer__field">
+              <label htmlFor="pricer-counterparty">Contraparte</label>
+              <input
+                id="pricer-counterparty"
+                type="text"
+                autoComplete="off"
+                className="pricer__input"
+                value={counterparty}
+                aria-invalid={fieldErrors.counterparty ? true : undefined}
+                aria-describedby={fieldErrors.counterparty ? 'pricer-counterparty-note' : undefined}
+                onChange={(e) => {
+                  setCounterparty(e.target.value);
+                  setFieldErrors(({ counterparty: _gone, ...rest }) => rest);
+                }}
+              />
+              {fieldErrors.counterparty && (
+                <div id="pricer-counterparty-note" className="pricer__error" role="alert">
+                  {fieldErrors.counterparty}
+                </div>
+              )}
+            </div>
+            <DateField
+              id="pricer-trade-date"
+              label="Fecha de pacto"
+              value={tradeDate}
+              error={fieldErrors.trade_date}
+              onChange={setDate('trade_date', setTradeEdit)}
             />
-            {fieldErrors.counterparty && (
-              <div id="pricer-counterparty-note" className="pricer__error" role="alert">
-                {fieldErrors.counterparty}
+            <DateField
+              id="pricer-start-date"
+              label="Inicio"
+              value={startDate}
+              error={fieldErrors.start_date}
+              onChange={setDate('start_date', setStartEdit)}
+            />
+            <DateField
+              id="pricer-maturity-date"
+              label="Vencimiento"
+              value={maturity}
+              error={fieldErrors.maturity_date}
+              help="Vacío: se calcula con el plazo"
+              onChange={setDate('maturity_date', setMaturity)}
+            />
+            <button type="submit" className="pricer__btn" disabled={adding}>
+              {adding ? 'Agregando…' : 'Agregar al portafolio'}
+            </button>
+            {added && (
+              <div className="pricer__ok" role="status">
+                <span>
+                  Operación {added.trade.id} agregada. <Link to="/portafolio">Ver portafolio</Link> ·{' '}
+                  <Link to={`/portafolio/${added.trade.id}`}>Ver ficha</Link>
+                </span>
+                <span>
+                  {added.requestedMaturity !== '' && added.requestedMaturity !== added.trade.maturity_date
+                    ? 'Vencimiento ajustado'
+                    : 'Vencimiento'}
+                  : <span className="num">{fmtDate(added.trade.maturity_date)}</span>
+                </span>
               </div>
             )}
-          </div>
-          <DateField
-            id="pricer-trade-date"
-            label="Fecha de pacto"
-            value={tradeDate}
-            error={fieldErrors.trade_date}
-            onChange={setDate('trade_date', setTradeEdit)}
-          />
-          <DateField
-            id="pricer-start-date"
-            label="Inicio"
-            value={startDate}
-            error={fieldErrors.start_date}
-            onChange={setDate('start_date', setStartEdit)}
-          />
-          <DateField
-            id="pricer-maturity-date"
-            label="Vencimiento"
-            value={maturity}
-            error={fieldErrors.maturity_date}
-            help="Vacío: se calcula con el plazo"
-            onChange={setDate('maturity_date', setMaturity)}
-          />
-          <button type="submit" className="pricer__btn" disabled={adding}>
-            {adding ? 'Agregando…' : 'Agregar al portafolio'}
-          </button>
-          {added && (
-            <div className="pricer__ok" role="status">
-              <span>
-                Operación {added.trade.id} agregada. <Link to="/portafolio">Ver portafolio</Link> ·{' '}
-                <Link to={`/portafolio/${added.trade.id}`}>Ver ficha</Link>
-              </span>
-              <span>
-                {added.requestedMaturity !== '' && added.requestedMaturity !== added.trade.maturity_date
-                  ? 'Vencimiento ajustado'
-                  : 'Vencimiento'}
-                : <span className="num">{fmtDate(added.trade.maturity_date)}</span>
-              </span>
-            </div>
-          )}
-        </form>
+          </form>
+        )}
       </div>
 
       <div className="pricer__result">

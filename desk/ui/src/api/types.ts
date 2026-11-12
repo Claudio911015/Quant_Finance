@@ -6,7 +6,9 @@ export type ProductId =
   | 'swaption'
   | 'bond'
   | 'equity_option'
-  | 'xccy_swap';
+  | 'xccy_swap'
+  | 'fx_no_touch'
+  | 'fx_double_no_touch';
 
 export type SourceKind = 'live' | 'proxy' | 'synthetic' | 'mixed';
 export type DataQuality = 'synthetic' | 'live' | 'mixed';

@@ -1,6 +1,6 @@
 """Curvas de descuento en QuantLib reconstruidas desde los factores de descuento del desk.
 
-Solo para el entorno de QuantLib (Python 3.12); el backend nunca importa este módulo.
+Para el entorno de QuantLib (Python 3.12) y, con `build_curve`, para los exóticos de FX del backend (`desk/api/pricing/fx_exotics.py`).
 
 El desk interpola linealmente la tasa cero continua con t = días/365 y extrapola plana la tasa cero
 fuera de [primer pilar, último pilar]. QuantLib lo reproduce con un `ZeroCurve` lineal en cero continua

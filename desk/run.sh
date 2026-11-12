@@ -5,6 +5,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="${QF_PYTHON:-/home/claudio/anaconda3/bin/python}"
 
+if ! "$PY" -c "import QuantLib" 2>/dev/null; then
+  echo "[run.sh] falta QuantLib en $PY: $PY -m pip install \"QuantLib==1.42.1\"" >&2
+  exit 1
+fi
+
 # 1. Binding C++ qfpy
 if ! compgen -G "$ROOT/build/src/qfpy*.so" > /dev/null; then
   echo "[run.sh] falta build/src/qfpy*.so; compilando qfpy..."

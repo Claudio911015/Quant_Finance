@@ -85,6 +85,36 @@ const PRODUCT_SECTIONS: Section[] = [
       { label: 'Modelo', text: 'Black-Scholes con insumos capturados en la operación.' },
     ],
   },
+  {
+    id: 'fx-exoticos',
+    title: 'Exóticos de FX',
+    items: [
+      {
+        label: 'Qué paga',
+        text: 'No touch: monto fijo en MXN al vencimiento si el USDMXN nunca toca la barrera. Double no touch: si nunca sale del corredor.',
+      },
+      {
+        label: 'Barrera',
+        text: 'Americana, vigilada de forma continua toda la vida: entre nodos de la malla se usa la probabilidad de cruce del puente browniano.',
+      },
+      {
+        label: 'Modelos',
+        text: 'Plano = vol de la superficie en spot y vencimiento. Con sonrisa = volatilidad local de Dupire calculada por QuantLib desde la superficie del snapshot (bicúbica, extrapolación constante), tabulada en la malla del Monte Carlo; donde la varianza local sale negativa se usa la vol plana. Diferencia frente a Dupire al vuelo: del orden de 0.3–0.8 % del pago. El efecto de la sonrisa se lee comparando el valor (± error estándar) con la referencia analítica plana.',
+      },
+      {
+        label: 'Cálculo',
+        text: 'QuantLib 1.42: trayectorias de GaussianPathGenerator; referencia analítica con AnalyticBinaryBarrierEngine y AnalyticDoubleBarrierBinaryEngine. La fórmula del puente es la única matemática propia.',
+      },
+      {
+        label: 'Error de Monte Carlo',
+        text: '20 000 trayectorias, 10 pasos, semilla fija 42: resultados reproducibles. Error estándar en MXN; delta (+1 % de spot) y vega (+1 punto de vol) por reprecio con la misma semilla.',
+      },
+      {
+        label: 'Límites',
+        text: 'Pago solo en MXN; volatilidad local, no estocástica ni vanna-volga; superficie sintética; sin rebate ni one touch; no se registran como operaciones del portafolio. El snapshot siempre trae superficie, no hay caso «sin superficie». Con sonrisa, el Monte Carlo reprecia las vainillas de la superficie con una vol implícita algo menor (Dupire de QuantLib sobre la bicúbica con extrapolación constante, 10 pasos): ATM −0.06 puntos a 91 días, −0.25 a 1 año y −0.40 a 2 años; en las alas (strikes a ±0.5 y ±1 σ√T) hasta −0.15, −0.65 y −0.47. Con 20 o 40 pasos a 1 año baja a −0.22 y −0.18 ATM: no basta para pagar el tiempo de respuesta. Con corredores muy anchos la fórmula cerrada no converge: la referencia sale «—» y el método analítico responde con error. La vigilancia continua del double no touch usa 10 pasos y subvalúa en corredores más estrechos que ~1 desviación (σ√T).',
+      },
+    ],
+  },
 ];
 
 const GENERAL_SECTIONS: Section[] = [

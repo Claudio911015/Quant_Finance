@@ -25,8 +25,14 @@ vi.mock('ag-grid-community', async (importOriginal) => {
 // qué datos reciben, no cómo pintan.
 vi.mock('./PricerChart', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./PricerChart')>()), // los textos de cada gráfica sí son los reales
-  PricerChart: ({ data }: { data: { kind: string; product?: string; periodDays?: number } }) => (
-    <div data-testid="chart" data-kind={data.kind} data-product={data.product} data-period-days={data.periodDays} />
+  PricerChart: ({ data }: { data: { kind: string; product?: string; periodDays?: number; series?: unknown } }) => (
+    <div
+      data-testid="chart"
+      data-kind={data.kind}
+      data-product={data.product}
+      data-period-days={data.periodDays}
+      data-series={JSON.stringify(data.series)}
+    />
   ),
 }));
 
@@ -588,6 +594,130 @@ describe('PricerForm', () => {
     // solo la swaption avisa que su gráfica es aproximada
     const note = 'Aproximación con descuento plano; el PV exacto es el de arriba.';
     expect(within(card).queryByText(note) !== null).toBe(product === 'swaption');
+  });
+});
+
+describe('exóticos de FX', () => {
+  /** Como lo entrega `POST /api/price/fx_*`: la serie de la gráfica viene del backend, con una marca por barrera. */
+  const exotic = (product: string, barriers: number[], over: Record<string, unknown> = {}): PriceResponse => ({
+    product: product as PriceResponse['product'],
+    currency: 'MXN',
+    pv: 412345.678,
+    pv_mxn: 412345.678,
+    risk: { delta: -52000, vega: -8100 },
+    cashflows: null,
+    details: {
+      price_pct: 41.23,
+      no_touch_probability: 0.4175,
+      std_error: 1234.5678,
+      paths: 20000,
+      model: 'smile',
+      method: 'mc',
+      analytic_flat_pv: 400000,
+      chart: { strike: null, barriers, spots: [18.5, 19, 19.4], pnl: [1, 2, 3] },
+      ...over,
+    },
+  });
+
+  it('no touch: envía los valores por omisión y dibuja la serie del backend tal cual, sin recalcularla', async () => {
+    const api = mockApi({ 'POST /price/fx_no_touch': json(exotic('fx_no_touch', [19.5])) });
+    renderForm('fx_no_touch');
+
+    valuate();
+
+    const heading = await screen.findByRole('heading', { name: 'Valor contra spot' });
+    expect(api.of('POST', '/price/fx_no_touch')[0].body).toEqual({
+      side: 'buy',
+      barrier: 19.5,
+      barrier_type: 'up',
+      payout_mxn: 1000000,
+      days: 91,
+      model: 'smile',
+      method: 'mc',
+      snapshot: 'MX-DEMO',
+    });
+    const chart = within(heading.closest('section') as HTMLElement).getByTestId('chart');
+    expect(chart.getAttribute('data-product')).toBe('fx_no_touch');
+    expect(JSON.parse(chart.getAttribute('data-series') as string)).toEqual({
+      strike: null,
+      barriers: [19.5],
+      spots: [18.5, 19, 19.4],
+      pnl: [1, 2, 3],
+    });
+  });
+
+  it('double no touch: manda las dos barreras y la serie lleva las dos marcas', async () => {
+    const api = mockApi({ 'POST /price/fx_double_no_touch': json(exotic('fx_double_no_touch', [17.5, 19.8])) });
+    renderForm('fx_double_no_touch');
+
+    valuate();
+
+    const chart = await screen.findByTestId('chart');
+    expect(api.of('POST', '/price/fx_double_no_touch')[0].body).toMatchObject({ lower: 17.5, upper: 19.8 });
+    expect(JSON.parse(chart.getAttribute('data-series') as string).barriers).toEqual([17.5, 19.8]);
+  });
+
+  it('muestra el error estándar junto al PV y los datos del cálculo con sus rótulos', async () => {
+    mockApi({ 'POST /price/fx_no_touch': json(exotic('fx_no_touch', [19.5])) });
+    renderForm('fx_no_touch');
+
+    valuate();
+
+    await screen.findByText('± MXN 1,234.57 (error estándar)');
+    const block = screen.getByText('Detalle del cálculo').closest('section') as HTMLElement;
+    const row = (label: string) => (within(block).getByText(label).closest('tr') as HTMLElement).textContent;
+    expect(row('Probabilidad de no tocar')).toContain('41.75 %');
+    expect(row('Precio (% del pago)')).toContain('41.23 %');
+    expect(row('Referencia analítica (plano)')).toContain('MXN 400,000.00');
+    expect(row('Trayectorias')).toContain('20,000');
+    expect(row('Modelo')).toContain('Con sonrisa (vol local)');
+    expect(row('Método')).toContain('Monte Carlo');
+  });
+
+  it('con método analítico (error estándar 0) no muestra el error estándar', async () => {
+    mockApi({
+      'POST /price/fx_no_touch': json(exotic('fx_no_touch', [19.5], { std_error: 0, paths: 0, method: 'analytic' })),
+    });
+    renderForm('fx_no_touch');
+
+    valuate();
+
+    await screen.findByText('Medidas de riesgo');
+    expect(screen.queryByText(/error estándar/)).toBeNull();
+    const block = screen.getByText('Detalle del cálculo').closest('section') as HTMLElement;
+    expect(within(block).getByText('Analítico')).toBeTruthy();
+  });
+
+  it('sin referencia analítica (la serie no converge con corredores muy anchos) muestra «—» en vez de cero', async () => {
+    mockApi({
+      'POST /price/fx_double_no_touch': json(exotic('fx_double_no_touch', [0.01, 1000000], { analytic_flat_pv: null })),
+    });
+    renderForm('fx_double_no_touch');
+
+    valuate();
+
+    const block = (await screen.findByText('Detalle del cálculo')).closest('section') as HTMLElement;
+    const row = (label: string) => (within(block).getByText(label).closest('tr') as HTMLElement).textContent;
+    expect(row('Referencia analítica (plano)')).toBe('Referencia analítica (plano)—');
+    expect(row('Trayectorias')).toContain('20,000');
+  });
+
+  it.each(['fx_no_touch', 'fx_double_no_touch'] as const)('%s no ofrece agregar al portafolio', (product) => {
+    renderForm(product);
+    expect(screen.queryByRole('button', { name: 'Agregar al portafolio' })).toBeNull();
+    expect(screen.queryByLabelText('Contraparte')).toBeNull();
+  });
+
+  it('los demás productos siguen sin error estándar ni datos del cálculo', async () => {
+    mockApi({ 'POST /price/irs': json(IRS_RESPONSE) });
+    renderForm('irs');
+
+    valuate();
+
+    await screen.findByText('Medidas de riesgo');
+    expect(screen.queryByText('Detalle del cálculo')).toBeNull();
+    expect(screen.queryByText(/error estándar/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Agregar al portafolio' })).toBeTruthy();
   });
 });
 

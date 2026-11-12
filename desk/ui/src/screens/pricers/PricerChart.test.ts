@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capFloorPayoffSeries, forwardPayoffSeries, payoffSeries, swaptionPayoffSeries } from './PricerChart';
+import { buildOption, capFloorPayoffSeries, forwardPayoffSeries, payoffSeries, swaptionPayoffSeries } from './PricerChart';
 
 describe('payoffSeries', () => {
   const at = (s: { spots: number[]; pnl: number[] }, spot: number) =>
@@ -152,5 +152,40 @@ describe('swaptionPayoffSeries', () => {
     expect(swaptionPayoffSeries(payer, undefined)).toBeNull();
     expect(swaptionPayoffSeries({ ...payer, swap_tenor_years: 0 }, 365)).toBeNull();
     expect(swaptionPayoffSeries({ ...payer, strike: 0 }, 365)).toBeNull();
+  });
+});
+
+describe('buildOption con la serie del backend (exóticos con barrera)', () => {
+  const series = { strike: null as unknown as number, spots: [17.6, 18.5, 19.7], pnl: [10, 20, 30] };
+  const build = (product: 'fx_no_touch' | 'fx_double_no_touch', barriers: number[]) =>
+    buildOption({ kind: 'payoff', product, params: {}, pv: 1, currency: 'MXN', series: { ...series, barriers } }) as {
+      xAxis: { min: number; max: number };
+      series: { data: number[][]; markLine: { data: { xAxis?: number; yAxis?: number }[] } }[];
+    };
+
+  it('usa los spots y el valor del backend sin recalcular nada desde los parámetros (vacíos aquí)', () => {
+    expect(build('fx_no_touch', [19.8]).series[0].data).toEqual([
+      [17.6, 10],
+      [18.5, 20],
+      [19.7, 30],
+    ]);
+  });
+
+  it('double no touch: una línea vertical por barrera, además de la del cero', () => {
+    const lines = build('fx_double_no_touch', [17.5, 19.8]).series[0].markLine.data;
+    expect(lines.map((l) => l.xAxis)).toEqual([undefined, 17.5, 19.8]);
+    expect(lines[0].yAxis).toBe(0);
+  });
+
+  it('el eje alcanza las barreras aunque queden fuera del último spot vivo', () => {
+    const { xAxis } = build('fx_double_no_touch', [17.5, 19.8]);
+    expect([xAxis.min, xAxis.max]).toEqual([17.5, 19.8]);
+  });
+
+  it('sin barriers (otros productos) la marca sigue siendo el strike', () => {
+    const o = buildOption({ kind: 'payoff', product: 'fx_option', params: { notional_usd: 1, strike: 19, option_type: 'call' }, pv: 0, currency: 'MXN' }) as {
+      series: { markLine: { data: { xAxis?: number }[] } }[];
+    };
+    expect(o.series[0].markLine.data.map((l) => l.xAxis)).toEqual([undefined, 19]);
   });
 });
