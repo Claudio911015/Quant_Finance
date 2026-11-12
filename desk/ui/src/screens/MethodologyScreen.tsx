@@ -511,7 +511,7 @@ const VALIDATION_SECTIONS: Section[] = [
       },
       {
         label: 'Qué no se compara',
-        text: 'Riesgo (DV01, escenarios, VaR), XVA, contabilidad de coberturas, valuación de operaciones envejecidas con fijaciones y datos de mercado reales de un proveedor. ORE no se usa como segunda referencia.',
+        text: 'Riesgo (DV01, escenarios, VaR), XVA, contabilidad de coberturas, valuación de operaciones envejecidas con fijaciones y datos de mercado reales de un proveedor. Tampoco se compara el bootstrap de las curvas (QuantLib recibe los factores de descuento ya armados), la interpolación de la superficie de volatilidad (las opciones USDMXN usan la volatilidad plana que el escritorio leyó de su superficie), el cross currency swap, la curva MXN-USD (solo se usan TIIE-F y SOFR con colateral en pesos), los calendarios (QuantLib usa fechas enteras sin calendario ni ajuste) ni la extrapolación fuera del último pilar (ningún caso lo rebasa). ORE no se usa como segunda referencia.',
       },
       {
         label: 'Reporte',

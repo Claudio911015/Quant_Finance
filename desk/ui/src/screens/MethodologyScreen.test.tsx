@@ -360,6 +360,14 @@ describe('MethodologyScreen', () => {
       expect(row('Qué no se compara')).toContain('contabilidad de coberturas');
     });
 
+    it('declara también los límites de la validación (H06): bootstrap, superficie, xccy, MXN-USD, calendarios y extrapolación', () => {
+      renderScreen();
+      const text = row('Qué no se compara');
+      for (const limit of ['bootstrap', 'superficie de volatilidad', 'cross currency swap', 'MXN-USD', 'calendarios', 'extrapolación']) {
+        expect(text).toContain(limit);
+      }
+    });
+
     it('enlaza la pantalla Validación', () => {
       renderScreen();
       expect(screen.getByRole('link', { name: 'pantalla Validación' }).getAttribute('href')).toBe(
