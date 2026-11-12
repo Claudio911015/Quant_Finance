@@ -168,7 +168,8 @@ fija con el tipo de cambio pactado.
   \item[Alta a la par.] \codigo{desk/api/xccy.py}{resolve} completa los términos faltantes: el tipo de cambio
     pactado es el spot del snapshot y el diferencial es el par de la ecuación~\eqref{eq:cap07-spread-par}
     (calculado con el diferencial en cero porque el valor es lineal);
-    \codigo{desk/api/xccy.py}{at_par} lo hace al dar de alta una operación.
+    \codigo{desk/api/xccy.py}{at_par} lo hace al dar de alta una operación y, si falta el diferencial y el inicio es
+    anterior a la fecha del snapshot, responde 400 con \texttt{field} \texttt{spread} en lugar de calcularlo.
   \item[Pricer.] \codigo{desk/api/pricing/xccy.py}{_swap} arma una operación que empieza en la fecha del
     snapshot y vence a $28$ días por periodo; \codigo{desk/api/pricing/xccy.py}{_price} devuelve el valor, el
     diferencial par, el nocional en pesos, la curva de descuento y las tres sensibilidades que calcula
@@ -287,9 +288,13 @@ verificación independiente son las identidades de este capítulo recalculadas a
     \item \emph{Fechas.} Las fechas de pago son las pactadas: no se ajustan por días inhábiles ni hay rezago de
           pago (Metodología, «Calendarios»). Al dar de alta, el plazo se redondea a periodos enteros de $28$ días.
     \item \emph{Alta a la par.} Con inicio igual a la fecha del snapshot, el diferencial par es el de la cotización
-          y el valor es cero. Con inicio anterior, el diferencial que se guarda es el par del swap
-          \emph{envejecido} sin fijaciones y el tipo de cambio pactado es el spot del snapshot, no el de la fecha
-          de inicio (hallazgo H15 de \texttt{HALLAZGOS.md}).
+          y el valor es cero: para 26 periodos en \texttt{MX-DEMO} es
+          $\verif{cap07-alta-par-spread}{-0.0010000}$. La par solo se calcula en la fecha de inicio, así que con
+          inicio anterior y sin diferencial el alta responde HTTP~\verif{cap07-alta-par-http}{400} con
+          \texttt{field} \texttt{spread} y pide capturar el diferencial pactado; antes se guardaba el par del swap
+          \emph{envejecido} sin fijaciones (hallazgo H15 de \texttt{HALLAZGOS.md}, resuelto). El tipo de cambio
+          omitido sigue tomando el spot del snapshot aunque el inicio sea anterior: la regla solo exige el
+          diferencial.
     \item \emph{Alcance.} No hay plantilla de confirmación imprimible ni exportación FpML para este producto, ni
           comparación contra QuantLib; el riesgo de crédito del swap pertenece al capítulo~\ref{cap:xva}.
   \end{itemize}

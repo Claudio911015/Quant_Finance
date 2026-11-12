@@ -11,6 +11,7 @@ import tempfile
 
 import comun  # primero: arregla sys.path
 from desk.api import db, market, seed_market
+from desk.api.app import create_app
 from desk.api.pricing import PRODUCTS
 from desk.api.qf import qfpy
 
@@ -86,4 +87,16 @@ for id_, periodos in (("cap07-spread-par-2a", 26), ("cap07-spread-par-3a", 39)):
     assert abs(r["pv"]) < 1e-6 and abs(r["risk"]["dv01_tiie"]) < 1e-6 and abs(r["risk"]["dv01_sofr"]) < 1e-6
     if periodos == 26:  # swap de 2 años, 5 millones de USD: todo el DV01 de tasa cae en MXN-USD
         comun.comprobar("cap07-dv01-mxn-usd", r["risk"]["dv01_mxn_usd"], 1e-3)
+
+# --- alta a la par por la API: con inicio en el as_of se guarda el diferencial cotizado; con inicio anterior, 400 (H15) ---
+with tempfile.TemporaryDirectory() as tmp:
+    cliente = create_app(db_path=os.path.join(tmp, "cap07-api.db")).test_client()
+    cuerpo = {"product": "xccy_swap", "counterparty": "Banco Alfa (sintético)",
+              "params": {"side": "pay_usd", "notional_usd": 5e6, "periods": 26, "exchange": "both"}}
+    nueva = cliente.post("/api/trades", json=cuerpo)
+    assert nueva.status_code == 201 and nueva.get_json()["start_date"] == "2026-11-10"
+    comun.comprobar("cap07-alta-par-spread", nueva.get_json()["params"]["spread"], 5e-8)
+    vieja = cliente.post("/api/trades", json=dict(cuerpo, trade_date="2026-10-12"))  # 29 días antes del as_of
+    assert vieja.get_json()["field"] == "spread"
+    comun.comprobar("cap07-alta-par-http", vieja.status_code, 0.5)
 comun.terminar()

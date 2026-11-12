@@ -303,8 +303,9 @@ serie como el día al que aplica la tasa, sin desplazarla.
         \codigo{desk/api/valuation.py}{aged_swap} y \codigo{desk/api/valuation.py}{value_trade}; swap nuevo del
         pricer: \codigo{desk/api/pricing/rates.py}{_irs_swap}, tasa par por omisión
         \codigo{desk/api/pricing/rates.py}{_irs_par} y respuesta \codigo{desk/api/pricing/rates.py}{_irs_price}.
-  \item Alta a la par: \codigo{desk/api/portfolio.py}{_at_par} guarda como tasa fija la tasa par del swap
-        envejecido en el snapshot de la petición (ver los límites de la sección~\ref{sec:cap03-limites}).
+  \item Alta a la par: \codigo{desk/api/portfolio.py}{_at_par} guarda como tasa fija la tasa par del swap con
+        sus fechas finales en el snapshot de la petición y rechaza el alta si el inicio es anterior a él (ver los
+        límites de la sección~\ref{sec:cap03-limites}).
   \item Cupones liquidados~\eqref{eq:cap03-liquidado}: \codigo{desk/api/settlement.py}{_irs_coupons};
         proyectados: \codigo{desk/api/settlement.py}{_projected_irs}.
 \end{itemize}
@@ -454,10 +455,15 @@ $\verif{cap03-pv-un-curva}{-386317.96}$~\MXN{} (descuento en TIIE-F) a $\verif{c
     \item El valor es sucio (incluye el devengo del periodo en curso) y es el del tenedor: positivo si
           recibe más de lo que paga.
     \item El pricer de un swap nuevo no usa fijaciones; las fijaciones solo entran por el envejecimiento.
-    \item \emph{Alta a la par.} \codigo{desk/api/portfolio.py}{_at_par} guarda la tasa par del swap
-          \emph{envejecido} en la fecha del snapshot de la petición, sin fijaciones y sin devolver avisos. Si el
-          swap empieza antes de esa fecha, la tasa guardada no es la par de la fecha de inicio (hallazgo H02 en
-          \texttt{HALLAZGOS.md}).
+    \item \emph{Alta a la par.} \codigo{desk/api/portfolio.py}{_at_par} guarda la tasa par del swap con sus fechas
+          finales en la fecha del snapshot de la petición. La par solo se calcula en la fecha de inicio: si el
+          swap empieza antes de esa fecha, el alta responde 400 con \texttt{field} \texttt{fixed\_rate} y pide
+          capturar la tasa pactada, porque la par del swap ya envejecido (sin fijaciones) no es la de la fecha de
+          pacto (hallazgo H02 de \texttt{HALLAZGOS.md}, resuelto). Con 13 periodos de 28 días que empiezan en
+          el \emph{as\_of} de \texttt{MX-DEMO} (2026-11-10) la tasa guardada es
+          $\verif{cap03-alta-par-tasa}{0.0675000000}$, la cotización de 364 días; con el pacto 29 días antes la
+          respuesta es el código HTTP~\verif{cap03-alta-par-http}{400}
+          (\codigo{docs/tex/verificacion/cap03_swaps_ois.py}{ejemplo_alta_a_la_par}).
   \end{itemize}
 \end{limites}
 

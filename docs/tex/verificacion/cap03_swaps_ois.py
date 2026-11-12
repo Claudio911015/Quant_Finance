@@ -1,6 +1,7 @@
 """Ejemplos verificables del capítulo 3 (swaps OIS): swap nuevo, swap envejecido con fijaciones y descuento con otra curva."""
 import comun  # primero: arregla sys.path
 from datetime import date, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 from desk.api import valuation
@@ -94,7 +95,25 @@ def ejemplo_colateral():
     comun.comprobar("cap03-flo-telescopica-col", NOM * (1.0 - descuento.discount_factor(70 / 365)), 0.005)
 
 
+def ejemplo_alta_a_la_par():
+    """Alta a la par sobre la base sembrada: con inicio en el as_of se guarda la par; con inicio anterior, 400 (H02)."""
+    import tempfile
+    from desk.api.app import create_app
+
+    with tempfile.TemporaryDirectory() as carpeta:
+        cliente = create_app(db_path=Path(carpeta) / "cap03.db").test_client()
+        cuerpo = {"product": "irs", "counterparty": "Banco Alfa (sintético)",
+                  "params": {"curve": "TIIE-F", "side": "payer", "notional": NOM, "periods": 13}}
+        nueva = cliente.post("/api/trades", json=cuerpo)
+        assert nueva.status_code == 201 and nueva.get_json()["start_date"] == "2026-11-10"
+        comun.comprobar("cap03-alta-par-tasa", nueva.get_json()["params"]["fixed_rate"], 5e-11)
+        vieja = cliente.post("/api/trades", json=dict(cuerpo, trade_date="2026-10-12"))  # 29 días antes del as_of
+        assert vieja.get_json()["field"] == "fixed_rate"
+        comun.comprobar("cap03-alta-par-http", vieja.status_code, 0.5)
+
+
 ejemplo_nuevo()
 ejemplo_envejecido()
 ejemplo_colateral()
+ejemplo_alta_a_la_par()
 comun.terminar()
