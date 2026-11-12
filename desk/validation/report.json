@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-11-12T03:15:53+00:00",
+  "generated_at": "2026-11-12T04:21:22+00:00",
   "snapshot": {
     "id": "MX-DEMO",
     "as_of": "2026-11-10",
     "spot": 18.6
   },
-  "desk_commit": "ea8d1cf135d239f6f5c784d921d8b50bbfea4c64",
+  "desk_commit": "b09a30eee6e8b3ff6f65416e8476896660788c74",
   "desk_dirty": false,
   "reference": {
     "library": "QuantLib",
