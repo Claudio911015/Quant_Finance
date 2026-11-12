@@ -31,6 +31,7 @@ Qué hace el código: `Interpolator` aplica «LogLinear» al logaritmo de la **t
 Qué declara la Metodología/el diseño: el comentario de contrato de `bootstrapOis` y de `bootstrapXccyDiscount` dice que «every quote reprices exactly when method is local (Linear, LogLinear)». La Metodología («Curvas») solo declara interpolación lineal en tasa cero.
 Impacto: ninguno en la aplicación: `market.py` nunca pasa `method` y usa el valor por omisión, Linear (donde sí reprecia a 3e-16). Solo afectaría a quien llame al binding con LogLinear. Con CubicSpline la desviación observada es del orden de 1e-6 en la tasa par, y eso sí está declarado en el contrato.
 Capítulo: 2 (Curvas)
+Resolución: `bootstrapOis` lanza `std::invalid_argument` con `InterpolationMethod::LogLinear` (`ValueError` en `qfpy`); no se implementó el bootstrap log-lineal. El comentario de contrato de `bootstrapOis` y de `bootstrapXccyDiscount` dice ahora que solo Linear reprecia exactamente (CubicSpline de forma aproximada; `bootstrapXccyDiscount` con LogLinear sigue fallando con `std::runtime_error`). Pruebas: `OisBootstrap.LogLinearIsRejected` (C++) y `test_bootstrap_ois_rejects_loglinear`; la prueba de bindings que aceptaba LogLinear usa CubicSpline. Commit f39d31f.
 
 ## H02 — Alta a la par de un swap que empieza antes del snapshot: tasa del swap envejecido, sin fijaciones y sin aviso
 Archivo: `desk/api/portfolio.py`
@@ -39,6 +40,7 @@ Qué hace el código: arma `valuation.aged_swap({start_date, maturity_date}, {..
 Qué declara la Metodología/el diseño: Metodología, «Ciclo de vida y valuación a fecha», «Alta a la par»: «Un swap dado de alta sin tasa fija nace a la par: se guarda con la tasa par del snapshot de la petición (o MX-DEMO), de modo que su PV en la fecha de pacto es cero.»
 Impacto: el PV es cero en la fecha del snapshot de la petición, no en la fecha de pacto ni de inicio cuando son anteriores. Y como no se consultan las fijaciones registradas, la tasa guardada depende de la curva y no de las fijaciones reales de esos días, sin ningún aviso `missing_fixing` al usuario. Con `start_date == as_of` (el caso normal de un alta del día) no hay diferencia.
 Capítulo: 3 (Swaps de tasa OIS)
+Resolución: omitir `fixed_rate` solo se permite si `start_date` ≥ el `as_of` del snapshot usado; si no, 400 con `field` `fixed_rate` y el mensaje «Para una operación que ya empezó capture la tasa pactada: la tasa par solo se calcula en la fecha de inicio» (`portfolio._at_par`). La siembra (`TRADES`, `XVA_TRADES`) ya traía tasa y diferencial explícitos: el PV de las 16 operaciones sembradas es idéntico bit a bit antes y después. El XVA incremental usa `prepare_trade` y cambia igual (una prueba que dependía de la par con inicio pasado captura ahora `fx_rate` y `spread`). Pruebas nuevas en `test_portfolio.py` y `test_xva_incremental.py`; Metodología «Alta a la par». Commit 1754d54.
 
 ## H03 — El residuo de la cascada de P&L es cero por construcción; lo no atribuido cae en «Eventos»
 Archivo: `desk/api/risk/explain.py`
@@ -47,6 +49,7 @@ Qué hace el código: `events = (pv_to + settled) − (values[-1] + s0)` es un c
 Qué declara la Metodología/el diseño: Metodología, «Riesgo avanzado», «Residuo»: «Por qué no es exactamente cero: la cascada suma exactamente el P&L salvo redondeo numérico y datos del mercado que no pertenecen a ningún bloque.» El diseño del corte 6 (D1) dice que «el residuo mide lo no atribuido» aunque la suma sea exacta por construcción.
 Impacto: el residuo no mide ninguna calidad de la atribución: un P&L mal explicado por los bloques de mercado aparece en «Eventos» (y, por tanto, parece un efecto de terminaciones o ejercicios), no en «Residuo». Quien lea «Residuo ≈ 0» no debe concluir que los pasos de mercado lo explican todo. La Metodología debería decir que el residuo es cero por construcción y que «Eventos» es el componente de cierre, o el código debería aislar los eventos valuando con y sin ellos como también declara la Metodología («Terminaciones, ejercicios y cambios de nocional se aíslan valuando con y sin los eventos de la ventana»).
 Capítulo: 9 (Riesgo)
+Resolución: la Metodología («Riesgo avanzado», «Residuo» y «Operaciones nuevas y eventos») dice que el residuo es un control aritmético, cero por construcción salvo redondeo, y que lo no atribuido a los pasos de mercado cae en «Eventos», el componente de cierre. Sin cambio de código. Commit 5287e1e.
 
 ## H04 — VaR histórico y ES se calculan en Python con una convención de cuantil distinta de la de C++
 Archivo: `desk/api/risk/hist_var.py` (y `src/risk/var.cpp`)
@@ -55,6 +58,7 @@ Qué hace el código: el percentil y el déficit esperado se calculan en Python:
 Qué declara la Metodología/el diseño: Metodología, «Riesgo avanzado», «Déficit esperado»: «Promedio de las pérdidas más allá del VaR al mismo nivel; siempre es mayor o igual que el VaR.» y «VaR histórico»: «Percentil empírico». `CLAUDE.md` del repo: «Toda la matemática financiera vive en C++ y se llama por `qfpy`; Python valida, orquesta fechas y fijaciones, y persiste.»
 Impacto: el ES del desk promedia las `k` peores pérdidas incluida la del VaR, no solo las que están «más allá» (con el ejemplo del capítulo 9 daría 2.90·e en vez de 2.85·e, 1.8 % más); y el cuantil y el ES se calculan fuera de C++, con una convención distinta de la de `historicalVaR`. Ninguna cifra del desk cambia hoy porque el backend no usa `historicalVaR`, pero quien la conecte obtendría otro cuantil cuando `W(1 − α)` sea entero.
 Capítulo: 9 (Riesgo)
+Resolución: la Metodología declara el cuantil (la k-ésima peor pérdida sin interpolar, k = max(1, ⌈W(1 − α)⌉)) y que el ES promedia las k peores pérdidas, incluida la del VaR, calculados en Python y no con `historicalVaR`. Sin cambio de código. Commit 83dbcc9.
 
 ## H05 — Tolerancia de 5e-4 en cap/floor y swaption: cinco órdenes de magnitud por encima de lo observado
 Archivo: `desk/validation/common.py`
@@ -63,6 +67,7 @@ Qué hace el código: clasifica como `ok` cualquier caso con diferencia relativa
 Qué declara la Metodología/el diseño: Metodología, «Validación contra QuantLib», «Tolerancias»: «caps/floors y swaptions con Hull-White 5e-4, porque las implementaciones y convenciones del modelo difieren.» Diseño del corte 7 (D3): «modelo y convenciones de implementación distintos; la diferencia se explica caso por caso».
 Impacto: la razón declarada ya no es lo que miden los datos (con los mismos insumos y el mismo modelo la diferencia es de redondeo y del orden de 1e-9 en la swaption), de modo que la tolerancia no acota la discrepancia real: es un margen de protección contra futuras diferencias de convención, y la validación de Hull–White es mucho menos sensible de lo que sugiere el texto. No se propone aquí un valor nuevo; sería una decisión sobre cuánta diferencia de implementación se tolera.
 Capítulo: 12 (Validación contra QuantLib)
+Resolución: la tolerancia de `cap_floor` y `swaption` baja a 1e-6 del nocional (`desk/validation/common.py`, README del arnés, Metodología «Tolerancias» y fixture de la interfaz). `make_report.sh` regenerado sobre el commit ea8d1cf: 62 dentro, 0 explicadas, 0 fuera, `commit_matches: true` (peores diferencias: 2.98e-9 en swaption y 2.79e-16 en cap/floor). La prueba que edita un PV dentro de tolerancia usa 5e-7. Commit d386877.
 
 ## H06 — La Metodología no declara varios límites de la validación que el README del arnés sí declara (o que ninguno declara)
 Archivo: `desk/ui/src/screens/MethodologyScreen.tsx` (y `desk/validation/README.md`)
@@ -71,6 +76,7 @@ Qué hace el código: el arnés entrega a QuantLib los factores de descuento ya 
 Qué declara la Metodología/el diseño: «Qué se compara» dice «con las mismas curvas, spot, volatilidades y parámetros de Hull-White» y «Qué no se compara» solo enumera «Riesgo (DV01, escenarios, VaR), XVA, contabilidad de coberturas, valuación de operaciones envejecidas con fijaciones y datos de mercado reales de un proveedor». El README del arnés sí declara que no valida el bootstrap, la superficie ni el envejecimiento, pero ni él ni la Metodología mencionan el cross currency swap, la curva MXN-USD, los calendarios ni la extrapolación.
 Impacto: quien lea solo la Metodología (la pantalla de la aplicación) puede creer que el bootstrap, la superficie de volatilidad y el cross currency swap están validados contra QuantLib. Lo correcto es añadir esos puntos a «Qué no se compara».
 Capítulo: 12 (Validación contra QuantLib)
+Resolución: la Metodología («Qué no se compara») añade el bootstrap, la interpolación de la superficie, el cross currency swap, la curva MXN-USD, los calendarios y la extrapolación. Commit 3198f6f.
 
 ## H07 — `hedge_ratio` no entra en la medición del periodo
 Archivo: `desk/api/hedge_measure.py` y `desk/api/hedge_effectiveness.py`
@@ -79,6 +85,7 @@ Qué hace el código: la razón `h` se guarda al designar y solo se compara en e
 Qué declara la Metodología/el diseño: el diseño del corte 4 (D2) define `hedge_ratio` como «unidades de instrumento por unidad de partida» y la aclaración P-aceptada dice que «solo entra a la comparación de nocional». La Metodología («Coberturas») no lo menciona: lista como simplificación solo «sin reequilibrio de la razón de cobertura». IFRS 9 6.4.1(c)(iii) pide que la razón designada sea la de las cantidades realmente cubiertas.
 Impacto: una razón distinta de 1 que el usuario considera intencional aparece como sobre o subcobertura en la medición: la parte del instrumento que excede a la partida va a inefectividad aunque la razón la justifique, y una cobertura por debajo de la razón no genera inefectividad. El campo sirve solo para avisar de `mismatch` en nocional.
 Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+Resolución: la medición no cambia (decisión contable pendiente de un contador). El alta avisa `hedge_ratio_mismatch` si `hedge_ratio` difiere en más de 1 % de (fracción designada × nocional del instrumento) / nocional de la partida; la Metodología (fila «Razón de cobertura» y lista de avisos) y el reporte de la relación (`DECL_HEDGE_RATIO`) declaran que se compara la fracción designada del instrumento contra la partida completa y que la razón capturada es informativa. El punto quedó como observación 8 en las «Observaciones contables que siguen abiertas» de `docs/superpowers/qf-desk/corte4/audit.md`, que es la lista de cuestiones para el contador. Commit 0912da3.
 
 ## H08 — El aviso `forecast_date_holiday` no está en la Metodología
 Archivo: `desk/api/hedges.py`
@@ -87,6 +94,7 @@ Qué hace el código: además de `no_economic_relationship`, `instrument_off_mar
 Qué declara la Metodología/el diseño: Metodología, «Coberturas», «Derivado fuera de mercado»: «Al designar, el alta avisa de esto, de que la prueba prospectiva no muestre relación económica, de un flujo pronosticado en fin de semana (…) y de una cobertura documentada más de un día después de su fecha de designación». No menciona el inhábil.
 Impacto: ninguno en cifras: el aviso informa, no bloquea ni cambia la medición. La lista de avisos de la Metodología está incompleta.
 Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+Resolución: la Metodología lista `forecast_date_holiday` entre los avisos del alta. Commit 47a2977.
 
 ## H09 — La relación queda «concluida» también cuando instrumento y partida vencen juntos
 Archivo: `desk/api/hedges.py`
@@ -95,6 +103,7 @@ Qué hace el código: devuelve `concluida` siempre que el `trade_status` del úl
 Qué declara la Metodología/el diseño: Metodología, «Reciclaje»: «En el cierre final la reserva queda en 0 si el instrumento y la partida vencen juntos. Si el instrumento vence antes que el flujo cubierto, la reserva se conserva en ORI (…) y la relación pasa a Concluida». Presenta `concluida` solo para el segundo caso; el diseño (F2) la describe como «instrumento vencido; reserva pendiente de reciclar».
 Impacto: el estado «concluida» no distingue la cobertura terminada del todo de la que aún tiene reserva pendiente: hay que mirar el saldo de la reserva. La nota de reserva pendiente del reporte sí se muestra solo si el saldo no es cero.
 Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+Resolución: la Metodología dice que la relación queda Concluida siempre que el último cierre fue el final, también con instrumento y partida vencidos juntos y reserva cero. Commit 4fb5d75.
 
 ## H10 — La identidad de control de valor razonable vale cero por construcción
 Archivo: `desk/api/hedge_measure.py`
@@ -103,6 +112,7 @@ Qué hace el código: calcula `identity_residual = (d_inst_cum + settled_period)
 Qué declara la Metodología/el diseño: diseño del corte 4, D4: «Identidad de control (se guarda y se prueba)». La Metodología no habla de la identidad, y el diseño la enuncia con detalle para flujo de efectivo (donde sí es una comprobación: depende de `inst_total`, `effective_cum`, `oci` y `recycled`).
 Impacto: en valor razonable el campo `identity_residual` siempre es 0.0 y no sirve de control; la única comprobación del periodo es el cuadre de cargos y abonos.
 Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+Resolución: ningún consumidor necesitaba el campo (la interfaz solo lo declaraba en un tipo y una prueba lo leía como aserción vacía): en valor razonable el periodo ya no guarda `identity_residual`; en flujo de efectivo se conserva. Commit ac3725d.
 
 ## H11 — El término crítico «moneda» del flujo pronosticado compara una constante
 Archivo: `desk/api/hedge_effectiveness.py`
@@ -111,6 +121,7 @@ Qué hace el código: para `forecast_fx` emite `_term("currency", "USD", "USD")`
 Qué declara la Metodología/el diseño: Metodología, «Efectividad prospectiva»: «Términos críticos (nocional, índice o moneda, fechas y sentido…)». Sugiere una comparación real de la moneda.
 Impacto: ninguno hoy: el único par admitido es USDMXN con un `fx_forward`, y el alta rechaza otras combinaciones. El término es informativo y no puede fallar.
 Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+Resolución: `critical_terms` ya no emite el término «moneda» del flujo pronosticado (ni su rótulo ni su tipo en la interfaz); la Metodología deja de mencionarlo. La prueba del forward idéntico espera nocional, vencimiento y sentido. Commit 9684cbe.
 
 ## H12 — El residuo de redondeo en valor razonable no va a «inefectividad»
 Archivo: `desk/api/hedges.py` y `desk/api/hedge_measure.py`
@@ -119,6 +130,7 @@ Qué hace el código: el residuo de redondeo se absorbe en la última línea de 
 Qué declara la Metodología/el diseño: Metodología, «Coberturas», «Asientos sugeridos»: «el residuo del periodo va a resultados por inefectividad», sin distinguir el tipo.
 Impacto: solo la redacción: en valor razonable el residuo (a lo más unos centavos) queda mezclado con el resultado de cobertura, no en una línea de inefectividad.
 Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+Resolución: la Metodología («Asientos sugeridos») dice que el residuo de redondeo va a la cuenta principal de resultados del tipo: «Resultados — inefectividad de cobertura» en flujo de efectivo y «Resultados — cobertura de valor razonable» en valor razonable. Sin cambio de código. Commit d79f023.
 
 ## H13 — El cupón del bono no devenga ACT/360: es nominal × tasa / frecuencia y el corrido es lineal en días/365
 Archivo: `src/instruments/bond.cpp` y `desk/api/pricing/rates.py`
@@ -127,6 +139,7 @@ Qué hace el código: `_bond_instrument` construye `qfpy.Bond(face, coupon_rate,
 Qué declara la Metodología/el diseño: Metodología, «Ciclo de vida y valuación a fecha», «Convención de días»: «Días naturales, t = días/365, devengo ACT/360, fijaciones diarias capitalizadas»; «Bono»: «Flujos fijos descontados con la curva elegida»; «Límites», «Bono»: «Periodos uniformes; la convención M-Bono de 182 días queda fuera».
 Impacto: un bono de nominal 10^8 y cupón 7.5 % semestral paga 3 750 000 por periodo; con devengo ACT/360 sobre 182.5 días pagaría 3 802 083.33 (+1.4 %). La frase «devengo ACT/360» rige para los swaps y las opciones de tasa, no para el bono. La validación contra QuantLib usa ACT/365 y coincide a 6e-8 del nocional (caso bond-08), de modo que el cálculo es coherente con lo que el código hace, no con la frase general de la Metodología.
 Capítulo: 6 (Bonos)
+Resolución: la Metodología limita «devengo ACT/360» a los swaps y las opciones de tasa y añade la fila «Cupón» del bono (nominal × tasa / frecuencia, corrido lineal en días/365). Sin cambio de código. Commit 6319970.
 
 ## H14 — Docstring y ramas de `valuation.shortened` describen un envejecimiento de cap/floor y bono que `value_trade` ya no usa
 Archivo: `desk/api/valuation.py`
@@ -135,6 +148,7 @@ Qué hace el código: `value_trade` valúa el bono y el cap/floor con `aging.bon
 Qué declara la Metodología/el diseño: Metodología, «Ciclo de vida y valuación a fecha», «Bono y cap/floor envejecidos»: calendario exacto de i/frecuencia años con cupón corrido y caplet ya fijado fuera del valor; no habla de periodos enteros.
 Impacto: ninguno en el cálculo; un lector que solo vea `valuation.py` puede creer que el bono y el cap/floor se envejecen por periodos enteros.
 Capítulo: 5 (Hull–White) y 6 (Bonos)
+Resolución: se borraron las ramas `cap_floor` y bono de `valuation.shortened` (sin llamador, comprobado con grep) y se corrigió el docstring del módulo. Las suites no cambian. Commit ea8d1cf.
 
 ## H15 — Alta a la par de un cross currency swap que empieza antes del snapshot: diferencial del swap envejecido, sin fijaciones y sin aviso
 Archivo: `desk/api/xccy.py` (llamada desde `desk/api/portfolio.py`, `prepare_trade`)
@@ -143,6 +157,7 @@ Qué hace el código: si el alta no trae `fx_rate` o `spread`, `at_par` arma el 
 Qué declara la Metodología/el diseño: Metodología, «Ciclo de vida y valuación a fecha», «Alta a la par»: «Un swap dado de alta sin tasa fija nace a la par: se guarda con la tasa par del snapshot de la petición (o MX-DEMO), de modo que su PV en la fecha de pacto es cero.»; y el docstring de `at_par`: «la operación nace a la par y queda guardada con ambos».
 Impacto: el PV es cero en la fecha del snapshot de la petición, no en la de pacto ni en la de inicio cuando son anteriores; el diferencial guardado depende de los días transcurridos y de la tasa a un día de la curva, no de las fijaciones reales, sin aviso `missing_fixing`, y `fx_rate` es el spot del snapshot y no el tipo de cambio de la fecha de inicio. Con `start_date == as_of` (el alta del día) no hay diferencia. Es el mismo mecanismo que H02 para el `irs`.
 Capítulo: 7 (Cross currency swap)
+Resolución: la misma regla que H02 para el diferencial del `xccy_swap` (`xccy.at_par`: 400 con `field` `spread` y «Para una operación que ya empezó capture el diferencial pactado: el diferencial par solo se calcula en la fecha de inicio»). La regla no se extendió a `fx_rate` omitido, que sigue tomando el spot del snapshot. Commit 1754d54.
 
 ## H16 — El comentario de contrato de `VolSurface` dice extrapolación plana en varianza; el código extrapola plano en volatilidad
 Archivo: `include/qf/termstructure/volsurface.hpp` (contrato) y `src/termstructure/volsurface.cpp`
@@ -151,6 +166,7 @@ Qué hace el código: `vol` ancla la varianza total en (T = 0, w = 0) y la inter
 Qué declara la Metodología/el diseño: el comentario de clase de `VolSurface` dice que el segundo paso interpola «w linearly in T (flat extrapolation on w)»; con extrapolación plana en la varianza la volatilidad sería √(w_1/T) = 0.1768 a 0.125 años y √(w_n/T) = 0.1099 a 0.7 años. La Metodología («Opción FX») solo dice «Vol de la superficie por plazo y strike».
 Impacto: ninguno en el cálculo; quien lea el contrato del encabezado en vez del cuerpo de `vol` esperaría una volatilidad que sube antes del primer plazo y decae después del último.
 Capítulo: 4 (Derivados de FX y opción sobre acción)
+Resolución: el comentario de contrato de `VolSurface` dice que la extrapolación es plana en volatilidad (σ del primer pilar antes del primer plazo y σ del último después). Solo comentario. Commit 2c1a4ab.
 
 ## H17 — La bandera de términos de la conciliación se levanta sin probar ningún factor en `xccy_swap` y `equity_option`
 Archivo: `desk/api/ops_recon.py`
@@ -159,6 +175,7 @@ Qué hace el código: `terms_flag = status == "revisar" and (bp is None or abs(b
 Qué declara la Metodología/el diseño: Metodología, «Conciliación»: «se marca para revisar, con bandera de términos si ni ±25 pb ni ±2 % la explican»; corte 5, D5: bandera «si la diferencia supera lo explicable por ±25 pb o ±2 % de spot».
 Impacto: para esos dos productos la bandera no aporta información (es siempre verdadera en `revisar`); un auditor que la lea como «se probó el desplazamiento de curva y de spot y no explica» se equivoca. En los demás productos la regla coincide con la Metodología.
 Capítulo: 11 (Operaciones: conciliación)
+Resolución: en `xccy_swap` y `equity_option` la fila `revisar` sale con `terms_flag` nulo y `terms_reason` «sin descomposición para este producto» (también en la columna `reason` del CSV); la interfaz lo rotula «Sin descomposición para este producto» y la Metodología de Conciliación lo declara. Los productos con factores no cambian. Commit baa4631.
 
 ## H18 — El docstring de `settlement.py` dice que el bono no liquida; el código ya liquida cupones y amortización
 Archivo: `desk/api/settlement.py`
@@ -167,6 +184,7 @@ Qué hace el código: `settled_flows` despacha el bono a `aging.bond_settled`, q
 Qué declara la Metodología/el diseño: Metodología, «Bono y cap/floor envejecidos»: «sus cupones y su amortización se liquidan»; el cap/floor y la swaption no tienen liquidación derivada.
 Impacto: ninguno en el cálculo; el encabezado del módulo describe un estado anterior y puede hacer creer que el cupón y la amortización de un bono no entran al P&L.
 Capítulo: 8 (Ciclo de vida, liquidaciones y P&L)
+Resolución: el docstring de `settlement.py` dice que el bono liquida cupones y amortización por `aging.bond_settled`. Commit 31873c5.
 
 ## H19 — El calendario `US` marca inhábil el 2023-11-10, pero la Fed de Nueva York publicó SOFR ese día
 Archivo: `desk/api/calendars.py`
@@ -175,6 +193,7 @@ Qué hace el código: un feriado de fecha fija en sábado se observa el viernes 
 Qué declara la Metodología/el diseño: Metodología, «Calendarios»: «de publicación de SOFR (SIFMA) en EE. UU. para SOFR, por reglas 2020–2040. Una fijación no publicada en día inhábil de su índice no es faltante.» El docstring del módulo dice «calendario SIFMA (el de la publicación de SOFR)».
 Impacto: bajo. Una operación envejecida a través del 2023-11-10 con SOFR cargada ese día la usa tal cual (una fijación cargada en día inhábil se usa), y una fijación faltante ese día no avisaría. Los demás sábados observados de 2020 a 2026 (3 de julio de 2020, 24 de diciembre de 2021, 3 de julio de 2026) sí coinciden con la ausencia de SOFR. El próximo caso de Veterans Day en sábado es el 2028-11-11 (viernes 2028-11-10): sin comprobar.
 Capítulo: 1 (Introducción, arquitectura y convenciones)
+Resolución: el Día de los Veteranos en sábado no se traslada al viernes en el calendario `US` (`calendars._observed` cambia `is_new_year` por `saturday_to_friday`); los traslados de 2020-07-03, 2021-12-24 y 2026-07-03 no cambian y el domingo sigue pasando al lunes. La regla se confirmó con la comparación del hallazgo, repetida el 2026-11-11 tras la corrección con las mismas 1 712 observaciones de SOFR de la Fed de Nueva York (ninguna fecha con SOFR es inhábil y ningún día hábil entre 2020-01-02 y 2026-11-09 carece de SOFR), con K.8 de la Fed y con el archivo de SIFMA, que lista Veterans Day 2023 sin recomendación de cierre. No se contrastó el caso 2028-11-10. Pruebas en `test_calendars.py`. Commit d4e6f30.
 
 ## H20 — `MDF_FETCH` por omisión sigue a `MDF_DB`; el README lo da como una ruta fija
 Archivo: `desk/api/app.py`
@@ -183,6 +202,7 @@ Qué hace el código: `MDF_FETCH` por omisión es `<directorio de MDF_DB>/exampl
 Qué declara la Metodología/el diseño: `desk/README.md`, «Datos de mercado reales»: «`MDF_FETCH`: `~/Git/MarketDataFeed/build/examples/fetch_sofr`» como ruta por omisión.
 Impacto: bajo; solo afecta a quien cambie `MDF_DB` y espere que el ejecutable siga en la ruta fija. Un refresco con la ruta equivocada responde 502 («No se pudo ejecutar MarketDataFeed»).
 Capítulo: 13 (Fuentes de datos y procedencia)
+Resolución: `desk/README.md` dice que `MDF_FETCH` por omisión es `<directorio de MDF_DB>/examples/fetch_sofr`. Commit 70963b6.
 
 ## H21 — El XVA se integra sobre la malla de reporte mensual con el extremo derecho; la Metodología habla de «malla diaria» y no declara esa discretización
 Archivo: `desk/api/risk/xva.py` (y `desk/api/risk/credit.py`)
@@ -199,3 +219,5 @@ Qué hace el código: solo el IRS TIIE-F cambia de curva con el colateral de la 
 Qué declara la Metodología/el diseño: Metodología, XVA, «Modelo y medida»: «Cada operación se descuenta con la curva de su contraparte.»
 Impacto: bajo; la frase lee como si el colateral de la contraparte eligiera la curva de todos los productos, y solo lo hace en el IRS TIIE-F. El PV y el XVA son coherentes con la valuación del desk.
 Capítulo: 14 (XVA y curvas de crédito)
+Resolución: la Metodología del XVA («Modelo y medida») dice que solo el IRS TIIE-F cambia de curva con el colateral de la contraparte; el IRS SOFR descuenta siempre con SOFR y el cross currency swap su pata MXN con MXN-USD (TIIE-F si falta) y su pata USD con SOFR. Sin cambio de código. Commit 550dac5.
+
