@@ -11,6 +11,10 @@ from desk.api.ops_cashflows import CSV_COLUMNS
 from desk.api.tests import hedge_fixture
 from desk.api.tests.conftest import insert_raw_trade
 from desk.api.tests.ops_fixture import ALFA, confirm_raw
+from desk.api.tests.original_book import original_book  # noqa: F401  (fixture)
+
+# corte 9: el calendario se prueba sobre el portafolio original de siete operaciones (ids 1 a 7)
+pytestmark = pytest.mark.usefixtures("original_book")
 
 AS_OF = date(2026, 11, 10)
 FIRST_COUPON = date(2026, 12, 8)  # día 28: primer cupón de las operaciones 1 y 2 (TIIE-F, 28 días)

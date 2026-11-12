@@ -21,15 +21,16 @@ def _insert_raw(app, product, params_text):
 
 def test_seed_creates_seven_trades_and_values_without_errors(client):
     trades = client.get("/api/trades").get_json()["trades"]
-    assert [t["id"] for t in trades] == list(range(1, 8))
-    assert [t["product"] for t in trades] == [
+    # corte 9: tras las 7 originales se siembran 9 operaciones más (swaps y cross currency swaps)
+    assert [t["id"] for t in trades] == list(range(1, 17))
+    assert [t["product"] for t in trades[:7]] == [
         "irs", "irs", "irs", "fx_forward", "fx_forward", "fx_option", "cap_floor"
     ]
     assert all(t["counterparty"].endswith("(sintético)") for t in trades)
 
     v = client.get("/api/portfolio/valuation?snapshot=MX-DEMO").get_json()
     assert v["snapshot"] == "MX-DEMO" and v["as_of"] == "2026-11-10"
-    assert len(v["rows"]) == 7
+    assert len(v["rows"]) == 16
     assert all(r["error"] is None for r in v["rows"])
     assert all(r["pv_mxn"] is not None for r in v["rows"])
     assert v["total_mxn"] == pytest.approx(sum(r["pv_mxn"] for r in v["rows"]))
@@ -39,8 +40,10 @@ def test_seed_creates_seven_trades_and_values_without_errors(client):
         "id", "product", "counterparty", "trade_date", "start_date", "maturity_date", "status",
         "notional", "currency", "maturity", "pv", "pv_mxn", "warnings", "error", "collateral_currency",
     }
-    assert all(r["status"] == "viva" and r["warnings"] == [] for r in v["rows"])
-    assert all(r["trade_date"] == r["start_date"] == "2026-11-10" for r in v["rows"])
+    # las 7 originales nacen en el as_of; las 9 del corte 9 traen su propia trade_date
+    original = v["rows"][:7]
+    assert all(r["status"] == "viva" and r["warnings"] == [] for r in original)
+    assert all(r["trade_date"] == r["start_date"] == "2026-11-10" for r in original)
     assert all(r["maturity"] == r["maturity_date"] > "2026-11-10" for r in v["rows"])
 
 
@@ -64,7 +67,7 @@ def test_create_list_and_delete_is_refused(client):
     r = client.post("/api/trades", json=_trade())
     assert r.status_code == 201
     t = r.get_json()
-    assert t["id"] == 8
+    assert t["id"] == 17  # 7 originales + 9 del corte 9 + la nueva
     assert t["notional"] == 1e6 and t["currency"] == "MXN" and t["maturity"] == "2027-11-09"
     assert t["params"]["fixed_rate"] == 0.07 and t["created_at"]
     assert set(t) == {"id", "product", "counterparty", "trade_date", "start_date",
@@ -74,7 +77,7 @@ def test_create_list_and_delete_is_refused(client):
 
     r = client.delete("/api/trades/8")  # una operación no se borra: se termina
     assert r.status_code == 409 and r.get_json()["field"] == "id"
-    assert len(client.get("/api/trades").get_json()["trades"]) == 8
+    assert len(client.get("/api/trades").get_json()["trades"]) == 17
 
 
 def test_create_trims_counterparty_and_stores_normalized_params(client):
@@ -91,7 +94,7 @@ def test_persistence_across_create_app(tmp_path):
     assert app1.test_client().post("/api/trades", json=_trade()).status_code == 201
     app2 = create_app(db_path=db)
     trades = app2.test_client().get("/api/trades").get_json()["trades"]
-    assert len(trades) == 8  # 7 sembradas, sin resembrar, + la nueva
+    assert len(trades) == 17  # 16 sembradas (7 + 9 del corte 9), sin resembrar, + la nueva
     assert trades[-1]["counterparty"] == "Banco Test"
 
 
@@ -108,9 +111,9 @@ def test_corrupt_rows_report_error_and_rest_is_valued(app, client):
     _insert_raw(app, "irs", "{no es json")  # JSON ilegible
     _insert_raw(app, "bono_raro", "{}")  # producto desconocido
 
-    assert len(client.get("/api/trades").get_json()["trades"]) == 10  # el listado no se rompe
+    assert len(client.get("/api/trades").get_json()["trades"]) == 19  # el listado no se rompe
     v = client.get("/api/portfolio/valuation?snapshot=MX-DEMO").get_json()
-    good, bad = v["rows"][:7], v["rows"][7:]
+    good, bad = v["rows"][:16], v["rows"][16:]  # 16 sembradas (7 + 9 del corte 9), luego las 3 corruptas
     assert all(r["error"] is None for r in good)
     assert len(bad) == 3
     for r in bad:
@@ -127,7 +130,7 @@ def test_trade_pv_mxn_and_load_trades(app):
 
         mkt = market.load_context(conn, "MX-DEMO")
         trades = portfolio.load_trades(conn)
-        assert len(trades) == 7 and isinstance(trades[0]["params"], dict)
+        assert len(trades) == 16 and isinstance(trades[0]["params"], dict)  # 7 + 9 del corte 9
         base = [portfolio.trade_pv_mxn(t, mkt) for t in trades]
         up = [portfolio.trade_pv_mxn(t, mkt.shifted(spot_pct=10.0)) for t in trades]
         assert up[0] == pytest.approx(base[0])  # irs TIIE-F no depende del spot
@@ -170,7 +173,7 @@ def test_create_invalid_is_400_with_field(client, body, field):
     r = client.post("/api/trades", json=body)
     assert r.status_code == 400
     assert r.get_json()["field"] == field
-    assert len(client.get("/api/trades").get_json()["trades"]) == 7
+    assert len(client.get("/api/trades").get_json()["trades"]) == 16  # 7 + 9 del corte 9
 
 
 @pytest.mark.parametrize("omit", [True, False], ids=["sin fixed_rate", "fixed_rate null"])

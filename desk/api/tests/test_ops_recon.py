@@ -10,6 +10,10 @@ from desk.api.db import connect
 from desk.api.tests import hedge_fixture
 from desk.api.tests.conftest import insert_raw_trade
 from desk.api.tests.ops_fixture import ALFA, fx_trade, irs_trade, own_pv
+from desk.api.tests.original_book import original_book  # noqa: F401  (fixture)
+
+# corte 9: la conciliación se prueba sobre el portafolio original de siete operaciones (ids 1 a 7)
+pytestmark = pytest.mark.usefixtures("original_book")
 
 BETA = "Banco Beta (sintético)"
 HEADER = "trade_id,bank_pv,currency,bank_ref\n"

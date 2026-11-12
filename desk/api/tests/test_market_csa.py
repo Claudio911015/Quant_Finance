@@ -12,6 +12,7 @@ import pytest
 from desk.api import db, market, seed_market
 from desk.api.qf import qfpy
 from desk.api.tests.csa_fixture import strip_csa
+from desk.api.tests.original_book import original_book  # noqa: F401  (fixture)
 
 URL = "/api/market/snapshots/MX-DEMO"
 CSA = "MXN-USD"
@@ -522,6 +523,10 @@ def _dv01(client, snapshot="MX-DEMO"):
     return r.get_json()
 
 
+# corte 9: los cross currency swaps sembrados siempre descuentan con MXN-USD, así que estas dos pruebas
+# (curva dependiente en cero para un portafolio MXN; TIIE-F/SOFR sin cambio con o sin la curva) miran el
+# portafolio original de siete operaciones.
+@pytest.mark.usefixtures("original_book")
 def test_dv01_includes_the_dependent_curve_with_zeros_for_the_mxn_portfolio(client):
     d = _dv01(client)
     assert d["errors"] == []
@@ -531,6 +536,7 @@ def test_dv01_includes_the_dependent_curve_with_zeros_for_the_mxn_portfolio(clie
     assert all(p["dv01_mxn"] == 0 for p in csa["points"]) and csa["parallel_mxn"] == 0
 
 
+@pytest.mark.usefixtures("original_book")
 def test_dv01_of_tiie_and_sofr_is_unchanged_by_the_dependent_curve(app, client):
     with_curve = _dv01(client)
     _roll(client, "SIN-LISTAS", as_of="2026-11-10")

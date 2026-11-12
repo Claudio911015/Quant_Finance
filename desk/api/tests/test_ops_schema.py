@@ -9,6 +9,7 @@ from desk.api.app import create_app
 from desk.api.db import connect
 from desk.api.tests.hedge_fixture import roll
 from desk.api.tests.ops_fixture import confirm_raw, own_pv
+from desk.api.tests.original_book import drop_xva_trades
 
 AS_OF = date(2026, 11, 10)
 DEFAULT_NAME = "Empresa sin nombre (configurar en la confirmación)"
@@ -86,6 +87,7 @@ def test_settings_and_refs_are_editable_configuration(app):
 def test_existing_database_without_the_new_tables_recovers_them(tmp_path):
     path = tmp_path / "old.db"
     app = create_app(db_path=path)
+    drop_xva_trades(app)  # una base anterior al corte 9: solo las 7 originales
     conn = sqlite3.connect(str(path))
     try:
         before = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
@@ -107,7 +109,8 @@ def test_existing_database_without_the_new_tables_recovers_them(tmp_path):
             "reconciliations_no_update", "reconciliations_no_delete",
             "reconciliation_rows_no_update", "reconciliation_rows_no_delete",
         } <= names
-        assert conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == before
+        # no resembró las 7; el arranque solo añade las 9 del corte 9 (borrar `settings` borró su marca)
+        assert conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == before + 9
     finally:
         conn.close()
     assert app2.test_client().get("/api/settings").get_json() == {"company_name": DEFAULT_NAME}

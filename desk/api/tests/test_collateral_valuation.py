@@ -16,6 +16,7 @@ from desk.api.risk.scenarios import DEFAULT_SCENARIOS
 from desk.api.tests.csa_fixture import set_collateral, strip_csa, trade_with
 from desk.api.tests.hedge_fixture import designate, load_fixings, par_irs, roll
 from desk.api.tests.hedge_fixture import frozen_clock  # noqa: F401  (autouse: reloj fijo de coberturas)
+from desk.api.tests.original_book import original_book  # noqa: F401  (fixture)
 
 AS_OF = date(2026, 11, 10)
 X = "Banco X (prueba)"
@@ -224,6 +225,7 @@ def test_r2_parity_snapshot_gives_the_same_pv_under_either_collateral(app, clien
 
 # ----------------------------------------------------------------------------- colateral MXN: nada cambia
 
+@pytest.mark.usefixtures("original_book")
 def test_mxn_collateral_values_the_seed_like_a_snapshot_without_the_lists(app, client):
     with_lists = _rows(client)
     assert len(with_lists) == 7 and all(r["collateral_currency"] == "MXN" for r in with_lists.values())
@@ -281,6 +283,9 @@ def _dv01(client):
     return r.get_json()
 
 
+# corte 9: los cross currency swaps sembrados descuentan siempre con MXN-USD (colateral USD) y no se pueden
+# valuar "sin las listas"; estas dos pruebas son sobre el portafolio original de siete operaciones.
+@pytest.mark.usefixtures("original_book")
 def test_r7_dv01_with_usd_collateral_has_a_nonzero_dependent_curve_that_adds_up(client):
     for p in ("irs", "bond", "cap_floor"):
         trade_with(client, p, X, dict(BOOK)[p])

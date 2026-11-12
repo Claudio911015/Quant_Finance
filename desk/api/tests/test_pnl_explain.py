@@ -63,7 +63,7 @@ def test_response_shape_and_steps(client):
     assert body["steps"][0] == {"key": "carry", "label": "Paso del tiempo y liquidaciones"}
     assert body["steps"][1] == {"key": "curve:TIIE-F", "label": "Tasas TIIE-F"}
     assert body["steps"][-1] == {"key": "residual", "label": "Residuo"}
-    assert list(rows) == list(range(1, 8))
+    assert list(rows) == list(range(1, 17))  # 7 originales + 9 del corte 9
     assert set(body["totals"]) == {"pnl", "components"}
     assert set(rows[1]) == {"id", "product", "counterparty", "pnl", "components", "error", "explain_error", "warnings"}
     assert rows[1]["product"] == "irs" and rows[1]["counterparty"] == "Banco Alfa (sintético)"

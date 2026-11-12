@@ -491,7 +491,7 @@ def test_sofr_par_irs_has_zero_pv_on_live(live_client, side, periods):
 
 def test_portfolio_valuation_on_live_has_no_errors(live_client):
     v = live_client.get("/api/portfolio/valuation?snapshot=MKT-LIVE").get_json()
-    assert len(v["rows"]) == 7
+    assert len(v["rows"]) == 16  # 7 originales + 9 del corte 9
     assert all(r["error"] is None and r["pv_mxn"] is not None for r in v["rows"])
     assert math.isfinite(v["total_mxn"]) and _all_finite(v)
     demo = live_client.get("/api/portfolio/valuation?snapshot=MX-DEMO").get_json()

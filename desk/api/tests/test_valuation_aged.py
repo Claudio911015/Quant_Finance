@@ -104,6 +104,8 @@ def test_r9_migrated_book_values_through_value_trade_unchanged(tmp_path):
         mkt = market.load_context(conn, "MX-DEMO")
         golden = golden_pv()
         for trade in portfolio.load_trades(conn):
+            if trade["id"] not in golden:
+                continue  # las 9 operaciones del corte 9 (ids 8 a 16) no tienen valor dorado del corte 1
             v = valuation.value_trade(trade, mkt, {})
             assert v["status"] == "viva" and v["warnings"] == []
             assert v["pv_mxn"] == pytest.approx(golden[trade["id"]], rel=1e-8)
@@ -234,15 +236,15 @@ def test_exercised_option_is_not_flagged_as_expired_unexercised(client):
 
 def test_not_yet_agreed_trades_are_worth_zero(client):
     _book(client, "fx_forward", FWD, trade_date=_iso(3), start_date=_iso(3))
-    _roll(client, "BEFORE", -5)
+    _roll(client, "BEFORE", -700)  # antes de toda la semilla; la más antigua del corte 9 es de 2025-02-14
     v = client.get(VALUATION % "BEFORE").get_json()
-    assert len(v["rows"]) == 8
+    assert len(v["rows"]) == 17  # 16 sembradas (7 + 9 del corte 9) + la nueva
     assert all(r["status"] == "no_pactada" for r in v["rows"])
     assert all(r["pv"] == r["pv_mxn"] == 0 and r["error"] is None for r in v["rows"])
     assert v["total_mxn"] == 0
     _roll(client, "BEFORE_PACT", 1)  # el último pacta el día 3
     pact = _rows(client, "BEFORE_PACT")
-    assert pact[8]["status"] == "no_pactada" and pact[1]["status"] == "viva"
+    assert pact[17]["status"] == "no_pactada" and pact[1]["status"] == "viva"
 
 
 # --------------------------------------------------------------------- R5, R6

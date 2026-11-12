@@ -68,7 +68,8 @@ def test_listing_has_the_seed_counterparties_in_mxn_with_their_trade_counts(clie
     assert r.status_code == 200
     rows = r.get_json()["counterparties"]
     assert [c["name"] for c in rows] == [ALFA, BETA, GAMMA]  # por nombre
-    assert {c["name"]: c["trades"] for c in rows} == {ALFA: 3, BETA: 2, GAMMA: 2}
+    # 7 originales (3, 2, 2) + 9 del corte 9 (3 por contraparte)
+    assert {c["name"]: c["trades"] for c in rows} == {ALFA: 6, BETA: 5, GAMMA: 5}
     for c in rows:
         assert set(c) == {"id", "name", "collateral_currency", "effective_date", "trades", "history"}
         assert c["collateral_currency"] == "MXN" and c["effective_date"] is None and c["history"] == []
@@ -76,7 +77,7 @@ def test_listing_has_the_seed_counterparties_in_mxn_with_their_trade_counts(clie
 
 def test_listing_trades_count_follows_new_trades(client):
     trade_with(client, "fx_forward", ALFA, {"side": "buy", "notional_usd": 1e6, "days": 30, "strike": 19.0})
-    assert _listing(client)[ALFA]["trades"] == 4
+    assert _listing(client)[ALFA]["trades"] == 7  # 6 sembradas (corte 9 incluido) + la nueva
 
 
 # ------------------------------------------------------------------------------ PUT
@@ -86,7 +87,7 @@ def test_valid_put_changes_the_collateral_and_records_one_event(client, monkeypa
     r = set_collateral(client, ALFA, "USD", "2026-11-10")
     assert r.status_code == 200, r.get_json()
     body = r.get_json()
-    assert body["name"] == ALFA and body["trades"] == 3
+    assert body["name"] == ALFA and body["trades"] == 6  # 3 originales + 3 del corte 9
     assert body["collateral_currency"] == "USD" and body["effective_date"] == "2026-11-10"
     assert len(body["history"]) == 1
     assert set(body["history"][0]) == {"id", "collateral_currency", "effective_date", "created_at"}
@@ -210,7 +211,7 @@ def test_trades_carry_the_collateral_history_of_their_counterparty(app, client):
     finally:
         conn.close()
     expected = [{"effective_date": date(2026, 11, 10), "currency": "USD"}]
-    assert all(c == expected for c in by_cp[ALFA]) and len(by_cp[ALFA]) == 3
+    assert all(c == expected for c in by_cp[ALFA]) and len(by_cp[ALFA]) == 6  # 3 originales + 3 del corte 9
     assert all(c == [] for c in by_cp[BETA] + by_cp[GAMMA])
     assert one["counterparty"] == ALFA and one["collateral"] == expected
     assert "collateral" not in portfolio.public_trade(one)  # la forma HTTP no cambia

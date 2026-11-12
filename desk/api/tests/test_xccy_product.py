@@ -246,7 +246,7 @@ def test_r6_the_new_product_does_not_disturb_the_seed_portfolio(client):
         assert after[tid]["pv_mxn"] == row["pv_mxn"]
     assert after[trade["id"]]["product"] == "xccy_swap"
     listing = client.get("/api/trades").get_json()["trades"]
-    assert [t["product"] for t in listing].count("xccy_swap") == 1
+    assert [t["product"] for t in listing].count("xccy_swap") == 4  # 3 sembrados en el corte 9 + el nuevo
 
 
 # ------------------------------------------------------------------------ flujos (R6)

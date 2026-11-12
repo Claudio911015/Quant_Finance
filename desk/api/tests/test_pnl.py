@@ -38,7 +38,7 @@ def test_r4_identity_holds_for_every_seed_trade_over_35_days(client):
     body, rows = _pnl(client, "MX-DEMO", "D1")
     assert body["from"] == {"snapshot": "MX-DEMO", "as_of": AS_OF.isoformat()}
     assert body["to"] == {"snapshot": "D1", "as_of": _iso(35)}
-    assert sorted(rows) == list(range(1, 8))
+    assert sorted(rows) == list(range(1, 17))  # 7 originales + 9 del corte 9
     assert all(r["error"] is None for r in rows.values())
     _assert_adds_up(body)
     valuation_from = _rows(client, "MX-DEMO")
@@ -247,7 +247,7 @@ def test_row_with_an_error_has_null_figures_and_is_left_out_of_the_totals(app, c
     assert all(row[k] is None for k in ("pv_from", "pv_to", "settled", "pnl", "status_from", "status_to"))
     assert row["warnings"] == []
     _assert_adds_up(body)
-    assert len([r for r in body["rows"] if r["error"] is None]) == 7
+    assert len([r for r in body["rows"] if r["error"] is None]) == 16  # 7 originales + 9 del corte 9
 
 
 def test_from_later_than_to_is_rejected_on_the_to_field(client):

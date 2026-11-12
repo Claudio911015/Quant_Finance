@@ -1,5 +1,7 @@
 """Cruces entre los cortes 3 (colateral USD, xccy_swap), 5 (operaciones), 6 (riesgo avanzado) y 7
 (validación) que cada corte, construido por separado, no podía probar."""
+import csv
+import io
 import json
 import sqlite3
 from datetime import date
@@ -119,7 +121,11 @@ def test_calendar_settled_xccy_flows_after_rolling_and_the_csv_keeps_them(client
         ("2026-11-10", "exchange", "USD"), ("2026-11-10", "exchange", "MXN"),
         ("2026-12-08", "coupon", "USD"), ("2026-12-08", "coupon", "MXN")}
     csv_body = client.get("/api/cashflows?snapshot=D1&format=csv").data.decode("utf-8")
-    assert csv_body.count("xccy_swap") == len([r for r in body["rows"] if r["trade_id"] == desk["xccy"]])
+    # el CSV trae también los xccy sembrados en el corte 9: se cuentan solo las filas del xccy de la prueba
+    csv_rows = list(csv.DictReader(io.StringIO(csv_body)))
+    assert len([r for r in csv_rows if r["trade_id"] == str(desk["xccy"])]) == len(
+        [r for r in body["rows"] if r["trade_id"] == desk["xccy"]]
+    )
 
 
 # ---------------------------------------------- confirmación de liquidaciones (corte 5 × 3)

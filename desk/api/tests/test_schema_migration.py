@@ -6,6 +6,7 @@ import pytest
 
 from desk.api import events
 from desk.api.app import create_app
+from desk.api.seed_trades import XVA_TRADES
 from desk.api.tests.corte1_fixture import FIXTURE, build_corte1_db, golden_pv
 
 AS_OF = "2026-11-10"
@@ -46,10 +47,14 @@ def migrated(tmp_path):
 def test_migration_keeps_ids_and_gives_each_trade_one_execution(migrated):
     path, app = migrated
     trades = app.test_client().get("/api/trades").get_json()["trades"]
-    assert [t["id"] for t in trades] == list(range(1, 8))
-    evs = _rows(path, "SELECT trade_id, type, event_date, data, prev_event_id FROM trade_events ORDER BY id")
+    # corte 9: la base migrada recibe además las 9 operaciones nuevas (ids 8 a 16) al arrancar
+    assert [t["id"] for t in trades] == list(range(1, 17))
+    evs = _rows(
+        path,
+        "SELECT trade_id, type, event_date, data, prev_event_id FROM trade_events WHERE trade_id <= 7 ORDER BY id",
+    )
     assert evs == [(i, "execution", AS_OF, "{}", None) for i in range(1, 8)]
-    for t in trades:
+    for t in trades[:7]:
         assert t["trade_date"] == t["start_date"] == AS_OF
         assert t["maturity_date"] == t["maturity"] > AS_OF
 
@@ -60,7 +65,7 @@ def test_migration_preserves_created_at_terms_and_counterparties(migrated):
     rows = _rows(
         path,
         "SELECT t.id, t.product, c.name, t.terms, t.created_at FROM trades t"
-        " JOIN counterparties c ON c.id = t.counterparty_id ORDER BY t.id",
+        " JOIN counterparties c ON c.id = t.counterparty_id WHERE t.id <= 7 ORDER BY t.id",  # las 7 migradas
     )
     assert len(rows) == 7
     for tid, product, name, terms, created_at in rows:
@@ -76,10 +81,12 @@ def test_migrated_pv_equals_corte1_golden(migrated):
     _, app = migrated
     v = app.test_client().get("/api/portfolio/valuation?snapshot=MX-DEMO").get_json()
     golden = golden_pv()
-    assert [r["id"] for r in v["rows"]] == sorted(golden)
+    # el dorado es de las 7 migradas; las 9 del corte 9 (ids 8 a 16) se valúan aparte, sin error
+    assert [r["id"] for r in v["rows"][:7]] == sorted(golden) and len(v["rows"]) == 16
     for r in v["rows"]:
         assert r["error"] is None
-        assert r["pv_mxn"] == pytest.approx(golden[r["id"]], rel=1e-8), r["id"]
+        if r["id"] in golden:
+            assert r["pv_mxn"] == pytest.approx(golden[r["id"]], rel=1e-8), r["id"]
 
 
 def test_migration_is_idempotent(migrated, tmp_path):
@@ -109,9 +116,10 @@ def test_fresh_seed_equals_migration(migrated, tmp_path):
     )
     norm = lambda rows: [r[:6] + (json.loads(r[6]),) for r in rows]  # noqa: E731
     assert norm(_rows(fresh, sql)) == norm(_rows(path, sql))
+    # una ejecución por operación: las 7 originales en el as_of y las 9 del corte 9 en su trade_date
     assert _rows(fresh, "SELECT trade_id, type, event_date FROM trade_events ORDER BY id") == [
         (i, "execution", AS_OF) for i in range(1, 8)
-    ]
+    ] + [(8 + k, "execution", spec[3]) for k, spec in enumerate(XVA_TRADES)]
 
 
 @pytest.mark.parametrize(
@@ -162,6 +170,6 @@ def test_trade_events_are_insert_only(tmp_path):
             conn.execute("UPDATE trade_events SET type = 'x'")
         with pytest.raises(sqlite3.DatabaseError):
             conn.execute("DELETE FROM trade_events")
-        assert conn.execute("SELECT COUNT(*) FROM trade_events").fetchone()[0] == 7
+        assert conn.execute("SELECT COUNT(*) FROM trade_events").fetchone()[0] == 16  # 7 + 9 del corte 9
     finally:
         conn.close()

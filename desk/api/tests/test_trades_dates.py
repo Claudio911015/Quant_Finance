@@ -117,7 +117,7 @@ def test_repeated_counterparty_reuses_its_id(app, client):
     _post(client, _body(counterparty="  Banco Nuevo  "))
     _post(client, _body(counterparty="Banco Alfa (sintético)"))  # ya sembrada
     assert _sql(app, "SELECT COUNT(*) FROM counterparties")[0][0] == before + 1
-    assert _sql(app, "SELECT COUNT(DISTINCT counterparty_id) FROM trades WHERE id > 7")[0][0] == 2
+    assert _sql(app, "SELECT COUNT(DISTINCT counterparty_id) FROM trades WHERE id > 16")[0][0] == 2  # tras las 16 sembradas (corte 9)
 
 
 # ------------------------------------------------------------------ plazo <-> fechas
@@ -210,7 +210,7 @@ def test_insert_event_chains_prev_event_id_and_loads_in_date_order(app, client):
 def test_delete_is_always_409_and_missing_is_404(client):
     r = client.delete("/api/trades/1")
     assert r.status_code == 409 and r.get_json() == {"error": "Una operación no se borra: termínala", "field": "id"}
-    assert len(client.get("/api/trades").get_json()["trades"]) == 7
+    assert len(client.get("/api/trades").get_json()["trades"]) == 16  # 7 originales + 9 del corte 9
     r = client.delete("/api/trades/999")
     assert r.status_code == 404 and r.get_json()["field"] == "id"
 

@@ -418,7 +418,7 @@ def test_state_recomputed_from_stored_events_matches_the_endpoint(app, client):
     conn = connect(app.config["DESK_DB"])
     try:
         trades = portfolio.load_trades(conn)
-        assert len(trades) == 10 and set(created) <= {t["id"] for t in trades}
+        assert len(trades) == 19 and set(created) <= {t["id"] for t in trades}  # 16 sembradas (corte 9) + 3
         distinct_by_trade = {}
         for t in trades:
             evs = events.load_events(conn, t["id"])

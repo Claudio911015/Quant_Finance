@@ -241,6 +241,13 @@ def test_usage_without_limits_is_empty(client):
 
 
 def test_usage_matches_existing_routes_for_the_four_metrics(client):
+    # con las 9 operaciones del corte 9 las tres contrapartes quedan con PV neto negativo: se agrega un
+    # receiver grande a tasa alta con Beta para que el máximo con 0 se ejerza en los dos signos
+    r = client.post("/api/trades", json={
+        "product": "irs", "counterparty": BETA,
+        "params": {"curve": "TIIE-F", "side": "receiver", "notional": 1e9, "periods": 26, "fixed_rate": 0.10},
+    })
+    assert r.status_code == 201, r.get_json()
     valuation = client.get("/api/portfolio/valuation?snapshot=%s" % SNAP).get_json()
     dv01 = client.post("/api/risk/dv01", json={"snapshot": SNAP}).get_json()
     var = client.post("/api/risk/var", json=VAR_BODY).get_json()
@@ -281,8 +288,8 @@ def test_usage_matches_existing_routes_for_the_four_metrics(client):
         assert row["status"] == "ok"
         assert row["limit_id"] == ids[(row["metric"], row["key"])]
     assert [u["limit_id"] for u in got["usage"]] == sorted(ids.values())
-    # un uso positivo de verdad en las cuatro métricas
-    assert all(v > 0 for k, v in expected.items() if k != ("pv_exposure", ALFA))
+    # un uso positivo de verdad en las cuatro métricas (Alfa y Gamma tienen PV neto negativo: uso 0)
+    assert all(v > 0 for k, v in expected.items() if k not in (("pv_exposure", ALFA), ("pv_exposure", GAMMA)))
 
 
 def test_usage_uses_the_current_amount(client):

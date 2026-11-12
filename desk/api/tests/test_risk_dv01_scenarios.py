@@ -142,7 +142,7 @@ def test_dv01_corrupt_rows_are_reported_and_excluded(app, client):
     _insert_raw(app, "irs", json.dumps({"curve": "TIIE-F"}))  # faltan campos
     _insert_raw(app, "irs", "{no es json")
     d = _dv01(client)
-    assert [e["id"] for e in d["errors"]] == [8, 9]
+    assert [e["id"] for e in d["errors"]] == [17, 18]  # tras las 16 sembradas (7 + 9 del corte 9)
     assert all(e["error"] for e in d["errors"])
     assert d["total_mxn"] == pytest.approx(clean["total_mxn"])
     assert d["curves"] == clean["curves"]
@@ -182,11 +182,11 @@ def test_spot_shock_moves_only_fx_and_sofr_trades(client):
     s = _scenarios(client, [{"name": "USDMXN +10 %", "type": "fx_spot", "pct": 10}])[0]
     by_id = {r["id"]: r["pnl_mxn"] for r in s["trades"]}
     products = {t["id"]: t["product"] for t in client.get("/api/trades").get_json()["trades"]}
-    assert len(by_id) == 7 and all(r["error"] is None for r in s["trades"])
+    assert len(by_id) == 16 and all(r["error"] is None for r in s["trades"])  # 7 + 9 del corte 9
     for tid, pnl in by_id.items():
-        if tid in (1, 2, 7):  # irs TIIE-F y cap TIIE-F: MXN puro
+        if tid in (1, 2, 7, 8, 11, 15):  # irs TIIE-F y cap TIIE-F (8, 11 y 15 son del corte 9): MXN puro
             assert pnl == pytest.approx(0, abs=1e-6), products[tid]
-        else:  # irs SOFR (USD), forwards y opción FX
+        else:  # irs SOFR (USD), forwards, opción FX y cross currency swaps
             assert abs(pnl) > 1.0, products[tid]
     assert s["total_mxn"] == pytest.approx(sum(by_id.values()))
 
@@ -205,10 +205,10 @@ def test_scenario_corrupt_rows_report_error_and_rest_is_valued(app, client):
     clean = _scenarios(client, [{"name": "p", "type": "parallel", "curve": "TIIE-F", "bp": 10}])[0]
     _insert_raw(app, "irs", "{no es json")
     s = _scenarios(client, [{"name": "p", "type": "parallel", "curve": "TIIE-F", "bp": 10}])[0]
-    assert len(s["trades"]) == 8
-    bad = s["trades"][7]
-    assert bad["id"] == 8 and bad["pnl_mxn"] is None and bad["error"]
-    assert s["trades"][:7] == clean["trades"]
+    assert len(s["trades"]) == 17  # 16 sembradas (7 + 9 del corte 9) + la corrupta
+    bad = s["trades"][16]
+    assert bad["id"] == 17 and bad["pnl_mxn"] is None and bad["error"]
+    assert s["trades"][:16] == clean["trades"]
     assert s["total_mxn"] == pytest.approx(clean["total_mxn"])
 
 

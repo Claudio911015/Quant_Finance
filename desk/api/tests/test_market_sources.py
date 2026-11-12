@@ -182,6 +182,7 @@ def test_put_on_missing_live_is_404_not_409(client):
 def test_demo_valuation_total_unchanged(client):
     """R7: la valuación de MX-DEMO no cambia con la procedencia."""
     v = client.get("/api/portfolio/valuation?snapshot=MX-DEMO").get_json()
-    assert len(v["rows"]) == 7
+    assert len(v["rows"]) == 16  # 7 originales + 9 del corte 9
     assert all(r["error"] is None for r in v["rows"])
-    assert v["total_mxn"] == pytest.approx(1536785.72, rel=1e-6)
+    # el valor fijado es el de las 7 originales: las 9 del corte 9 se suman aparte
+    assert sum(r["pv_mxn"] for r in v["rows"][:7]) == pytest.approx(1536785.72, rel=1e-6)

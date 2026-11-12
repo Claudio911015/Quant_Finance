@@ -117,7 +117,8 @@ def test_r5_terminated_trade_leaves_scenarios_and_var(client):
     after = _all(client)
 
     assert all(1 not in ids for ids in _scenario_ids(after["scenarios"]))
-    assert all(ids == [2, 3, 4, 5, 6, 7] for ids in _scenario_ids(after["scenarios"]))
+    # corte 9: además de las 7 originales hay 9 operaciones sembradas (ids 8 a 16)
+    assert all(ids == list(range(2, 17)) for ids in _scenario_ids(after["scenarios"]))
     assert after["dv01"]["errors"] == [] and after["var"]["errors"] == []
     for b, a in zip(before["scenarios"]["scenarios"], after["scenarios"]["scenarios"]):
         assert a["total_mxn"] == pytest.approx(b["total_mxn"] - row1[b["name"]]["pnl_mxn"], rel=1e-9, abs=1e-6)
@@ -139,7 +140,8 @@ def test_snapshot_before_the_termination_is_unchanged(client):
 def test_r8_expired_trades_are_out_of_risk(client):
     _roll(client, "V91", 91)  # los fx_forward/fx_option de 91 días (ids 5 y 6) vencen ese día
     scenarios = _scenarios(client, "V91")
-    assert all(ids == [1, 2, 3, 4, 7] for ids in _scenario_ids(scenarios))
+    # las 9 del corte 9 (ids 8 a 16) vencen después de 91 días y siguen en el riesgo
+    assert all(ids == [1, 2, 3, 4, 7] + list(range(8, 17)) for ids in _scenario_ids(scenarios))
     assert _dv01(client, "V91")["errors"] == []
     assert _var(client, "V91")["errors"] == []
 
@@ -147,7 +149,8 @@ def test_r8_expired_trades_are_out_of_risk(client):
 # ------------------------------------------------------------------------ no_pactada
 
 def test_trades_not_yet_agreed_are_out_of_risk(client):
-    _roll(client, "PAST", -5)  # antes del `trade_date` de toda la semilla
+    # antes del `trade_date` de toda la semilla; con el corte 9 la más antigua es de 2025-02-14
+    _roll(client, "PAST", -700)
     d = _dv01(client, "PAST")
     assert d["errors"] == [] and d["total_mxn"] == 0.0 and d["parallel_mxn"] == 0.0
     for c in d["curves"].values():

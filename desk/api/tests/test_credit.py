@@ -11,6 +11,11 @@ from desk.api import fixings as fixing_store
 from desk.api.qf import qfpy
 from desk.api.risk import credit
 from desk.api.tests.conftest import empty_portfolio, insert_raw_trade
+from desk.api.tests.original_book import original_book  # noqa: F401  (fixture)
+
+# corte 9: el motor anterior de crédito se prueba sobre el portafolio original de siete operaciones;
+# T8 lo reemplaza por el motor nuevo y reescribe estas pruebas
+pytestmark = pytest.mark.usefixtures("original_book")
 
 ALFA, BETA, GAMMA = "Banco Alfa (sintético)", "Banco Beta (sintético)", "Banco Gamma (sintético)"
 AS_OF = date(2026, 11, 10)  # as_of de MX-DEMO
