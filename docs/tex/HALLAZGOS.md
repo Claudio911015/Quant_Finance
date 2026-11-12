@@ -71,3 +71,51 @@ Qué hace el código: el arnés entrega a QuantLib los factores de descuento ya 
 Qué declara la Metodología/el diseño: «Qué se compara» dice «con las mismas curvas, spot, volatilidades y parámetros de Hull-White» y «Qué no se compara» solo enumera «Riesgo (DV01, escenarios, VaR), XVA, contabilidad de coberturas, valuación de operaciones envejecidas con fijaciones y datos de mercado reales de un proveedor». El README del arnés sí declara que no valida el bootstrap, la superficie ni el envejecimiento, pero ni él ni la Metodología mencionan el cross currency swap, la curva MXN-USD, los calendarios ni la extrapolación.
 Impacto: quien lea solo la Metodología (la pantalla de la aplicación) puede creer que el bootstrap, la superficie de volatilidad y el cross currency swap están validados contra QuantLib. Lo correcto es añadir esos puntos a «Qué no se compara».
 Capítulo: 12 (Validación contra QuantLib)
+
+## H07 — `hedge_ratio` no entra en la medición del periodo
+Archivo: `desk/api/hedge_measure.py` y `desk/api/hedge_effectiveness.py`
+Símbolo: `measure` (compara `F × instrumento` con el derivado hipotético sin escalar) y `critical_terms` (única función que usa la razón)
+Qué hace el código: la razón `h` se guarda al designar y solo se compara en el término crítico de nocional (`F × nocional del instrumento` contra `h × nocional de la partida`). `measure` no la usa: el hipotético tiene el nocional de la partida, sin multiplicar por `h`, y la regla del menor y el reciclaje comparan siempre contra él. Comprobado: swap de 600 M contra crédito de 500 M con `hedge_ratio = 1.2` (los cinco términos críticos salen `match`) da en el primer cierre inefectividad 41 720.6329, idéntica a la de la misma cobertura con `hedge_ratio = 1`.
+Qué declara la Metodología/el diseño: el diseño del corte 4 (D2) define `hedge_ratio` como «unidades de instrumento por unidad de partida» y la aclaración P-aceptada dice que «solo entra a la comparación de nocional». La Metodología («Coberturas») no lo menciona: lista como simplificación solo «sin reequilibrio de la razón de cobertura». IFRS 9 6.4.1(c)(iii) pide que la razón designada sea la de las cantidades realmente cubiertas.
+Impacto: una razón distinta de 1 que el usuario considera intencional aparece como sobre o subcobertura en la medición: la parte del instrumento que excede a la partida va a inefectividad aunque la razón la justifique, y una cobertura por debajo de la razón no genera inefectividad. El campo sirve solo para avisar de `mismatch` en nocional.
+Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+
+## H08 — El aviso `forecast_date_holiday` no está en la Metodología
+Archivo: `desk/api/hedges.py`
+Símbolo: `_designation_warnings`
+Qué hace el código: además de `no_economic_relationship`, `instrument_off_market`, `forecast_date_weekend` y `designation_backdated`, emite `forecast_date_holiday` cuando la fecha del flujo pronosticado es un día inhábil de México (lunes a viernes): «se liquidará con el último FIX publicado».
+Qué declara la Metodología/el diseño: Metodología, «Coberturas», «Derivado fuera de mercado»: «Al designar, el alta avisa de esto, de que la prueba prospectiva no muestre relación económica, de un flujo pronosticado en fin de semana (…) y de una cobertura documentada más de un día después de su fecha de designación». No menciona el inhábil.
+Impacto: ninguno en cifras: el aviso informa, no bloquea ni cambia la medición. La lista de avisos de la Metodología está incompleta.
+Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+
+## H09 — La relación queda «concluida» también cuando instrumento y partida vencen juntos
+Archivo: `desk/api/hedges.py`
+Símbolo: `status`
+Qué hace el código: devuelve `concluida` siempre que el `trade_status` del último cierre es `vencida` (el instrumento), sin mirar si el derivado hipotético también venció. Comprobado: swap idéntico al crédito, cierre a 35 días y cierre final al vencimiento: estado `concluida` con reserva 0.00 (sin nada pendiente de reciclar).
+Qué declara la Metodología/el diseño: Metodología, «Reciclaje»: «En el cierre final la reserva queda en 0 si el instrumento y la partida vencen juntos. Si el instrumento vence antes que el flujo cubierto, la reserva se conserva en ORI (…) y la relación pasa a Concluida». Presenta `concluida` solo para el segundo caso; el diseño (F2) la describe como «instrumento vencido; reserva pendiente de reciclar».
+Impacto: el estado «concluida» no distingue la cobertura terminada del todo de la que aún tiene reserva pendiente: hay que mirar el saldo de la reserva. La nota de reserva pendiente del reporte sí se muestra solo si el saldo no es cero.
+Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+
+## H10 — La identidad de control de valor razonable vale cero por construcción
+Archivo: `desk/api/hedge_measure.py`
+Símbolo: `measure` (rama `fair_value`, campo `identity_residual`)
+Qué hace el código: calcula `identity_residual = (d_inst_cum + settled_period) − (ineffectiveness − item_adjustment + settled_period)` con `ineffectiveness = d_inst_cum + item_adjustment`: el resultado es algebraicamente cero para cualquier entrada, de modo que no detecta ningún error de la rama.
+Qué declara la Metodología/el diseño: diseño del corte 4, D4: «Identidad de control (se guarda y se prueba)». La Metodología no habla de la identidad, y el diseño la enuncia con detalle para flujo de efectivo (donde sí es una comprobación: depende de `inst_total`, `effective_cum`, `oci` y `recycled`).
+Impacto: en valor razonable el campo `identity_residual` siempre es 0.0 y no sirve de control; la única comprobación del periodo es el cuadre de cargos y abonos.
+Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+
+## H11 — El término crítico «moneda» del flujo pronosticado compara una constante
+Archivo: `desk/api/hedge_effectiveness.py`
+Símbolo: `critical_terms`
+Qué hace el código: para `forecast_fx` emite `_term("currency", "USD", "USD")`: ambos lados están fijos, así que el término siempre sale `match`.
+Qué declara la Metodología/el diseño: Metodología, «Efectividad prospectiva»: «Términos críticos (nocional, índice o moneda, fechas y sentido…)». Sugiere una comparación real de la moneda.
+Impacto: ninguno hoy: el único par admitido es USDMXN con un `fx_forward`, y el alta rechaza otras combinaciones. El término es informativo y no puede fallar.
+Capítulo: 10 (Contabilidad de coberturas IFRS 9)
+
+## H12 — El residuo de redondeo en valor razonable no va a «inefectividad»
+Archivo: `desk/api/hedges.py` y `desk/api/hedge_measure.py`
+Símbolo: `MAIN_RESULT_ACCOUNT`; `journal`
+Qué hace el código: el residuo de redondeo se absorbe en la última línea de la cuenta de resultados principal del tipo: «Resultados — inefectividad de cobertura» en flujo de efectivo y «Resultados — cobertura de valor razonable» en valor razonable (donde no existe una cuenta de inefectividad separada).
+Qué declara la Metodología/el diseño: Metodología, «Coberturas», «Asientos sugeridos»: «el residuo del periodo va a resultados por inefectividad», sin distinguir el tipo.
+Impacto: solo la redacción: en valor razonable el residuo (a lo más unos centavos) queda mezclado con el resultado de cobertura, no en una línea de inefectividad.
+Capítulo: 10 (Contabilidad de coberturas IFRS 9)
