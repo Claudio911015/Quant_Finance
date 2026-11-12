@@ -12,8 +12,12 @@
 #include <qf/termstructure/yieldcurve.hpp>
 #include <qf/math/interpolation.hpp>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <optional>
+#include <set>
+#include <thread>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -41,6 +45,7 @@ struct OuMoments {
 };
 OuMoments ouMoments(double a, double sigma, double mu, double t);
 std::array<std::array<double, 5>, 5> stepCovariance(const ExposureModel& model, double dt);
+std::size_t aadTapeBytes();
 } // namespace qf::xva::detail
 
 namespace {
@@ -1115,5 +1120,315 @@ TEST(ExposureEngine, XvaSensitivitiesWithoutXadThrowsLogicError) {
     const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(10, schedule(0, 30, 3)));
     const FlatHazardRate hazard(0.02);
     EXPECT_THROW(engine.xvaSensitivities(setOf({s3()}), hazard, 0.6, hazard, 0.6, 0.005), std::logic_error);
+}
+#endif
+
+#ifdef QF_WITH_XAD
+// ---- sensitivities by adjoint differentiation (AAD) against central shocks on the same paths ----------------
+
+namespace {
+
+// Everything a bump can move: the market, the model, both credit curves (as vertices and hazards), LGDs, funding.
+struct Scenario {
+    ExposureMarket market = makeMarket();
+    ExposureModel model = demoModel();
+    std::vector<double> cpTimes{1.0, 3.0, 5.0, 10.0}, cpHazards{0.015, 0.020, 0.025, 0.030};
+    std::vector<double> ownTimes{2.0, 5.0, 10.0}, ownHazards{0.005, 0.008, 0.010};
+    double cpLgd = 0.6, ownLgd = 0.5, funding = 0.005;
+};
+
+using Triple = std::array<double, 3>;   // CVA, DVA, FVA
+
+// Step of each kind of input. A bump moves the input by +-h and the derivative is (f(+h) - f(-h)) / 2h, with the
+// same seed, so the paths are the same and the difference is the pathwise derivative the AAD computes.
+constexpr double kRateBump = 1e-5;       // 0.1 bp of zero rate
+constexpr double kModelBump = 1e-5;      // sigma, a, fx vol
+constexpr double kSpotBump = 1e-3;       // MXN per USD
+constexpr double kCreditBump = 1e-6;     // hazard and funding spread
+// Tolerance on each derivative: |aad - fd| <= max(1 % of |fd|, kAbs), kAbs = 1 MXN per unit of input
+// (= 1e-4 MXN per bp of a rate): it only absolves the pillars the set barely touches, where 1 % of nothing is nothing.
+constexpr double kAbs = 1.0;
+
+Triple valuesOf(const Scenario& s, const NettingSetSpec& set, const SimConfig& cfg) {
+    const ExposureEngine engine(s.market, s.model, cfg);
+    const PiecewiseHazardCurve cp(s.cpTimes, s.cpHazards), own(s.ownTimes, s.ownHazards);
+    const XvaResult r = computeXva(engine.simulate({set})[0], cp, s.cpLgd, own, s.ownLgd, s.funding);
+    return {r.cva, r.dva, r.fva};
+}
+
+XvaSensitivities aadOf(const Scenario& s, const NettingSetSpec& set, const SimConfig& cfg) {
+    const ExposureEngine engine(s.market, s.model, cfg);
+    const PiecewiseHazardCurve cp(s.cpTimes, s.cpHazards), own(s.ownTimes, s.ownHazards);
+    return engine.xvaSensitivities(set, cp, s.cpLgd, own, s.ownLgd, s.funding);
+}
+
+// Central difference of CVA, DVA and FVA with respect to the input that move(scenario, shift) shifts.
+template <class Move>
+Triple bumpCentral(const Scenario& s, const NettingSetSpec& set, const SimConfig& cfg, Move move, double h) {
+    Scenario up = s, down = s;
+    move(up, h);
+    move(down, -h);
+    const Triple a = valuesOf(up, set, cfg), b = valuesOf(down, set, cfg);
+    return {(a[0] - b[0]) / (2 * h), (a[1] - b[1]) / (2 * h), (a[2] - b[2]) / (2 * h)};
+}
+
+template <class Get>
+Triple pick(const XvaSensitivities& s, Get get) { return {get(s.cva), get(s.dva), get(s.fva)}; }
+
+void expectAgree(const Triple& aad, const Triple& fd, const std::string& what, double kAbsolute = kAbs) {
+    const char* const names[3] = {"CVA", "DVA", "FVA"};
+    for (std::size_t k = 0; k < 3; ++k)
+        EXPECT_LE(std::abs(aad[k] - fd[k]), std::max(0.01 * std::abs(fd[k]), kAbsolute))
+            << names[k] << " " << what << ": aad " << aad[k] << " bump " << fd[k];
+}
+
+YieldCurve& curveOf(Scenario& s, int which) {
+    return which == 0 ? s.market.tiie : which == 1 ? s.market.sofr : *s.market.mxnUsd;
+}
+
+// Every pillar of one curve (0 = TIIE-F, 1 = SOFR, 2 = MXN-USD).
+void expectCurveAgrees(const XvaSensitivities& aad, const Scenario& s, const NettingSetSpec& set,
+                       const SimConfig& cfg, int which) {
+    const char* const names[3] = {"TIIE-F", "SOFR", "MXN-USD"};
+    const auto vec = [which](const XvaGreeks& g) -> const std::vector<double>& {
+        return which == 0 ? g.tiie : which == 1 ? g.sofr : g.mxnUsd;
+    };
+    const std::size_t n = which == 0 ? s.market.tiie.maturities().size()
+                          : which == 1 ? s.market.sofr.maturities().size()
+                                       : s.market.mxnUsd->maturities().size();
+    ASSERT_EQ(vec(aad.cva).size(), n);
+    ASSERT_EQ(vec(aad.dva).size(), n);
+    ASSERT_EQ(vec(aad.fva).size(), n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const Triple fd = bumpCentral(s, set, cfg, [&](Scenario& sc, double h) {
+            curveOf(sc, which) = curveOf(sc, which).bumped(i, h / 1e-4);
+        }, kRateBump);
+        expectAgree(pick(aad, [&](const XvaGreeks& g) { return vec(g)[i]; }), fd,
+                    std::string(names[which]) + " pillar " + std::to_string(i));
+    }
+}
+
+void expectSpotAgrees(const XvaSensitivities& aad, const Scenario& s, const NettingSetSpec& set,
+                      const SimConfig& cfg) {
+    const Triple fd = bumpCentral(s, set, cfg, [](Scenario& sc, double h) { sc.market.spot += h; }, kSpotBump);
+    expectAgree(pick(aad, [](const XvaGreeks& g) { return g.spot; }), fd, "spot");
+}
+
+const SimConfig& monthly() {
+    static const SimConfig cfg = makeConfig(400, schedule(0, 30, 61));   // days 0..1800
+    return cfg;
+}
+
+}  // namespace
+
+TEST(ExposureEngine, AadMatchesBumpTiieSwap) {
+    const Scenario s;
+    const NettingSetSpec set = setOf({mxnSwap(true, 0.0710, -10, schedule(18, 28, 65), 1.0007, false, 300e6)});
+    const XvaSensitivities aad = aadOf(s, set, monthly());
+    expectCurveAgrees(aad, s, set, monthly(), 0);
+    // A TIIE-F swap valued in MXN without CSA does not see SOFR, MXN-USD or the spot.
+    for (const XvaGreeks* g : {&aad.cva, &aad.dva, &aad.fva}) {
+        for (double v : g->sofr) EXPECT_EQ(v, 0.0);
+        for (double v : g->mxnUsd) EXPECT_EQ(v, 0.0);
+        EXPECT_EQ(g->spot, 0.0);
+    }
+}
+
+TEST(ExposureEngine, AadMatchesBumpSofrSwap) {
+    const Scenario s;
+    // USD swap valued in MXN: SOFR projects and discounts it, the spot converts it, TIIE-F is the bank account of the
+    // deflator and MXN-USD sits in the drift of the spot.
+    const NettingSetSpec set = setOf({usdSwap(false, 0.0375, -100, schedule(265, 365, 5), 1.009, 15e6),
+                                      usdSwap(true, 0.0345, 0, schedule(91, 91, 20), 1.0, 10e6)});
+    const XvaSensitivities aad = aadOf(s, set, monthly());
+    for (int which = 0; which < 3; ++which) expectCurveAgrees(aad, s, set, monthly(), which);
+    expectSpotAgrees(aad, s, set, monthly());
+}
+
+TEST(ExposureEngine, AadMatchesBumpXccySwap) {
+    const Scenario s;
+    const NettingSetSpec set = setOf({}, {x0(), x1()});   // CSA discounting on MXN-USD, both exchanges of notional
+    const XvaSensitivities aad = aadOf(s, set, monthly());
+    for (int which = 0; which < 3; ++which) expectCurveAgrees(aad, s, set, monthly(), which);
+    expectSpotAgrees(aad, s, set, monthly());
+}
+
+TEST(ExposureEngine, AadMatchesBumpCombinedSet) {
+    const Scenario s;
+    const NettingSetSpec set = setOf({s0(), s1(), s2(), s4()}, {x0(), x1(), x2()});
+    const XvaSensitivities aad = aadOf(s, set, monthly());
+    for (int which = 0; which < 3; ++which) expectCurveAgrees(aad, s, set, monthly(), which);
+    expectSpotAgrees(aad, s, set, monthly());
+
+    // The five numbers of the model (the correlations are not inputs).
+    const struct { const char* name; double XvaGreeks::*field; double ExposureModel::*param; } model[] = {
+        {"fx vol", &XvaGreeks::fxVol, &ExposureModel::fxVol},
+        {"sigma MXN", &XvaGreeks::sigmaMxn, &ExposureModel::sigmaMxn},
+        {"a MXN", &XvaGreeks::aMxn, &ExposureModel::aMxn},
+        {"sigma USD", &XvaGreeks::sigmaUsd, &ExposureModel::sigmaUsd},
+        {"a USD", &XvaGreeks::aUsd, &ExposureModel::aUsd}};
+    for (const auto& m : model) {
+        const Triple fd = bumpCentral(s, set, monthly(), [&](Scenario& sc, double h) { sc.model.*m.param += h; },
+                                      kModelBump);
+        expectAgree(pick(aad, [&](const XvaGreeks& g) { return g.*m.field; }), fd, m.name);
+    }
+
+    // Hazards of both names (one derivative per tranche) and the funding spread.
+    ASSERT_EQ(aad.cva.counterpartyHazard.size(), s.cpHazards.size());
+    ASSERT_EQ(aad.cva.ownHazard.size(), s.ownHazards.size());
+    for (std::size_t i = 0; i < s.cpHazards.size(); ++i) {
+        const Triple fd = bumpCentral(s, set, monthly(), [&](Scenario& sc, double h) { sc.cpHazards[i] += h; },
+                                      kCreditBump);
+        expectAgree(pick(aad, [&](const XvaGreeks& g) { return g.counterpartyHazard[i]; }), fd,
+                    "counterparty hazard " + std::to_string(i));
+    }
+    for (std::size_t i = 0; i < s.ownHazards.size(); ++i) {
+        const Triple fd = bumpCentral(s, set, monthly(), [&](Scenario& sc, double h) { sc.ownHazards[i] += h; },
+                                      kCreditBump);
+        expectAgree(pick(aad, [&](const XvaGreeks& g) { return g.ownHazard[i]; }), fd,
+                    "own hazard " + std::to_string(i));
+    }
+    const Triple fd = bumpCentral(s, set, monthly(), [](Scenario& sc, double h) { sc.funding += h; }, kCreditBump);
+    expectAgree(pick(aad, [](const XvaGreeks& g) { return g.fundingSpread; }), fd, "funding spread");
+}
+
+TEST(ExposureEngine, AadValueMatchesComputeXva) {
+    const Scenario s;
+    const NettingSetSpec set = setOf({s0(), s1(), s2(), s4()}, {x0(), x1(), x2()});
+    const XvaSensitivities aad = aadOf(s, set, monthly());
+    const ExposureEngine engine(s.market, s.model, monthly());
+    const PiecewiseHazardCurve cp(s.cpTimes, s.cpHazards), own(s.ownTimes, s.ownHazards);
+    const XvaResult ref = computeXva(engine.simulate({set})[0], cp, s.cpLgd, own, s.ownLgd, s.funding);
+    const auto close = [](double a, double b, const char* what) {
+        EXPECT_LE(std::abs(a - b), 1e-12 * std::abs(b)) << what << ": " << a << " vs " << b;
+    };
+    close(aad.value.cva, ref.cva, "cva");
+    close(aad.value.dva, ref.dva, "dva");
+    close(aad.value.fva, ref.fva, "fva");
+    close(aad.value.total, ref.total, "total");
+    close(aad.value.cvaStdErr, ref.cvaStdErr, "cvaStdErr");
+    close(aad.value.dvaStdErr, ref.dvaStdErr, "dvaStdErr");
+}
+
+TEST(ExposureEngine, AadZeroVolatilityMatchesDeterministicDerivative) {
+    // Without volatility every path is the same one: the AAD derivative is the derivative of a deterministic
+    // function of the curves, which a very small central bump reproduces to many digits.
+    Scenario s;
+    s.model = zeroVolModel();
+    const NettingSetSpec set = setOf({s0(), s1(), s2(), s4()}, {x0(), x1(), x2()});
+    const SimConfig cfg = makeConfig(8, schedule(0, 30, 61));
+    const XvaSensitivities aad = aadOf(s, set, cfg);
+    const double h = 1e-7;
+    for (int which = 0; which < 3; ++which) {
+        const auto vec = [which](const XvaGreeks& g) -> const std::vector<double>& {
+            return which == 0 ? g.tiie : which == 1 ? g.sofr : g.mxnUsd;
+        };
+        for (std::size_t i = 0; i < vec(aad.cva).size(); ++i) {
+            const Triple fd = bumpCentral(s, set, cfg, [&](Scenario& sc, double shift) {
+                curveOf(sc, which) = curveOf(sc, which).bumped(i, shift / 1e-4);
+            }, h);
+            const Triple got = pick(aad, [&](const XvaGreeks& g) { return vec(g)[i]; });
+            for (std::size_t k = 0; k < 3; ++k)
+                EXPECT_LE(std::abs(got[k] - fd[k]), 1e-6 * std::abs(fd[k]) + 1e-3)   // 1e-3: rounding of the bump
+                    << "measure " << k << " curve " << which << " pillar " << i << ": aad " << got[k]
+                    << " bump " << fd[k];
+        }
+    }
+}
+
+TEST(ExposureEngine, AadFlatHazardHasOneTranche) {
+    const NettingSetSpec set = setOf({s0(), s1()}, {x0()});
+    const ExposureEngine engine(makeMarket(), demoModel(), monthly());
+    const XvaSensitivities aad = engine.xvaSensitivities(set, FlatHazardRate(0.02), 0.6, FlatHazardRate(0.01), 0.5, 0.005);
+    EXPECT_EQ(aad.cva.counterpartyHazard.size(), 1u);
+    EXPECT_EQ(aad.cva.ownHazard.size(), 1u);
+    // The exposure does not depend on credit, so one simulation serves the bumps.
+    const ExposureProfile profile = engine.simulate({set})[0];
+    const auto xva = [&](double lc, double lo) {
+        const XvaResult r = computeXva(profile, FlatHazardRate(lc), 0.6, FlatHazardRate(lo), 0.5, 0.005);
+        return Triple{r.cva, r.dva, r.fva};
+    };
+    const XvaResult ref = computeXva(profile, FlatHazardRate(0.02), 0.6, FlatHazardRate(0.01), 0.5, 0.005);
+    EXPECT_LE(std::abs(aad.value.cva - ref.cva), 1e-12 * std::abs(ref.cva));
+    EXPECT_LE(std::abs(aad.value.fva - ref.fva), 1e-12 * std::abs(ref.fva));
+    const Triple c1 = xva(0.02 + kCreditBump, 0.01), c0 = xva(0.02 - kCreditBump, 0.01);
+    const Triple o1 = xva(0.02, 0.01 + kCreditBump), o0 = xva(0.02, 0.01 - kCreditBump);
+    Triple fdC, fdO;
+    for (std::size_t k = 0; k < 3; ++k) {
+        fdC[k] = (c1[k] - c0[k]) / (2 * kCreditBump);
+        fdO[k] = (o1[k] - o0[k]) / (2 * kCreditBump);
+    }
+    expectAgree(pick(aad, [](const XvaGreeks& g) { return g.counterpartyHazard[0]; }), fdC, "flat counterparty hazard");
+    expectAgree(pick(aad, [](const XvaGreeks& g) { return g.ownHazard[0]; }), fdO, "flat own hazard");
+}
+
+TEST(ExposureEngine, AadRejectsNonLinearCurves) {
+    const NettingSetSpec set = setOf({s0()});
+    const FlatHazardRate hazard(0.02);
+    const YieldCurve cubic({0.25, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 12.0},
+                           {0.0690, 0.0700, 0.0705, 0.0710, 0.0715, 0.0720, 0.0725, 0.0728},
+                           InterpolationMethod::CubicSpline);
+    const SimConfig cfg = makeConfig(10, schedule(0, 30, 5));
+    // The double engine accepts any interpolation; the AAD replicates only Linear and refuses the rest.
+    EXPECT_NO_THROW(ExposureEngine(ExposureMarket{cubic, sofrCurve(), std::nullopt, kSpot}, demoModel(), cfg)
+                        .simulate({set}));
+    EXPECT_THROW(ExposureEngine(ExposureMarket{cubic, sofrCurve(), std::nullopt, kSpot}, demoModel(), cfg)
+                     .xvaSensitivities(set, hazard, 0.6, hazard, 0.6, 0.005), std::invalid_argument);
+    EXPECT_THROW(ExposureEngine(ExposureMarket{tiieCurve(), cubic, std::nullopt, kSpot}, demoModel(), cfg)
+                     .xvaSensitivities(set, hazard, 0.6, hazard, 0.6, 0.005), std::invalid_argument);
+    EXPECT_THROW(ExposureEngine(ExposureMarket{tiieCurve(), sofrCurve(), std::optional<YieldCurve>(cubic), kSpot},
+                                demoModel(), cfg).xvaSensitivities(set, hazard, 0.6, hazard, 0.6, 0.005),
+                 std::invalid_argument);
+    // A credit curve of another type has no tranches to differentiate.
+    struct OtherCurve : ICreditCurve {
+        double survivalProbability(double t) const override { return std::exp(-0.01 * t); }
+    };
+    EXPECT_THROW(ExposureEngine(makeMarket(), demoModel(), cfg).xvaSensitivities(set, OtherCurve{}, 0.6, hazard, 0.6, 0.005),
+                 std::invalid_argument);
+    EXPECT_NO_THROW(ExposureEngine(makeMarket(), demoModel(), cfg).xvaSensitivities(set, hazard, 0.6, hazard, 0.6, 0.005));
+}
+
+// R5, run by hand: ctest skips it. Combined set of 3 trades (TIIE-F 10 y payer with CSA, SOFR 5 y receiver, 5 y
+// cross currency swap with CSA), 2000 paths, integration grid of the desk (monthly U every 3 days U every payment
+// and its eve). Prints ratio = t(xvaSensitivities) / t(simulate + computeXva), both with the threads of
+// forEachPathChunk, and the peak bytes of a tape (they must not depend on the number of paths).
+TEST(ExposureEngine, DISABLED_AadTiming) {
+    const NettingSetSpec set =
+        setOf({mxnSwap(true, 0.0710, 0, schedule(28, 28, 130), 1.0, true, 300e6),
+               usdSwap(false, 0.0375, 0, schedule(91, 91, 20), 1.0, 15e6)},
+              {xccySwap(true, 0, schedule(91, 91, 20), 18.20, 0.0005, true, true)});
+    std::set<int> days = {0};
+    const int horizon = lastPayDay(set);
+    for (int d = 30; d <= horizon; d += 30) days.insert(d);
+    for (int d = 3; d <= horizon; d += 3) days.insert(d);
+    const auto payments = [&](const std::vector<int>& pay) {
+        for (int d : pay) { days.insert(d); days.insert(d - 1); }
+    };
+    for (const auto& sw : set.swaps) payments(sw.payDays);
+    for (const auto& x : set.xccys) payments(x.payDays);
+    const std::vector<int> grid(days.begin(), days.end());
+    const PiecewiseHazardCurve cp({0.5, 1.0, 2.0, 3.0, 5.0, 10.0}, {0.010, 0.012, 0.015, 0.018, 0.020, 0.022});
+    const PiecewiseHazardCurve own({0.5, 1.0, 2.0, 3.0, 5.0, 10.0}, {0.004, 0.005, 0.006, 0.007, 0.008, 0.009});
+    const auto seconds = [](auto&& f) {
+        const auto t0 = std::chrono::steady_clock::now();
+        f();
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    };
+    double ratio = 0.0;
+    std::size_t bytes500 = 0, bytes2000 = 0;
+    for (std::size_t nPaths : {std::size_t{500}, std::size_t{2000}}) {
+        const ExposureEngine engine(makeMarket(), demoModel(), makeConfig(nPaths, grid));
+        double base = 1e300;
+        for (int rep = 0; rep < 2; ++rep)
+            base = std::min(base, seconds([&] { computeXva(engine.simulate({set})[0], cp, 0.6, own, 0.5, 0.005); }));
+        const double aad = seconds([&] { engine.xvaSensitivities(set, cp, 0.6, own, 0.5, 0.005); });
+        (nPaths == 500 ? bytes500 : bytes2000) = qf::xva::detail::aadTapeBytes();
+        ratio = aad / base;
+        std::printf("paths %zu dates %zu threads %u: double %.3f s, AAD %.3f s, ratio = %.2f, tape bytes per thread = %zu\n",
+                    nPaths, grid.size(), std::thread::hardware_concurrency(), base, aad, ratio,
+                    qf::xva::detail::aadTapeBytes());
+    }
+    EXPECT_EQ(bytes500, bytes2000);
+    EXPECT_LE(ratio, 10.0);
 }
 #endif

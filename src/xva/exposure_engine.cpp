@@ -1,15 +1,22 @@
 #include <qf/xva/exposure_engine.hpp>
+#include <qf/math/interpolation.hpp>
+#include <qf/xva/piecewise_hazard_curve.hpp>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <map>
 #include <mutex>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
+#ifdef QF_WITH_XAD
+#include <XAD/XAD.hpp>
+#endif
 
 namespace qf::xva {
 
@@ -28,6 +35,10 @@ OuMoments ouMoments(double a, double sigma, double mu, double t);
 /// Covariance of the stochastic integrals of one step dt, ordered (xi_MXN, eta_MXN, xi_USD, eta_USD, zeta):
 /// xi = sigma int e^{-a(dt-s)} dW, eta = sigma int (1 - e^{-a(dt-s)})/a dW, zeta = sigma_X int dW.
 std::array<std::array<double, 5>, 5> stepCovariance(const ExposureModel& model, double dt);
+
+/// Peak bytes held by one AAD tape during the last xvaSensitivities() call (0 without XAD). Diagnostic for the
+/// timing test: it must not grow with the number of paths.
+std::size_t aadTapeBytes();
 
 } // namespace detail
 
@@ -1071,10 +1082,234 @@ XvaResult computeXva(const ExposureProfile& profile, const ICreditCurve& counter
     return out;
 }
 
-// Provisional: la rama con XAD llega en la tarea siguiente; hasta entonces lanza en ambas configuraciones.
+#ifdef QF_WITH_XAD
+
+namespace {
+
+using AD = xad::AReal<double, 4>;      // three adjoints (CVA, DVA, FVA); XAD has no N = 3 and the fourth stays free
+using ADTape = xad::Tape<double, 4>;
+
+std::atomic<std::size_t> gTapeBytes{0};
+
+// A credit curve as piecewise-constant hazards: the only two curve types the AAD understands.
+struct Hazards {
+    std::vector<double> times;
+    std::vector<double> rates;
+};
+
+Hazards hazardsOf(const ICreditCurve& curve, int lastDay)
+{
+    if (const auto* piecewise = dynamic_cast<const PiecewiseHazardCurve*>(&curve))
+        return {piecewise->times(), piecewise->hazards()};
+    if (const auto* flat = dynamic_cast<const FlatHazardRate*>(&curve))
+        return {{std::max(lastDay / kDaysPerYear, 1.0)}, {flat->hazardRate()}};
+    throw std::invalid_argument(
+        "ExposureEngine::xvaSensitivities: credit curves must be PiecewiseHazardCurve or FlatHazardRate");
+}
+
+void requireLinear(const termstructure::YieldCurve& curve, const char* name)
+{
+    if (curve.interpolationMethod() != math::InterpolationMethod::Linear)
+        throw std::invalid_argument(std::string("ExposureEngine::xvaSensitivities: the ") + name +
+                                    " curve must use Linear interpolation");
+}
+
+} // namespace
+
+XvaSensitivities ExposureEngine::xvaSensitivities(const NettingSetSpec& set, const ICreditCurve& counterparty,
+                                                  double counterpartyLgd, const ICreditCurve& own, double ownLgd,
+                                                  double fundingSpread) const
+{
+    validateLgd(counterpartyLgd, "counterparty");
+    validateLgd(ownLgd, "own");
+    if (!std::isfinite(fundingSpread) || fundingSpread < 0.0)
+        throw std::invalid_argument("computeXva: funding spread must be finite and >= 0");
+    requireLinear(market_.tiie, "TIIE-F");
+    requireLinear(market_.sofr, "SOFR");
+    if (market_.mxnUsd) requireLinear(*market_.mxnUsd, "MXN-USD");
+
+    const std::vector<int>& report = config_.reportDays;
+    const Hazards hazC = hazardsOf(counterparty, report.back());
+    const Hazards hazO = hazardsOf(own, report.back());
+    const std::size_t nPaths = config_.nPaths;
+    const std::size_t nDays = report.size();
+
+    // The inputs, in one vector: pillars of the three curves, spot, the five model numbers (in XvaGreeks order),
+    // hazards of both names, funding spread. The correlations are not inputs.
+    std::vector<double> x0;
+    const auto append = [&x0](const std::vector<double>& v) {
+        const std::size_t offset = x0.size();
+        x0.insert(x0.end(), v.begin(), v.end());
+        return offset;
+    };
+    const std::vector<double> noRates;
+    const std::size_t oTiie = append(market_.tiie.rates());
+    const std::size_t oSofr = append(market_.sofr.rates());
+    const std::size_t oMxn = append(market_.mxnUsd ? market_.mxnUsd->rates() : noRates);
+    const std::size_t oSpot = append({market_.spot});
+    const std::size_t oModel = append({model_.fxVol, model_.sigmaMxn, model_.aMxn, model_.sigmaUsd, model_.aUsd});
+    const std::size_t oHazC = append(hazC.rates);
+    const std::size_t oHazO = append(hazO.rates);
+    const std::size_t oFund = append({fundingSpread});
+    const std::size_t nIn = x0.size();
+    const std::size_t nTiie = market_.tiie.rates().size(), nSofr = market_.sofr.rates().size();
+    const std::size_t nMxn = market_.mxnUsd ? market_.mxnUsd->rates().size() : 0;
+
+    struct Partial {
+        std::vector<double> d[3];   // adjoints of CVA, DVA, FVA with respect to the inputs
+        std::size_t tapeBytes = 0;
+    };
+    std::map<std::size_t, Partial> partials;   // by first path, so the final sum does not depend on thread timing
+    std::mutex partialsMutex;
+    std::vector<double> cvaPath(nPaths), dvaPath(nPaths), fvaPath(nPaths);   // each already divided by nPaths
+
+    forEachPathChunk(nPaths, [&](std::size_t first, std::size_t last) {
+        ADTape tape;                                   // one tape per thread; declared first, destroyed last
+        std::vector<AD> in(x0.begin(), x0.end());
+        tape.registerInputs(in);
+        tape.newRecording();
+        const auto take = [&in](std::size_t offset, std::size_t count) {
+            return std::vector<AD>(in.begin() + static_cast<std::ptrdiff_t>(offset),
+                                   in.begin() + static_cast<std::ptrdiff_t>(offset + count));
+        };
+        const PillarCurve<AD> tiie{market_.tiie.maturities(), take(oTiie, nTiie)};
+        const PillarCurve<AD> sofr{market_.sofr.maturities(), take(oSofr, nSofr)};
+        PillarCurve<AD> mxnUsd;
+        if (nMxn > 0) mxnUsd = PillarCurve<AD>{market_.mxnUsd->maturities(), take(oMxn, nMxn)};
+        const MarketT<AD, PillarCurve<AD>> market{&tiie, &sofr, nMxn > 0 ? &mxnUsd : nullptr, in[oSpot]};
+        const ModelT<AD> model{in[oModel + 2], in[oModel + 1], in[oModel + 4], in[oModel + 3], in[oModel],
+                               model_.rhoMxnUsd, model_.rhoMxnFx, model_.rhoUsdFx};
+        const Context<AD> c = buildContext(market, model, {set}, report.back());
+
+        // Weights of each date in the three measures (they already carry the 1 / nPaths of the mean), recorded
+        // once. This is computeXva's weighted sum in another order: the sum over dates happens inside each path
+        // and the mean over paths last, whereas computeXva averages the dates first. Reusing computeXva would
+        // change its double numbers by rounding, so the formula is repeated here on purpose.
+        const std::vector<AD> hC = take(oHazC, hazC.rates.size());
+        const std::vector<AD> hO = take(oHazO, hazO.rates.size());
+        std::vector<AD> survC(nDays), survO(nDays), wC(nDays), wO(nDays), wF(nDays);
+        for (std::size_t j = 0; j < nDays; ++j) {
+            const double t = report[j] / kDaysPerYear;
+            survC[j] = survivalFromHazards(hazC.times, hC, t);
+            survO[j] = survivalFromHazards(hazO.times, hO, t);
+        }
+        const double invN = 1.0 / static_cast<double>(nPaths);
+        for (std::size_t j = 1; j < nDays; ++j) {
+            wC[j] = counterpartyLgd * (survC[j - 1] - survC[j]) * invN;
+            wO[j] = ownLgd * (survO[j - 1] - survO[j]) * invN;
+            wF[j] = in[oFund] * survC[j] * survO[j] * (report[j] / kDaysPerYear - report[j - 1] / kDaysPerYear) * invN;
+        }
+        const auto common = tape.getPosition();        // everything above is shared by the paths of this thread
+
+        // This loop over paths runs parallel to simulate()'s on purpose: sharing it would change the order of
+        // operations of simulate(), whose double results must not move.
+        std::size_t peakBytes = 0;
+        for (std::size_t p = first; p < last; ++p) {
+            PathData<AD> path;                         // no active variable may outlive resetTo below
+            path.resize(c.grid.horizon);
+            Bonds<AD> bonds;
+            bonds.resize(c.days.size());
+            simulatePath(c.grid, config_.seed, p, path);
+            const PathView<AD> pv0{{path.I[kMxn].data(), path.I[kUsd].data()}, AD(0.0)};
+            AD cva = 0.0, dva = 0.0, fva = 0.0;
+            for (std::size_t j = 1; j < nDays; ++j) {
+                const int d = report[j];
+                const std::size_t dd = static_cast<std::size_t>(d);
+                computeBonds(c, d, path.x[kMxn][dd], path.x[kUsd][dd], bonds);
+                PathView<AD> pv = pv0;
+                pv.X = path.X[dd];
+                const AD v = setValue(c.sets[0], c, d, bonds, c.grid.q[dd], pv);
+                const AD invBank = exp(-path.I[kMxn][dd]);
+                const AD posD = max(v, 0.0) * invBank, negD = max(-v, 0.0) * invBank;
+                cva += posD * wC[j];
+                dva += negD * wO[j];
+                fva += (posD - negD) * wF[j];
+            }
+            tape.registerOutput(cva);
+            tape.registerOutput(dva);
+            tape.registerOutput(fva);
+            derivative(cva)[0] = 1.0;
+            derivative(dva)[1] = 1.0;
+            derivative(fva)[2] = 1.0;
+            cvaPath[p] = xad::value(cva);
+            dvaPath[p] = xad::value(dva);
+            fvaPath[p] = xad::value(fva);
+            peakBytes = std::max(peakBytes, tape.getMemory());
+            tape.computeAdjointsTo(common);            // down to the shared part, whose adjoints accumulate
+            tape.clearDerivativesAfter(common);
+            tape.resetTo(common);                      // the tape never grows past one path
+        }
+        tape.computeAdjoints();                        // from the shared part to the inputs
+
+        Partial out;
+        out.tapeBytes = peakBytes;
+        for (int k = 0; k < 3; ++k) {
+            out.d[k].resize(nIn);
+            for (std::size_t i = 0; i < nIn; ++i) out.d[k][i] = derivative(in[i])[static_cast<std::size_t>(k)];
+        }
+        const std::lock_guard<std::mutex> lock(partialsMutex);
+        partials[first] = std::move(out);
+    });
+
+    std::array<std::vector<double>, 3> d;
+    for (auto& v : d) v.assign(nIn, 0.0);
+    std::size_t tapeBytes = 0;
+    for (const auto& entry : partials) {
+        for (std::size_t k = 0; k < 3; ++k)
+            for (std::size_t i = 0; i < nIn; ++i) d[k][i] += entry.second.d[k][i];
+        tapeBytes = std::max(tapeBytes, entry.second.tapeBytes);
+    }
+    gTapeBytes = tapeBytes;
+
+    XvaSensitivities out{};
+    const double n = static_cast<double>(nPaths);
+    for (std::size_t p = 0; p < nPaths; ++p) {
+        out.value.cva += cvaPath[p];
+        out.value.dva += dvaPath[p];
+        out.value.fva += fvaPath[p];
+    }
+    out.value.total = out.value.cva - out.value.dva + out.value.fva;
+    out.value.cvaStdErr = n * standardError(cvaPath);   // the paths carry 1/n: the sum of their own is n times larger
+    out.value.dvaStdErr = n * standardError(dvaPath);
+    XvaGreeks* const greeks[3] = {&out.cva, &out.dva, &out.fva};
+    for (std::size_t k = 0; k < 3; ++k) {
+        const auto slice = [&](std::size_t offset, std::size_t count) {
+            return std::vector<double>(d[k].begin() + static_cast<std::ptrdiff_t>(offset),
+                                       d[k].begin() + static_cast<std::ptrdiff_t>(offset + count));
+        };
+        XvaGreeks& g = *greeks[k];
+        g.tiie = slice(oTiie, nTiie);
+        g.sofr = slice(oSofr, nSofr);
+        g.mxnUsd = slice(oMxn, nMxn);
+        g.spot = d[k][oSpot];
+        g.fxVol = d[k][oModel];
+        g.sigmaMxn = d[k][oModel + 1];
+        g.aMxn = d[k][oModel + 2];
+        g.sigmaUsd = d[k][oModel + 3];
+        g.aUsd = d[k][oModel + 4];
+        g.counterpartyHazard = slice(oHazC, hazC.rates.size());
+        g.ownHazard = slice(oHazO, hazO.rates.size());
+        g.fundingSpread = d[k][oFund];
+    }
+    return out;
+}
+
+namespace detail {
+std::size_t aadTapeBytes() { return gTapeBytes; }
+} // namespace detail
+
+#else
+
 XvaSensitivities ExposureEngine::xvaSensitivities(const NettingSetSpec&, const ICreditCurve&, double,
-                                                  const ICreditCurve&, double, double) const {
+                                                  const ICreditCurve&, double, double) const
+{
     throw std::logic_error("ExposureEngine::xvaSensitivities: qf se compiló sin XAD (QF_WITH_XAD=OFF)");
 }
+
+namespace detail {
+std::size_t aadTapeBytes() { return 0; }
+} // namespace detail
+
+#endif
 
 } // namespace qf::xva

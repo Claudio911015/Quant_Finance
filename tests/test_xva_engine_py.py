@@ -262,6 +262,33 @@ class ExposureEngineBindings(unittest.TestCase):
         """qfxva says whether qf was built with XAD (QF_WITH_XAD); the sensitivities route reads it."""
         self.assertIsInstance(qfxva.HAS_XAD, bool)
 
+    @unittest.skipUnless(_HAVE_BUILD and getattr(qfxva, "HAS_XAD", False), "qf was built without XAD")
+    def test_xva_sensitivities_shape(self):
+        """One derivative per pillar and per hazard tranche; the value is compute_xva's on the same paths."""
+        engine = _engine(n_paths=100)
+        counterparty = qfxva.PiecewiseHazardCurve([1.0, 3.0, 6.0], [0.010, 0.020, 0.035])
+        own = qfxva.FlatHazardRate(0.012)
+        sens = engine.xva_sensitivities(self.set_a, counterparty, 0.6, own, 0.55, 0.005)
+        ref = qfxva.compute_xva(engine.simulate([self.set_a])[0], counterparty, 0.6, own, 0.55, 0.005)
+        for name in ("cva", "dva", "fva"):
+            self.assertAlmostEqual(getattr(sens.value, name), getattr(ref, name),
+                                   delta=1e-10 * abs(getattr(ref, name)))
+        for g in (sens.cva, sens.dva, sens.fva):
+            self.assertEqual((len(g.tiie), len(g.sofr), len(g.mxn_usd)), (8, 8, 8))
+            self.assertEqual(len(g.counterparty_hazard), 3)
+            self.assertEqual(len(g.own_hazard), 1)
+        self.assertTrue(any(abs(v) > 0.0 for v in sens.cva.tiie))
+        self.assertNotEqual(sens.cva.spot, 0.0)
+        self.assertGreater(sens.cva.counterparty_hazard[0], 0.0)
+        # Without the MXN-USD curve there are no pillars of it (a swap with CSA discounting would need it).
+        plain = qfxva.RateSwapSpec(qfxva.SwapCurrency.MXN, 100e6, 0.0710, True, 0,
+                                   [28 + 28 * k for k in range(13)], 1.0)
+        bare = _engine(n_paths=50, market=_market(with_basis=False))
+        sens = bare.xva_sensitivities(qfxva.NettingSetSpec(swaps=[plain], xccys=[]), counterparty, 0.6, own,
+                                      0.55, 0.005)
+        self.assertEqual(len(sens.cva.mxn_usd), 0)
+        self.assertEqual(len(sens.cva.tiie), 8)
+
 
 if __name__ == "__main__":
     unittest.main()
