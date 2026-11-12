@@ -353,11 +353,11 @@ const RISK_ADV_SECTIONS: Section[] = [
       },
       {
         label: 'Residuo',
-        text: 'Por qué no es exactamente cero: la cascada suma exactamente el P&L salvo redondeo numérico y datos del mercado que no pertenecen a ningún bloque. Los efectos cruzados se atribuyen al paso posterior, así que cambiar el orden cambia la atribución pero no el total.',
+        text: 'El residuo es un control aritmético, cero por construcción salvo redondeo: Eventos es el componente de cierre y recoge todo lo que los pasos de mercado no explican, así que un P&L mal explicado por los bloques aparece en Eventos y no en Residuo. Solo es distinto de cero si la cascada de una operación falla: entonces todo su P&L va al residuo y se muestra el error. Los efectos cruzados se atribuyen al paso posterior, así que cambiar el orden cambia la atribución pero no el total.',
       },
       {
         label: 'Operaciones nuevas y eventos',
-        text: 'Las operaciones pactadas en la ventana van completas a su paso. Terminaciones, ejercicios y cambios de nocional se aíslan valuando con y sin los eventos de la ventana.',
+        text: 'Las operaciones pactadas en la ventana van completas a su paso. Terminaciones, ejercicios y cambios de nocional se aíslan valuando con y sin los eventos de la ventana; Eventos, además, absorbe como componente de cierre cualquier otro efecto no atribuido a los pasos anteriores.',
       },
       {
         label: 'VaR histórico',

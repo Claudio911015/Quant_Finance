@@ -214,6 +214,10 @@ describe('MethodologyScreen', () => {
     it('describe la cascada, el residuo y el VaR histórico como sensibilidades', () => {
       renderScreen();
       expect(riskRow('Residuo')).toContain('orden');
+      // H03: el residuo es cero por construcción y lo no atribuido cae en Eventos
+      expect(riskRow('Residuo')).toContain('cero por construcción');
+      expect(riskRow('Residuo')).toContain('Eventos es el componente de cierre');
+      expect(riskRow('Residuo')).not.toContain('Por qué no es exactamente cero');
       expect(riskRow('VaR histórico')).toContain('sensibilidades');
     });
 
