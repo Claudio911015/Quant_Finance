@@ -19,7 +19,7 @@ DELTA = "Banco Delta (prueba)"
 KEYS = {"cva", "dva", "fva", "total"}
 TOP_KEYS = {
     "snapshot", "as_of", "counterparty", "notice", "method", "cds_jacobian", "params", "paths", "seed", "elapsed_s",
-    "valuation_elapsed_s", "n_inputs", "bump_cost_estimate_s", "xva", "units", "curves", "fx", "vols", "credit",
+    "valuation_elapsed_s", "n_inputs", "bump_cost_estimate_s", "xva", "curves", "fx", "vols", "credit",
     "funding", "empty_reason", "assumptions", "warnings",
 }
 
@@ -56,15 +56,24 @@ def test_shape_lengths_and_totals(alfa200):
     for side in ("counterparty", "own"):
         block = body["credit"][side]
         assert block["kind"] == "curve" and [c["tenor"] for c in block["cds"]] == ["1Y", "2Y", "3Y", "5Y", "7Y", "10Y"]
-        assert [h["to_years"] for h in block["hazards"]] == [1, 2, 3, 5, 7, 10]
+        assert block["hazards"] == []  # con cotizaciones de CDS no se repite la intensidad por tramo
     assert body["n_inputs"] == 10 + 10 + 9 + 1 + 5 + 6 + 6 + 1
     assert body["bump_cost_estimate_s"] == pytest.approx(2 * body["n_inputs"] * body["valuation_elapsed_s"])
     assert body["elapsed_s"] > 0 and body["valuation_elapsed_s"] > 0
     rows = [p for c in body["curves"] for p in c["pillars"]] + [body["fx"], body["funding"]] + body["vols"]
-    rows += [r for side in body["credit"].values() for r in side["cds"] + side["hazards"]]
+    rows += [r for side in body["credit"].values() for r in side["cds"]]
     for row in rows:
         assert KEYS <= set(row)
         assert row["total"] == pytest.approx(row["cva"] - row["dva"] + row["fva"], rel=1e-12, abs=1e-12)
+    # La total (MXN-USD recalibrada) está en TIIE-F, SOFR y el spot; en MXN-USD, que es lo que se recalibra, no.
+    with_total = [p for c in body["curves"][:2] for p in c["pillars"]] + [body["fx"]]
+    for row in with_total:
+        assert set(row["recalibrated"]) == KEYS
+        assert row["recalibrated"]["total"] == pytest.approx(
+            row["recalibrated"]["cva"] - row["recalibrated"]["dva"] + row["recalibrated"]["fva"], rel=1e-12, abs=1e-12
+        )
+    assert not any("recalibrated" in p for p in body["curves"][2]["pillars"] + body["vols"])
+    assert any(abs(r["recalibrated"]["cva"] - r["cva"]) > 1.0 for r in with_total)  # la recalibración sí importa
 
 
 def test_xva_is_exactly_the_one_of_get_xva_and_dv01_sums_the_pillars(alfa200):
@@ -73,10 +82,14 @@ def test_xva_is_exactly_the_one_of_get_xva_and_dv01_sums_the_pillars(alfa200):
     for curve in body["curves"]:
         for k in KEYS:
             assert curve["dv01"][k] == pytest.approx(sum(p[k] for p in curve["pillars"]), rel=1e-12)
+            if "recalibrated" in curve["dv01"]:
+                assert curve["dv01"]["recalibrated"][k] == pytest.approx(
+                    sum(p["recalibrated"][k] for p in curve["pillars"]), rel=1e-12
+                )
     # Una contraparte con deuda a tasa fija pagada (Alfa paga fija en TIIE-F): el DV01 del CVA no es cero.
     assert any(abs(c["dv01"]["cva"]) > 0 for c in body["curves"])
-    assert xva_sens.PARTIAL_NOTE in body["assumptions"]
-    assert body["notice"] == xva.NOTICE and body["units"]["curves"] == "MXN por pb"
+    assert [n in body["assumptions"] for n in (xva_sens.PARTIAL_NOTE, xva_sens.COST_NOTE)] == [True, True]
+    assert body["notice"] == xva.NOTICE
 
 
 # ---------------------------------------------------------------- AAD contra choque y reprecio
@@ -170,6 +183,39 @@ def test_aad_matches_bump_and_reprice_for_one_input_of_each_class(app, client):
     _agree(cds_rows[k], _central(credit(cp=shifted(1e-6)), credit(cp=shifted(-1e-6)), 2e-6 / 1e-4), "CDS %s" % k)
 
 
+def test_total_matches_bump_recalibrate_and_reprice(app, client):
+    """La total (MXN-USD recalibrada con sus puntos forward y base fijos) contra choque del insumo, recalibración
+    con `MarketContext.shifted` y reprecio completo con las mismas trayectorias: un pilar de TIIE-F, uno de SOFR y
+    el spot. Tolerancia max(1 %, 1 MXN por pb); el crédito no se recalibra (el perfil no lo usa)."""
+    _put_paths(client, 500)
+    body = _sens(client)
+    mkt, _, _, _, exposure, _ = _bump_world(app, ALFA)
+
+    def reprice(recalibrate, **move):
+        ctx = mkt.shifted(**move)
+        keep = {} if recalibrate else {market.CSA_CURVE: mkt.curves[market.CSA_CURVE]}
+        return exposure(curves=dict(ctx.curves, **keep), spot=ctx.spot)
+
+    def agree(row, plus, minus, width, what):
+        total, partial = (_central(reprice(r, **plus), reprice(r, **minus), width) for r in (True, False))
+        for k in KEYS:
+            assert abs(row["recalibrated"][k] - total[k]) <= max(0.01 * abs(total[k]), 1.0), (what, k)
+            gap = total[k] - partial[k]  # lo que aporta la recalibración: es lo que delataría un jacobiano mal escalado
+            assert abs(row["recalibrated"][k] - row[k] - gap) <= max(0.02 * abs(gap), 0.05), (what, k, gap)
+        return total
+
+    gaps = []
+    for curve in body["curves"][:2]:                  # TIIE-F y SOFR: el pilar de mayor sensibilidad total; ± 0.1 pb
+        rows = curve["pillars"]
+        i = max(range(len(rows)), key=lambda j: abs(rows[j]["recalibrated"]["total"]))
+        shift = lambda s: {"curve": curve["curve"], "pillar_shifts_bp": [s * 0.1 * (j == i) for j in range(len(rows))]}  # noqa: E731
+        agree(rows[i], shift(1), shift(-1), 0.2, (curve["curve"], i))
+        gaps.append(abs(rows[i]["recalibrated"]["cva"] - rows[i]["cva"]))
+    total = agree(body["fx"], {"spot_pct": 0.05}, {"spot_pct": -0.05}, 0.1, "spot")  # por 1 % del spot
+    gaps.append(abs(body["fx"]["recalibrated"]["cva"] - body["fx"]["cva"]))
+    assert all(g > 1.0 for g in gaps) and total["cva"] != 0.0  # la recalibración mueve el resultado: no es vacía
+
+
 # ---------------------------------------------------------------- errores y casos límite
 
 def test_unknown_counterparty_is_404_and_missing_parameters_are_400(client):
@@ -204,6 +250,8 @@ def test_without_the_mxn_usd_curve_it_does_not_appear(app, client):
     body = _sens(client)
     assert [c["curve"] for c in body["curves"]] == ["TIIE-F", "SOFR"]
     assert body["n_inputs"] == 10 + 10 + 1 + 5 + 6 + 6 + 1
+    for row in body["curves"][0]["pillars"] + body["curves"][1]["pillars"] + [body["fx"]]:
+        assert row["recalibrated"] == {k: row[k] for k in KEYS}  # sin MXN-USD no hay nada que recalibrar
 
 
 def test_assumptions_carry_the_same_notes_as_get_xva(app, client):
@@ -222,4 +270,4 @@ def test_assumptions_carry_the_same_notes_as_get_xva(app, client):
     reference = client.get("/api/xva", query_string={"snapshot": SNAP}).get_json()["assumptions"]
     notes = [a for a in reference if "curva MXN-USD" in a or "Spread de fondeo" in a or a.startswith(("Crédito propio", DELTA))]
     assert len(notes) == 4  # las cuatro existen en el caso armado: la prueba no puede pasar vacía
-    assert _sens(client, DELTA)["assumptions"] == reference + [xva_sens.PARTIAL_NOTE]
+    assert _sens(client, DELTA)["assumptions"] == reference + [xva_sens.PARTIAL_NOTE, xva_sens.COST_NOTE]
