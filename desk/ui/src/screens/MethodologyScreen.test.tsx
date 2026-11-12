@@ -370,8 +370,20 @@ describe('MethodologyScreen', () => {
       expect(row).toContain('como máximo 2 hilos');
       expect(row).toContain('decenas de segundos');
       expect(row).toContain('2 × número de insumos');
-      expect(row).toContain('derivadas parciales');
-      expect(row).toContain('no se recalibran');
+      // H25: el costo dice la verdad en los dos sentidos y de qué compilación sale
+      expect(row).toContain('a igual número de hilos');
+      expect(row).toContain('unas 7 a 9 valuaciones');
+      expect(row).toContain('de 15 a 23 veces el tiempo de una valuación');
+      expect(row).toContain('unas 5 veces más barata');
+      expect(row).toContain('la valuación en todos los hilos');
+      expect(row).toContain('compilación de depuración (Debug)');
+      // parcial y total, y los límites que se declaran
+      expect(row).toContain('la total recalibra MXN-USD');
+      expect(row).toContain('signo contrario');
+      expect(row).toContain('En ninguna se recalibran las curvas de crédito');
+      expect(row).toContain('no se informa su error estándar');
+      expect(row).toContain('vegas de Hull-White son mucho más ruidosas que el CVA');
+      expect(row).toContain('volatilidad exactamente cero su sensibilidad sale cero');
       expect(row).toContain('AGPL-3.0');
       expect(row).toContain('QF_WITH_XAD=OFF');
     });
