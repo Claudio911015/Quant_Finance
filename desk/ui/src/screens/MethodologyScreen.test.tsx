@@ -219,6 +219,11 @@ describe('MethodologyScreen', () => {
       expect(riskRow('Residuo')).toContain('Eventos es el componente de cierre');
       expect(riskRow('Residuo')).not.toContain('Por qué no es exactamente cero');
       expect(riskRow('VaR histórico')).toContain('sensibilidades');
+      // H04: convención de cuantil y de déficit esperado
+      expect(riskRow('VaR histórico')).toContain('k-ésima peor pérdida');
+      expect(riskRow('VaR histórico')).toContain('⌈W·(1 − α)⌉');
+      expect(riskRow('Déficit esperado')).toContain('incluida la del propio VaR');
+      expect(riskRow('Déficit esperado')).not.toContain('más allá del VaR');
     });
 
     it('declara la semilla de la historia sintética y el CVA informativo', () => {

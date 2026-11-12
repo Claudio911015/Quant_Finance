@@ -361,11 +361,11 @@ const RISK_ADV_SECTIONS: Section[] = [
       },
       {
         label: 'VaR histórico',
-        text: 'Revaluación por sensibilidades (delta), no revaluación completa: el P&L diario es exposición por cambios históricos. Percentil empírico; escala por raíz del horizonte, como el paramétrico. Ventana de 250 días por omisión, mínimo 60; sin historia suficiente no se calcula.',
+        text: 'Revaluación por sensibilidades (delta), no revaluación completa: el P&L diario es exposición por cambios históricos. Percentil empírico sin interpolar: con W pérdidas diarias de la ventana, el VaR es la k-ésima peor pérdida con k = max(1, ⌈W·(1 − α)⌉) (con W = 60 y α = 95 %, la 3.ª peor); escala por raíz del horizonte, como el paramétrico. El cuantil se calcula en Python, no con la función historicalVaR de C++, que no se usa y toma una pérdida más profunda cuando W·(1 − α) es entero. Ventana de 250 días por omisión, mínimo 60; sin historia suficiente no se calcula.',
       },
       {
         label: 'Déficit esperado',
-        text: 'Promedio de las pérdidas más allá del VaR al mismo nivel; siempre es mayor o igual que el VaR.',
+        text: 'Promedio de las k peores pérdidas, incluida la del propio VaR (la k-ésima), con el mismo k del VaR y la misma escala por raíz del horizonte; no pondera fraccionariamente cuando W·(1 − α) no es entero. Siempre es mayor o igual que el VaR.',
       },
       {
         label: 'Historia de factores',
