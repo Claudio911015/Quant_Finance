@@ -120,18 +120,19 @@ el forward y $y=\ln(K/F(t))$. La volatilidad local de Dupire que calcula \texttt
   \sigma_{\mathrm{loc}}^2(t,K)=\frac{\partial_t w}{1-\dfrac{y}{w}\,\partial_y w+\dfrac14\Bigl(-\dfrac14-\dfrac1w+\dfrac{y^2}{w^2}\Bigr)(\partial_y w)^2+\dfrac12\,\partial_{yy}w}.
 \end{equation}
 \texttt{NoExceptLocalVolSurface} es la misma clase, que donde la varianza local sale negativa devuelve la volatilidad plana $\vol$ en vez
-de lanzar excepción. Calcularla al vuelo en cada nodo de cada trayectoria es lento (según las mediciones del plan del corte, la tabla es unas $15$ veces más rápida
-y evita que un precio con griegas pase de $\approx1$ s a $\approx4$ s), así que el código la \emph{tabula} una vez por precio y la entrega a QuantLib como
+de lanzar excepción. Calcularla al vuelo en cada nodo de cada trayectoria es lento (un Monte Carlo de $20\,000$ trayectorias tarda $\approx0.36$ s con la tabla y $\approx2.3$ s al vuelo,
+unas $6$ veces más, medido en este corte con $161$ strikes; un precio calcula tres, el valor, la delta y la vega), así que el código la \emph{tabula} una vez por precio y la entrega a QuantLib como
 \texttt{FixedLocalVolSurface}:
 \begin{equation}\label{eq:cap15-tabla}
   \begin{aligned}
-  \hat\sigma[k,i]&=\sigma_{\mathrm{loc}}(\tilde t_i,K_k),\qquad K_k=\Spot\,e^{\xi_k\varsigma},\ \ \xi_k=-5+\tfrac{k}{4},\ k=0,\dots,40,\\
+  \hat\sigma[k,i]&=\sigma_{\mathrm{loc}}(\tilde t_i,K_k),\qquad K_k=\Spot\,e^{\xi_k\varsigma},\ \ \xi_k=-5+\tfrac{k}{16},\ k=0,\dots,160,\\
   \tilde t_0&=10^{-3}h,\qquad \tilde t_i=i\,h\ (i\ge1),
   \end{aligned}
 \end{equation}
 con interpolación lineal en strike, extrapolación constante y lineal en el tiempo (QuantLib solo la consulta en los nodos $t_i$ de la
-malla, ver abajo). Las constantes son $41$ strikes (\texttt{LV\_STRIKES}) y $m=10$ pasos (\texttt{STEPS}). La malla de strikes cubre
-$\pm5$ desviaciones $\varsigma$ del spot (con la $\vol$ plana, con el choque de vega incluido). Todo está en
+malla, ver abajo). Las constantes son $161$ strikes (\texttt{LV\_STRIKES}; el paso es $0.0625\,\varsigma$, $\approx1.1\,\%$ del spot a dos años) y $m=10$ pasos
+(\texttt{STEPS}). La malla de strikes cubre $\pm5$ desviaciones $\varsigma$ del spot (con la $\vol$ plana, con el choque de vega incluido). Con $41$ strikes (la tabla del
+primer corte) el paso era $0.25\,\varsigma$ y la interpolación lineal en strike movía el valor hasta $0.5\,\%$ del pago (sección~\ref{sec:cap15-limites}). Todo está en
 \codigo{desk/api/pricing/fx_exotics.py}{_build}; el spot de la malla es el de la petición (el spot chocado en el reprecio de delta).
 
 \begin{diferencia}
@@ -172,13 +173,19 @@ toque la barrera $b$ entre $t_i$ y $t_{i+1}$, si ambos extremos están del mismo
 \end{equation}
 (\citealt{beaglehole1997}; \citealt{glasserman2003}, cap.~6, que es la referencia que cita el comentario del código, y cap.~3 para el
 puente). Si los extremos quedan a lados opuestos de $b$ el producto de logaritmos es negativo y la fórmula da $p_i^{b}>1$: la trayectoria
-cruzó en un nodo. Como $\sigma_i$ es la del nodo izquierdo, en el modelo con sonrisa esto es coherente con la discretización de
+cruzó en un nodo. Si ambos quedan del lado \emph{muerto} (el que el producto excluye) el producto es positivo y la fórmula da $p_i^{b}<1$ aunque la trayectoria
+ya esté tocada: el puente solo describe pasos que empiezan y terminan en el lado vivo. Como $\sigma_i$ es la del nodo izquierdo, en el modelo con sonrisa esto es coherente con la discretización de
 Euler~\eqref{eq:cap15-paso}. Los factores de supervivencia de los pasos son independientes dado el camino, y el valor de una trayectoria es
 \begin{equation}\label{eq:cap15-pi}
-  \psi_{\mathrm{NT}}=\prod_{i=0}^{m-1}\max\bigl\{1-p_i^{H},\,0\bigr\},\qquad
-  \psi_{\mathrm{DNT}}=\prod_{i=0}^{m-1}\max\bigl\{1-p_i^{L}-p_i^{U},\,0\bigr\}.
+  \psi_{\mathrm{NT}}=\mathbf 1_{\mathcal A}\prod_{i=0}^{m-1}\max\bigl\{1-p_i^{H},\,0\bigr\},\qquad
+  \psi_{\mathrm{DNT}}=\mathbf 1_{\mathcal A}\prod_{i=0}^{m-1}\max\bigl\{1-p_i^{L}-p_i^{U},\,0\bigr\},
 \end{equation}
-En el no touch, el valor $\max\{\cdot,0\}$ es $0$ si algún nodo cruzó (la fórmula da $p>1$) y el estimador $\psi$ es la probabilidad condicional de no tocar dados
+donde $\mathcal A$ es el suceso de que \emph{todos} los nodos $X_0,\dots,X_m$, el inicial incluido, estén estrictamente en el lado vivo de cada barrera
+($X_i<H$ si la barrera está arriba del spot, $X_i>H$ si está abajo, $L<X_i<U$ en el corredor). Con el spot inicial vivo el indicador no cambia ningún valor:
+si un nodo posterior está en la barrera o más allá, algún paso une un nodo vivo con uno que no lo es, el producto de logaritmos es $\le0$, $p_i^{b}\ge1$ y el
+factor ya es $0$. Importa cuando el spot inicial está en la barrera o más allá, como el spot chocado del reprecio de delta antes de acotar el choque
+(sección~\ref{sec:cap15-griegas}, hallazgo H23): ahí todos los nodos pueden quedar del lado muerto y sin el indicador la trayectoria sobreviviría con probabilidad positiva
+(sección~\ref{sec:cap15-ej-puente}). En el no touch, $\psi$ es $0$ si algún nodo cruzó y, si no, la probabilidad condicional de no tocar dados
 los nodos: sin sesgo para la barrera continua cuando los nodos tienen su ley exacta, como en el modelo plano. En el double no
 touch, $1-p_i^{L}-p_i^{U}$ es una \emph{cota} de la supervivencia exacta del paso, que vale $1-p_i^{L}-p_i^{U}+P(\text{tocar ambas})$ con
 $P(\text{tocar ambas})\ge0$; la cota subvalúa siempre y se recorta en cero cuando $p_i^{L}+p_i^{U}\ge1$ (corredor estrecho frente a $\sigma_i\sqrt h$),
@@ -190,8 +197,8 @@ aunque la supervivencia exacta sea positiva. La corrección exacta serían las i
 cuyos términos $k=0$ del primer sumando y $k=0$, $k=-1$ del segundo son $1$, $-p_i^{L}$ y $-p_i^{U}$. El código \emph{no} la usa (usa solo esos tres términos, ecuación~\eqref{eq:cap15-pi}); se
 emplea en la sección~\ref{sec:cap15-validacion} como diagnóstico del sesgo. Por lo mismo, el double no touch nunca vale más que cada no touch con las
 mismas barreras trayectoria a trayectoria: con la misma semilla y la misma malla las trayectorias son las mismas y cada factor de
-$\psi_{\mathrm{DNT}}$ es a lo más el de $\psi_{\mathrm{NT}}$. La fórmula está en \codigo{desk/api/pricing/fx_exotics.py}{_mc}, en
-una línea.
+$\psi_{\mathrm{DNT}}$ es a lo más el de $\psi_{\mathrm{NT}}$. La fórmula y el indicador están en \codigo{desk/api/pricing/fx_exotics.py}{_mc}, en
+dos líneas.
 
 \begin{diferencia}
   \emph{Vigilancia continua frente a discreta.} Un Monte Carlo que solo mira los nodos subvalúa la probabilidad de tocar y
@@ -262,10 +269,14 @@ la diferencia entre ellos no se midió aparte (las pruebas del repositorio compa
 Los motores analíticos de barrera binaria no dan griegas (\texttt{delta not provided}, comprobado por el corte) y el Monte Carlo propio
 tampoco; el código reprecia con el mismo método, el mismo modelo y la misma semilla:
 \begin{equation}\label{eq:cap15-griegas}
-  \Delta_X=\frac{\hat\PV(1.01\,\Spot)-\hat\PV(\Spot)}{0.01\,\Spot},\qquad
+  \Delta_X=\frac{\hat\PV(\Spot+h_X)-\hat\PV(\Spot)}{h_X},\quad
+  h_X=\min\Bigl\{0.01\,\Spot,\ \tfrac12\min_{b}\,|\Spot-b|\Bigr\},\quad
   \mathcal V=\hat\PV(\vol+0.01)-\hat\PV(\vol),
 \end{equation}
-en \MXN{} por peso de spot y por punto de volatilidad (no se divide la vega entre $0.01$). El choque de spot cambia solo el valor inicial del
+con $b$ las barreras del producto, en \MXN{} por peso de spot y por punto de volatilidad (no se divide la vega entre $0.01$). El choque de spot es hacia arriba y de $1\,\%$ del spot,
+salvo que la barrera más cercana (arriba o abajo) esté a menos de $2\,\%$: entonces es la mitad de esa distancia, y el spot chocado nunca alcanza ni cruza una barrera (con un
+$1\,\%$ fijo, una barrera a menos de $1\,\%$ arriba del spot lo dejaba del lado muerto y la delta salía con el signo contrario, hallazgo H23). Con la barrera muy cerca el choque
+es pequeño y el cociente tiene más ruido relativo, porque el error de la diferencia se divide entre $h_X$. El choque de spot cambia solo el valor inicial del
 proceso (y el centro de la malla de strikes); las curvas, la volatilidad plana ($\vol(\Spot,T)$ con el $\Spot$ sin chocar) y la superficie no
 cambian, es decir, la delta es a volatilidad fija en strike. El choque de vega suma $0.01$ a la $\vol$ plana, o a \emph{todas} las
 volatilidades de la rejilla antes de calcular Dupire (que cambia también la malla de strikes de la tabla, proporcional a $\varsigma$, y la
@@ -335,8 +346,8 @@ gráfica de los demás pricers; su texto está en la sección «Exóticos de FX�
 en \texttt{\_price}: dos precios a la vez se hacen en serie. Sin él, dos hilos con fechas de valuación distintas se pisaban
 (la prueba lo reproduce antes del candado: resultado $0.0$ y «date before reference date»). La validación de entradas queda fuera del candado.
 
-\paragraph{Tamaño.} El módulo tiene 131 líneas de código (sin blancos, comentarios ni docstrings; criterio de la auditoría del corte) más 9 de
-registro, $140\le180$ del presupuesto del diseño.
+\paragraph{Tamaño.} El módulo tiene 133 líneas de código (sin blancos, comentarios ni docstrings; criterio de la auditoría del corte) más 9 de
+registro, $142\le180$ del presupuesto del diseño.
 
 % -------------------------------------------------------------------------------------------------
 \section{Ejemplo numérico verificable}\label{sec:cap15-ejemplo}
@@ -351,9 +362,9 @@ cifras de Monte Carlo cambian si cambian esas constantes). Salvo que se diga otr
 A $T=91/365$ el factor de descuento \texttt{TIIE-F} es $\DF{d}{T}=\verif{cap15-df-mxn-91}{0.9827210278}$ y el de \texttt{SOFR}
 $\DF{f}{T}=\verif{cap15-df-sofr-91}{0.9904858333}$; la \texttt{ZeroCurve} de QuantLib los reproduce a $10^{-9}$. Las tasas cero de
 la ecuación~\eqref{eq:cap15-cero} son $r_d=\verif{cap15-tasa-mxn-91}{0.069911522}$ y $r_f=\verif{cap15-tasa-sofr-91}{0.038343914}$, y la volatilidad plana
-$\vol(\Spot,T)=\verif{cap15-vol-plana-91}{0.120055181}$ (tolerancia $10^{-9}$). Con sonrisa, a un año ($d=365$), el nodo $k=21$ de la
-tabla~\eqref{eq:cap15-tabla} es $\xi_{21}=\tfrac14$, $K_{21}=18.60\,e^{0.25\varsigma}=19.2147$, y su volatilidad local en $t_5=0.5$ años es
-$\hat\sigma[21,5]=\verif{cap15-vol-local-nodo}{0.131888983}$; el script la compara con la ecuación~\eqref{eq:cap15-dupire} escrita a mano
+$\vol(\Spot,T)=\verif{cap15-vol-plana-91}{0.120055181}$ (tolerancia $10^{-9}$). Con sonrisa, a un año ($d=365$), el nodo $k=84$ de la
+tabla~\eqref{eq:cap15-tabla} es $\xi_{84}=\tfrac14$, $K_{84}=18.60\,e^{0.25\varsigma}=19.2147$, y su volatilidad local en $t_5=0.5$ años es
+$\hat\sigma[84,5]=\verif{cap15-vol-local-nodo}{0.131888983}$; el script la compara con la ecuación~\eqref{eq:cap15-dupire} escrita a mano
 (derivadas por diferencias finitas sobre la superficie bicúbica) y coinciden a $10^{-6}$.
 
 \subsection{Semilla y trayectoria}\label{sec:cap15-ej-semilla}
@@ -369,7 +380,9 @@ devuelve siempre los mismos nodos), $\sigma_i=0.12$ y $h=T/10$. Entre $X_i=18.80
 ecuación~\eqref{eq:cap15-puente} da $p_i^{H}=\verif{cap15-puente-p1}{0.008610059}$ y el código devuelve exactamente $1-p_i^{H}$. Con tres nodos
 $18.60,18.90,19.20$ el valor de la trayectoria es el producto de los dos factores,
 $\psi=\verif{cap15-puente-prod3}{0.932498936}$. Si los extremos quedan a lados opuestos de la barrera ($19.40\to19.60$ con $H=19.5$) la fórmula
-da $p=\verif{cap15-puente-p-cruzado}{1.157781526}>1$ y el código fija el factor en $0$. En el double no touch con corredor $(18.0,18.2)$ y los dos
+da $p=\verif{cap15-puente-p-cruzado}{1.157781526}>1$ y el código fija el factor en $0$. Si los dos nodos están del lado muerto ($18.70\to18.75$ con $H=18.5$ arriba del spot: el spot ya pasó
+la barrera) la fórmula da $p=\verif{cap15-puente-p-muerto}{0.447506728}<1$ y un factor $1-p\approx0.55>0$; el código devuelve $0$ por el indicador $\mathbf 1_{\mathcal A}$
+de la ecuación~\eqref{eq:cap15-pi} (también con un nodo inicial exactamente sobre la barrera, con la barrera abajo y con el corredor). En el double no touch con corredor $(18.0,18.2)$ y los dos
 nodos en $18.1$ (el corredor es más estrecho que $\sigma\sqrt h\approx0.34$), $p^{L}+p^{U}=\verif{cap15-puente-suma-doble}{1.687247770}>1$: la cota se recorta a $0$ aunque
 la supervivencia exacta del paso sea positiva (el sesgo de la sección~\ref{sec:cap15-limites}). Tolerancia $10^{-9}$.
 
@@ -389,26 +402,28 @@ $\mathrm{se}=\verif{cap15-nt-mc-se}{3268.715}$ \MXN{} (tolerancia $10^{-3}$), es
 (tolerancia $10^{-4}$). El double no touch en $(17.5,19.8)$ da $\hat\PV=\verif{cap15-dnt-mc-pv}{390211.873}$ con
 $\mathrm{se}=\verif{cap15-dnt-mc-se}{3097.108}$, $\hat u=\verif{cap15-dnt-mc-prob}{0.397073}$ y $z=\verif{cap15-dnt-mc-z}{0.1100}$.
 
-Con sonrisa (volatilidad local), el no touch superior en $19.5$ da $\hat\PV=\verif{cap15-nt-smile-pv}{527649.879}$, es decir
-$\verif{cap15-nt-smile-dif}{1493.46}$ \MXN{} más que el plano con las mismas normales (tolerancia $10^{-2}$), pero respecto a
-la referencia analítica plana está a $z=\verif{cap15-nt-smile-z}{0.6584}$ errores estándar: con las trayectorias por omisión el efecto de la sonrisa no se
+Con sonrisa (volatilidad local), el no touch superior en $19.5$ da $\hat\PV=\verif{cap15-nt-smile-pv}{527816.374}$, es decir
+$\verif{cap15-nt-smile-dif}{1659.95}$ \MXN{} más que el plano con las mismas normales (tolerancia $10^{-2}$), pero respecto a
+la referencia analítica plana está a $z=\verif{cap15-nt-smile-z}{0.7094}$ errores estándar: con las trayectorias por omisión el efecto de la sonrisa no se
 distingue de cero. Por eso la respuesta no trae un «ajuste por sonrisa» precalculado: la Metodología indica leerlo comparando el valor, con su error estándar, contra la
 referencia analítica plana.
 
 \subsection{Delta y vega}\label{sec:cap15-ej-griegas}
 
-Con el método analítico el no touch superior en $19.5$ tiene, por la ecuación~\eqref{eq:cap15-griegas},
+Con el método analítico el no touch superior en $19.5$ (a $4.8\,\%$ del spot: $h_X=0.01\,\Spot$) tiene, por la ecuación~\eqref{eq:cap15-griegas},
 $\Delta_X=\verif{cap15-nt-delta-an}{-539589.485}$ y $\mathcal V=\verif{cap15-nt-vega-an}{-31312.206}$ \MXN{}
 (tolerancia $10^{-3}$; el script los recalcula a mano con la ecuación~\eqref{eq:cap15-nt-arriba} en $1.01\Spot$ y en $\vol+0.01$). Con
 Monte Carlo (plano) son $\verif{cap15-nt-delta-mc}{-540331.75}$ y $\verif{cap15-nt-vega-mc}{-31742.10}$ (tolerancia $10^{-2}$): la
 diferencia con las analíticas es de $0.14\,\%$ y $1.4\,\%$. Ambas son negativas: quien compra un no touch superior pierde valor si sube el spot
 o la volatilidad.
 
-\emph{Delta con la barrera cerca del spot.} Con la barrera superior en $18.62$, a $0.1\,\%$ del spot, el spot chocado ($18.786$) ya está
-del lado muerto. El método analítico, que devuelve cero con el spot sobre la barrera, da $\Delta_X=\verif{cap15-delta-cerca-an}{-66483.61}$; la delta
+\emph{Delta con la barrera cerca del spot.} Con la barrera superior en $18.62$, a $0.1\,\%$ del spot, el choque es $h_X=\min\{0.186,\ \tfrac12\cdot0.02\}=0.01$ y el spot
+chocado ($18.61$) queda del lado vivo. El método analítico da $\Delta_X=\verif{cap15-delta-cerca-an}{-618997.17}$ con ese choque; la delta
 verdadera (diferencia central de la forma cerrada con paso $10^{-4}\Spot$) es $\verif{cap15-delta-cerca-real}{-619678.96}$ y el Monte Carlo
-da $\verif{cap15-delta-cerca-mc}{631697.97}$, con \emph{signo contrario}: con los dos extremos de cada paso del lado muerto, la
-ecuación~\eqref{eq:cap15-puente} da $p<1$ y la supervivencia sale positiva en vez de cero (hallazgo H23 de \texttt{HALLAZGOS.md}).
+da $\verif{cap15-delta-cerca-mc}{-627955.44}$, con el mismo signo. Con la barrera a $0.1\,\%$, $0.5\,\%$ y $2\,\%$ del spot, arriba y abajo, el Monte Carlo difiere de la forma
+cerrada con el mismo choque en a lo más $\verif{cap15-delta-cerca-dif-max}{1.66}\,\%$ (tolerancia $10^{-2}$). Antes de acotar el choque, con $1\,\%$ fijo
+($18.786$, ya del lado muerto) el Monte Carlo daba $+631\,697.97$ y el analítico $-66\,483.61$ (hallazgo H23): la delta del Monte Carlo salía con el signo
+contrario porque con los dos extremos de cada paso del lado muerto la ecuación~\eqref{eq:cap15-puente} da $p<1$ y la supervivencia salía positiva en vez de cero.
 
 \subsection{Malla e identidades}\label{sec:cap15-ej-malla}
 
@@ -441,6 +456,9 @@ $\le0.327\,\%$. Además:
 \codigo{desk/api/tests/test_price_fx_exotics.py}{test_sell_is_minus_buy_and_runs_are_reproducible},
 \codigo{desk/api/tests/test_price_fx_exotics.py}{test_delta_and_vega_are_bumped_repricings} (las definiciones de la ecuación~\eqref{eq:cap15-griegas}),
 \codigo{desk/api/tests/test_price_fx_exotics.py}{test_flat_model_delta_keeps_the_volatility_of_the_unbumped_spot},
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_a_node_on_or_beyond_a_barrier_kills_the_path_even_if_every_node_is_on_the_dead_side} (spot inicial en la barrera o más allá: valor exactamente $0$, con una y con dos barreras, plano y con sonrisa),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_delta_with_a_barrier_near_the_spot_has_the_closed_form_sign_and_size} (barrera a $0.1$, $0.5$ y $2\,\%$ del spot, arriba y abajo, y corredores estrechos: signo de la forma cerrada y diferencia $\le\max\{10\,\%,3\,\mathrm{se}/h_X\}$),
+\codigo{desk/api/tests/test_price_fx_exotics.py}{test_delta_bump_is_up_and_the_smaller_of_one_percent_and_half_the_distance_to_the_nearest_barrier} (el choque $h_X$ de la ecuación~\eqref{eq:cap15-griegas}),
 \codigo{desk/api/tests/test_price_fx_exotics.py}{test_prices_at_once_with_different_valuation_dates_equal_the_serial_ones} (el candado),
 \codigo{desk/api/tests/test_price_fx_exotics.py}{test_corridor_where_the_analytic_series_fails_is_still_priced_by_mc},
 \codigo{desk/api/tests/test_price_fx_exotics.py}{test_analytic_method_where_the_series_fails_is_a_400_in_spanish},
@@ -515,18 +533,18 @@ $-0.9\,\%$ con $1,2,3,5,10$ y $50$ pasos; en un corredor de $1.5\,\varsigma$, $-
     \item \emph{Reprecio de las vainillas de la superficie con sonrisa.} El modelo con sonrisa no reprecia las vainillas de su propia superficie. En la
           tabla~\ref{tab:cap15-vainillas} se da la volatilidad implícita del Monte Carlo menos la de la superficie, en puntos de volatilidad, con
           variable de control $E[X_T]=X(T)$ y $200\,000$ trayectorias (error de $\approx0.02$), para strikes a $m\,\varsigma$ del forward. A $91$ días el
-          sesgo es $\le0.13$ puntos, a un año llega a $-0.65$ en el ala superior (ATM $-0.24$) y a dos años a $-0.47$ (ATM $-0.39$). El corte midió con otra
-          corrida $-0.06$ ATM a $91$ días, $-0.25$ a un año y $-0.40$ a dos, y $-0.22$ ATM a un año con $20$ pasos (que sube el tiempo de respuesta de
-          $0.98$ s a $1.56$--$1.59$ s, por encima del objetivo de $1.5$ s). Con $40$ pasos la ATM a un año baja a $-0.17$: más pasos no lo resuelve. La auditoría
+          sesgo es $\le0.13$ puntos, a un año llega a $-0.60$ en el ala superior (ATM $-0.22$) y a dos años a $-0.58$ (ATM $-0.50$). Con $20$ pasos la ATM a un año es $-0.18$ y con
+          $40$ pasos $-0.15$: más pasos no lo resuelve, y el tiempo de respuesta sin gráfica pasa de $\approx1.1$ s a $\approx1.7$ s y $\approx3.2$ s (objetivo $1.5$ s). Las cifras son las de la tabla de $161$ strikes; con
+          los $41$ de la primera versión la ATM era $-0.03$, $-0.24$ y $-0.39$ a $91$ días, un año y dos años: la tabla más fina mueve las cifras hasta $0.11$ puntos, pero no elimina el sesgo. La auditoría
           mostró que el mismo sesgo aparece con Dupire al vuelo y $50$ pasos, es decir, viene de Dupire sobre la superficie bicúbica con extrapolación constante y
           no de la tabla. El efecto sobre el precio de los exóticos no se midió aparte.
-    \item \emph{Tabla de volatilidad local frente al cálculo al vuelo.} Tabular Dupire en $41$ strikes ($\approx15\times$ más rápido) cambia el valor porque
-          interpola linealmente en strike. Diferencia pareada con las mismas normales, en \% del pago (tabla $-$ al vuelo, $40\,000$ trayectorias):
-          no touch superior en $19.5$ a $91$ días $\verif{cap15-tabla-nt91-41}{-0.018}$; no touch superior en $22.0$ a dos años
-          $\verif{cap15-tabla-nt730-41}{-0.314}$; double no touch en $(15.5,23)$ a dos años $\verif{cap15-tabla-dnt730-41}{-0.515}$. Con $161$ strikes bajan a
-          $\verif{cap15-tabla-nt730-161}{-0.003}$ y $\verif{cap15-tabla-dnt730-161}{0.030}$ (tolerancia $0.0011$): la causa es la interpolación
-          (a dos años el paso de $0.25\varsigma$ es $4.6\,\%$ del spot). La auditoría midió $-0.01$ a $-0.33\,\%$ entre $91$ días y dos años. La Metodología
-          declara «del orden de $0.3$--$0.8\,\%$ del pago» (hallazgo H24): solo vale a dos años.
+    \item \emph{Tabla de volatilidad local frente al cálculo al vuelo.} Tabular Dupire interpola linealmente en strike, así que el valor no coincide con el del Dupire de QuantLib
+          calculado al vuelo. La tabla~\ref{tab:cap15-tabla} da la diferencia pareada con las mismas normales, en \% del pago (tabla $-$ al vuelo, $40\,000$ trayectorias).
+          Con los $161$ strikes del código es de a lo más $0.03\,\%$ del pago a $91$ días, un año y dos años, del orden del ruido de la comparación pareada; con los $41$ de la
+          primera versión llegaba a $-0.31\,\%$ (no touch) y $-0.51\,\%$ (double) a dos años y a $0.32\,\%$ (double) a un año. La causa es la interpolación: a dos años el paso de $0.25\varsigma$
+          era $4.6\,\%$ del spot y el de $0.0625\varsigma$ es $1.1\,\%$. La Metodología declaraba «del orden de $0.3$--$0.8\,\%$ del pago» (hallazgo H24), cifra que solo valía a dos
+          años con $41$ strikes; ahora declara la medida con $161$. Pasar de $41$ a $161$ strikes añade $\approx0.05$ s a un precio sin gráfica (medianas de cinco corridas: $0.96$--$1.05$ s con $41$ y $1.02$--$1.09$ s con $161$, bajo el objetivo de $1.5$ s;
+          la petición completa, con gráfica, pasa de $\approx1.7$--$1.8$ s a $\approx1.9$--$2.0$ s).
     \item \emph{Corredores estrechos.} El double no touch usa $10$ pasos y una cota de primer orden por paso (ecuación~\eqref{eq:cap15-pi}), que subvalúa siempre.
           La tabla~\ref{tab:cap15-estrecho} muestra que el sesgo relativo es sensible con $W<0.8$, pero el valor ya es $<0.06\,\%$ del pago; con corredores
           de $W\ge1$ no se distingue del ruido. Más pasos lo reducen a costa de tiempo.
@@ -536,9 +554,10 @@ $-0.9\,\%$ con $1,2,3,5,10$ y $50$ pasos; en un corredor de $1.5\,\varsigma$, $-
           paso $0.5\varsigma$ con el corredor centrado en el spot, es $W=\ln(U/L)/\varsigma\approx\verif{cap15-ancho-falla-91}{55.0}$ a $91$ días (primer ancho que
           falla), $\verif{cap15-ancho-falla-1}{59.0}$ a un día y $\verif{cap15-ancho-falla-730}{50.0}$ a dos años: por ejemplo $(10,40)$ a $7$ días o $(1,100)$ a $91$ días.
           La serie de imágenes~\eqref{eq:cap15-dnt-serie} converge con esos corredores; el límite es de la suma de QuantLib.
-    \item \emph{Delta con la barrera cerca del spot.} El spot chocado no se revalida: con la barrera a menos de $1\,\%$ del spot (hacia el lado vivo) el reprecio
-          cae del lado muerto, el Monte Carlo da supervivencia positiva y la delta puede salir con el signo contrario (sección~\ref{sec:cap15-ej-griegas}, hallazgo H23). La
-          delta es además a volatilidad fija en strike.
+    \item \emph{Delta con la barrera cerca del spot.} El choque de spot es hacia arriba y se acota a la mitad de la distancia a la barrera más cercana (ecuación~\eqref{eq:cap15-griegas}), de modo que
+          el reprecio nunca cruza una barrera (hallazgo H23, sección~\ref{sec:cap15-ej-griegas}). Con la barrera a menos de $2\,\%$ del spot la delta es entonces una diferencia sobre un paso
+          pequeño (a $0.1\,\%$, un choque de $0.05\,\%$ del spot) y su ruido relativo crece como $1/h_X$; la prueba del repositorio exige que quede a menos de $\max\{10\,\%,3\,\mathrm{se}/h_X\}$ de la forma cerrada con
+          el mismo choque, y con una barrera a $0.1$, $0.5$ y $2\,\%$ del spot la diferencia medida es de a lo más $1.7\,\%$ (sección~\ref{sec:cap15-ej-griegas}). La delta es además a volatilidad fija en strike.
     \item \emph{Referencia analítica.} Usa tasas cero constantes a $T$ y volatilidad plana, mientras el Monte Carlo usa las tasas forward de la curva; con curvas
           no planas son dos modelos distintos. \texttt{analytic\_flat\_pv} es siempre plana, aun cuando el modelo pedido sea con sonrisa.
     \item \emph{Candado.} Por la fecha de valuación global de QuantLib, \codigo{desk/api/pricing/fx_exotics.py}{_LOCK} serializa los precios de exóticos en el
@@ -555,13 +574,30 @@ $-0.9\,\%$ con $1,2,3,5,10$ y $50$ pasos; en un corredor de $1.5\,\varsigma$, $-
 \toprule
 Plazo y pasos & $-1\varsigma$ & $-\tfrac12\varsigma$ & ATM fwd & $+\tfrac12\varsigma$ & $+1\varsigma$ \\
 \midrule
-91 días, $m=10$ & \verif{cap15-vain-91-10-km1}{-0.04} & \verif{cap15-vain-91-10-km05}{-0.02} & \verif{cap15-vain-91-10-k0}{-0.03} & \verif{cap15-vain-91-10-kp05}{-0.06} & \verif{cap15-vain-91-10-kp1}{-0.13} \\
-1 año, $m=10$ & \verif{cap15-vain-365-10-km1}{-0.30} & \verif{cap15-vain-365-10-km05}{-0.16} & \verif{cap15-vain-365-10-k0}{-0.24} & \verif{cap15-vain-365-10-kp05}{-0.65} & \verif{cap15-vain-365-10-kp1}{-0.49} \\
-1 año, $m=40$ & \verif{cap15-vain-365-40-km1}{-0.24} & \verif{cap15-vain-365-40-km05}{-0.12} & \verif{cap15-vain-365-40-k0}{-0.17} & \verif{cap15-vain-365-40-kp05}{-0.53} & \verif{cap15-vain-365-40-kp1}{-0.38} \\
-2 años, $m=10$ & \verif{cap15-vain-730-10-km1}{-0.30} & \verif{cap15-vain-730-10-km05}{-0.17} & \verif{cap15-vain-730-10-k0}{-0.39} & \verif{cap15-vain-730-10-kp05}{-0.47} & \verif{cap15-vain-730-10-kp1}{-0.32} \\
+91 días, $m=10$ & \verif{cap15-vain-91-10-km1}{-0.04} & \verif{cap15-vain-91-10-km05}{-0.03} & \verif{cap15-vain-91-10-k0}{-0.04} & \verif{cap15-vain-91-10-kp05}{-0.07} & \verif{cap15-vain-91-10-kp1}{-0.13} \\
+1 año, $m=10$ & \verif{cap15-vain-365-10-km1}{-0.26} & \verif{cap15-vain-365-10-km05}{-0.14} & \verif{cap15-vain-365-10-k0}{-0.22} & \verif{cap15-vain-365-10-kp05}{-0.60} & \verif{cap15-vain-365-10-kp1}{-0.44} \\
+1 año, $m=20$ & \verif{cap15-vain-365-20-km1}{-0.23} & \verif{cap15-vain-365-20-km05}{-0.12} & \verif{cap15-vain-365-20-k0}{-0.18} & \verif{cap15-vain-365-20-kp05}{-0.55} & \verif{cap15-vain-365-20-kp1}{-0.40} \\
+1 año, $m=40$ & \verif{cap15-vain-365-40-km1}{-0.20} & \verif{cap15-vain-365-40-km05}{-0.10} & \verif{cap15-vain-365-40-k0}{-0.15} & \verif{cap15-vain-365-40-kp05}{-0.48} & \verif{cap15-vain-365-40-kp1}{-0.33} \\
+2 años, $m=10$ & \verif{cap15-vain-730-10-km1}{-0.33} & \verif{cap15-vain-730-10-km05}{-0.24} & \verif{cap15-vain-730-10-k0}{-0.50} & \verif{cap15-vain-730-10-kp05}{-0.58} & \verif{cap15-vain-730-10-kp1}{-0.41} \\
 \bottomrule
 \end{tabular}
 \caption{Volatilidad implícita del Monte Carlo con sonrisa menos la de la superficie, en puntos de volatilidad (tolerancia $0.011$; ruido de Monte Carlo $\approx0.02$). Columnas: strike $=X(T)\,e^{m\varsigma}$ con $m=-1,-\tfrac12,0,+\tfrac12,+1$.}\label{tab:cap15-vainillas}
+\end{table}
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{No touch superior} & \multicolumn{2}{c}{Double no touch} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Plazo (barrera; corredor) & $41$ strikes & $161$ strikes & $41$ strikes & $161$ strikes \\
+\midrule
+91 días ($19.5$; $(17.5,19.8)$) & \verif{cap15-tabla-nt91-41}{-0.018} & \verif{cap15-tabla-nt91-161}{-0.001} & \verif{cap15-tabla-dnt91-41}{-0.039} & \verif{cap15-tabla-dnt91-161}{-0.002} \\
+1 año ($20.5$; $(16,22)$) & \verif{cap15-tabla-nt365-41}{-0.018} & \verif{cap15-tabla-nt365-161}{-0.011} & \verif{cap15-tabla-dnt365-41}{0.315} & \verif{cap15-tabla-dnt365-161}{0.029} \\
+2 años ($22$; $(15.5,23)$) & \verif{cap15-tabla-nt730-41}{-0.314} & \verif{cap15-tabla-nt730-161}{-0.003} & \verif{cap15-tabla-dnt730-41}{-0.515} & \verif{cap15-tabla-dnt730-161}{0.030} \\
+\bottomrule
+\end{tabular}
+\caption{Valor con la tabla de volatilidad local menos el valor con el Dupire de QuantLib al vuelo (modelo con sonrisa, mismas normales, $40\,000$ trayectorias), en \% del pago (tolerancia $0.0011$).}\label{tab:cap15-tabla}
 \end{table}
 
 % -------------------------------------------------------------------------------------------------

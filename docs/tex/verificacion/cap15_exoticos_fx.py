@@ -114,11 +114,13 @@ def dupire(t, K):
     return math.sqrt(dwdt / den)
 
 
-T365, nodo = 1.0, 5  # nodo de tiempo t = 5 T / 10 = 0.5 años; fila 21 de la tabla = X0 exp(0.25 sigma sqrt(T))
-K21, t5 = ks365[21], T365 * nodo / fe.STEPS
-assert abs(K21 - X0 * math.exp(np.linspace(-5, 5, fe.LV_STRIKES)[21] * sigma365 * math.sqrt(T365))) < 1e-12
-assert abs(tab365[21, nodo] - dupire(t5, K21)) < 1e-6
-comun.comprobar("cap15-vol-local-nodo", tab365[21, nodo], 1e-9)
+assert fe.LV_STRIKES == 161  # xi_k = -5 + k / 16
+T365, nodo, k84 = 1.0, 5, 84  # nodo de tiempo t = 5 T / 10 = 0.5 años; fila 84 de la tabla = X0 exp(0.25 sigma sqrt(T))
+K84, t5 = ks365[k84], T365 * nodo / fe.STEPS
+assert abs(K84 - X0 * math.exp(0.25 * sigma365 * math.sqrt(T365))) < 1e-12
+assert abs(K84 - X0 * math.exp(np.linspace(-5, 5, fe.LV_STRIKES)[k84] * sigma365 * math.sqrt(T365))) < 1e-12
+assert abs(tab365[k84, nodo] - dupire(t5, K84)) < 1e-6
+comun.comprobar("cap15-vol-local-nodo", tab365[k84, nodo], 1e-9)
 
 # --- números aleatorios y avance de la trayectoria: GaussianPathGenerator reproducido a mano con las mismas normales ---
 u0 = ql.UniformRandomGenerator(fe.SEED).next().value()
@@ -213,7 +215,8 @@ class Camino:
 
 
 def supervivencia(nodos, barreras, sig, dt):
-    """_mc del módulo sobre `nodos` con volatilidad plana `sig` y paso `dt`; devuelve el valor de la trayectoria."""
+    """_mc del módulo sobre `nodos` con volatilidad plana `sig` y paso `dt`; devuelve el valor de la trayectoria.
+    `barreras` son pares (nivel, +1 si queda arriba del spot)."""
     real = fe.ql
     fe.ql = types.SimpleNamespace(
         GaussianRandomSequenceGenerator=real.GaussianRandomSequenceGenerator,
@@ -229,19 +232,25 @@ def supervivencia(nodos, barreras, sig, dt):
 dt = T91 / 10
 cruce = lambda a, b, H, sig: math.exp(-2 * math.log(a / H) * math.log(b / H) / (sig ** 2 * dt))
 p1 = cruce(18.80, 19.05, 19.5, 0.12)
-assert abs(supervivencia([18.80, 19.05], [19.5], 0.12, dt) - (1 - p1)) < 1e-12
+assert abs(supervivencia([18.80, 19.05], [(19.5, 1)], 0.12, dt) - (1 - p1)) < 1e-12
 comun.comprobar("cap15-puente-p1", p1, 1e-9)
 n3 = [18.60, 18.90, 19.20]
 prod = (1 - cruce(18.60, 18.90, 19.5, 0.12)) * (1 - cruce(18.90, 19.20, 19.5, 0.12))
-assert abs(supervivencia(n3, [19.5], 0.12, dt) - prod) < 1e-12
+assert abs(supervivencia(n3, [(19.5, 1)], 0.12, dt) - prod) < 1e-12
 comun.comprobar("cap15-puente-prod3", prod, 1e-9)
 pc = cruce(19.40, 19.60, 19.5, 0.12)  # nodos a lados opuestos: la fórmula da > 1 y el código fija el factor en 0
-assert pc > 1 and supervivencia([19.40, 19.60], [19.5], 0.12, dt) == 0.0
+assert pc > 1 and supervivencia([19.40, 19.60], [(19.5, 1)], 0.12, dt) == 0.0
 comun.comprobar("cap15-puente-p-cruzado", pc, 1e-9)
 suma = cruce(18.1, 18.1, 18.0, 0.12) + cruce(18.1, 18.1, 18.2, 0.12)  # corredor (18.0, 18.2): 1 - pL - pU < 0
-assert suma > 1 and supervivencia([18.1, 18.1], [18.0, 18.2], 0.12, dt) == 0.0
+assert suma > 1 and supervivencia([18.1, 18.1], [(18.0, -1), (18.2, 1)], 0.12, dt) == 0.0
 comun.comprobar("cap15-puente-suma-doble", suma, 1e-9)
-dos = supervivencia([18.1, 18.15, 18.1], [18.0, 18.2], 0.12, dt)
+muerto = cruce(18.70, 18.75, 18.5, 0.12)  # barrera 18.5 arriba del spot, pero los nodos ya están todos del lado muerto
+assert 0 < muerto < 1 and supervivencia([18.70, 18.75], [(18.5, 1)], 0.12, dt) == 0.0
+comun.comprobar("cap15-puente-p-muerto", muerto, 1e-9)
+assert supervivencia([18.5, 18.4], [(18.5, 1)], 0.12, dt) == 0.0  # nodo inicial sobre la barrera
+assert supervivencia([18.40, 18.45], [(18.5, -1)], 0.12, dt) == 0.0  # barrera inferior, nodos todos por debajo
+assert supervivencia([18.60, 18.65], [(18.0, -1), (18.5, 1)], 0.12, dt) == 0.0  # corredor (18.0, 18.5), nodos por encima
+dos = supervivencia([18.1, 18.15, 18.1], [(18.0, -1), (18.2, 1)], 0.12, dt)
 mano = 1.0
 for a, b in ((18.1, 18.15), (18.15, 18.1)):
     mano *= max(1 - cruce(a, b, 18.0, 0.12) - cruce(a, b, 18.2, 0.12), 0.0)
@@ -281,25 +290,46 @@ assert abs(ra["risk"]["delta"] - d_mano) < 1e-6 and abs(ra["risk"]["vega"] - v_m
 comun.comprobar("cap15-nt-delta-an", ra["risk"]["delta"], 1e-3)
 comun.comprobar("cap15-nt-vega-an", ra["risk"]["vega"], 1e-3)
 
-# --- delta con la barrera a menos de 1 % del spot: el spot chocado ya pasó la barrera ---
+# --- delta con la barrera a menos de 2 % del spot: el choque es min(1 % del spot, mitad de la distancia a la barrera) ---
+
+
+def delta_real(H, arriba, h=1e-4 * X0):
+    """Diferencia central de la forma cerrada con paso 1e-4 del spot."""
+    V = lambda S: 1e6 * df_d * no_toca(S, H, T91, rd, rf, sigma, arriba)
+    return (V(X0 + h) - V(X0 - h)) / (2 * h)
+
+
 pc_ = validar(NT, barrier=18.62, barrier_type="up")
-h = 1e-4 * X0
-real = (1e6 * df_d * (no_toca(X0 + h, 18.62, T91, rd, rf, sigma, True) - no_toca(X0 - h, 18.62, T91, rd, rf, sigma, True)) / (2 * h))
+choque = min(0.01 * X0, 0.5 * abs(X0 - 18.62))  # 0.01: la barrera está a 0.02 del spot
+assert abs(choque - 0.01) < 1e-12
 mc_ = fe._result(pc_, mkt)["risk"]["delta"]
 an_ = fe._result(dict(pc_, method="analytic"), mkt)["risk"]["delta"]
-assert mc_ > 0 > an_ and real < 0
+real = delta_real(18.62, True)
+assert mc_ < 0 and an_ < 0 and real < 0
 comun.comprobar("cap15-delta-cerca-mc", mc_, 1e-2)
 comun.comprobar("cap15-delta-cerca-an", an_, 1e-2)
 comun.comprobar("cap15-delta-cerca-real", real, 1e-2)
+dif_max = 0.0  # la barrera a 0.1 %, 0.5 % y 2 % del spot, arriba y abajo: Monte Carlo contra la forma cerrada con el mismo choque
+for pct in (0.001, 0.005, 0.02):
+    for tipo, signo in (("up", 1), ("down", -1)):
+        H = round(X0 * (1 + signo * pct), 6)
+        pn = validar(NT, barrier=H, barrier_type=tipo)
+        m, a = (fe._result(q, mkt) for q in (pn, dict(pn, method="analytic")))
+        d_mc, d_an = m["risk"]["delta"], a["risk"]["delta"]
+        h_ = min(0.01 * X0, 0.5 * abs(X0 - H))
+        assert d_mc * d_an > 0 and d_mc * delta_real(H, tipo == "up") > 0
+        assert abs(d_mc - d_an) <= max(0.10 * abs(d_an), 3 * m["details"]["std_error"] / h_)
+        dif_max = max(dif_max, 100 * abs(d_mc - d_an) / abs(d_an))
+comun.comprobar("cap15-delta-cerca-dif-max", dif_max, 1e-2)
 
 # --- malla de tiempo e identidades (mismas trayectorias normales) ---
 p30 = validar(NT, days=30, barrier=18.9, barrier_type="up")
 dom30, proc30, sig30, *_ = fe._build(p30, mkt, X0, 0.0)
 T30 = 30 / 365.0
-u10, se10 = fe._mc(proc30, sig30, None, None, [18.9], T30, fe.PATHS)
+u10, se10 = fe._mc(proc30, sig30, None, None, [(18.9, 1)], T30, fe.PATHS)
 fe.STEPS = 40
 try:
-    u40, se40 = fe._mc(proc30, sig30, None, None, [18.9], T30, fe.PATHS)
+    u40, se40 = fe._mc(proc30, sig30, None, None, [(18.9, 1)], T30, fe.PATHS)
 finally:
     fe.STEPS = 10
 assert abs(u10 - u40) <= 3 * math.hypot(se10, se40)
@@ -309,9 +339,9 @@ comun.comprobar("cap15-malla-dif-se", (u10 - u40) / math.hypot(se10, se40), 1e-4
 pdw, pup, pdn2 = (validar(NT, barrier=17.5, barrier_type="down"), validar(NT, barrier=19.8, barrier_type="up"),
                   validar(DNT, lower=17.5, upper=19.8))
 dom_, proc_, sig_, *_ = fe._build(pdn2, mkt, X0, 0.0)
-u_dw = fe._mc(proc_, sig_, None, None, [17.5], T91, fe.PATHS)[0]
-u_up = fe._mc(proc_, sig_, None, None, [19.8], T91, fe.PATHS)[0]
-u_dn = fe._mc(proc_, sig_, None, None, [17.5, 19.8], T91, fe.PATHS)[0]
+u_dw = fe._mc(proc_, sig_, None, None, [(17.5, -1)], T91, fe.PATHS)[0]
+u_up = fe._mc(proc_, sig_, None, None, [(19.8, 1)], T91, fe.PATHS)[0]
+u_dn = fe._mc(proc_, sig_, None, None, [(17.5, -1), (19.8, 1)], T91, fe.PATHS)[0]
 assert u_dn <= min(u_dw, u_up)
 comun.comprobar("cap15-id-abajo", u_dw, 1e-6)
 comun.comprobar("cap15-id-arriba", u_up, 1e-6)
@@ -351,7 +381,7 @@ for pasos in (5, 10):
         X = trayectorias(procc, T91, pasos, NN)
         for W, cod in ((0.6, "06"), (0.7, "07"), (0.8, "08"), (1.0, "10")):
             L, U = X0 * math.exp(-W * sT / 2), X0 * math.exp(W * sT / 2)
-            u_cod = fe._mc(procc, sigc, None, None, [L, U], T91, NN)[0]
+            u_cod = fe._mc(procc, sigc, None, None, [(L, -1), (U, 1)], T91, NN)[0]
             u_ex = puente_exacto(X, L, U, sigc ** 2 * T91 / pasos).mean()
             if pasos == 10:
                 u_an = fe._analytic(dict(pdnc, lower=L, upper=U), procc) / dom.discount(T91)
@@ -390,7 +420,7 @@ def iter_caminos(proc, T, pasos, n):
     return (pg.next() for _ in range(n))
 
 
-for dias, pasos in ((91, 10), (365, 10), (730, 10), (365, 40)):
+for dias, pasos in ((91, 10), (365, 10), (730, 10), (365, 20), (365, 40)):
     for (m, dif), cod in zip(sesgo_vainillas(dias, pasos), ("km1", "km05", "k0", "kp05", "kp1")):
         comun.comprobar("cap15-vain-%d-%d-%s" % (dias, pasos, cod), dif, 0.011)
 
@@ -401,7 +431,7 @@ def diferencia_tabla_vuelo(nombre, dias, n=40000, **kw):
     """Valor (por unidad de pago) con la tabla menos el valor con el Dupire al vuelo, para 41 y 161 strikes."""
     T = dias / 365.0
     p = validar(nombre, days=dias, model="smile", **kw)
-    barreras = [p[f] for f, *_ in fe._sides(p)]
+    barreras = [(p[f], lado) for f, lado, _ in fe._sides(p)]
     dm, pr, sg, ks, tab = fe._build(p, mkt, X0, 0.0)
     lv = ql.NoExceptLocalVolSurface(pr.blackVolatility(), pr.riskFreeRate(), pr.dividendYield(), pr.stateVariable(), sg)
     pr2 = ql.GeneralizedBlackScholesProcess(pr.stateVariable(), pr.dividendYield(), pr.riskFreeRate(), pr.blackVolatility(),
@@ -411,29 +441,30 @@ def diferencia_tabla_vuelo(nombre, dias, n=40000, **kw):
     tiempos[0] = 1e-3 * T / fe.STEPS
     sig = np.array([[lv.localVol(tiempos[i], X[j, i], True) for i in range(fe.STEPS)] for j in range(n)])
     surv = 1.0
-    for b in barreras:
+    for b, _ in barreras:
         lb = np.log(X / b)
         surv = surv - np.exp(-2 * lb[:, :-1] * lb[:, 1:] / (sig ** 2 * T / fe.STEPS))
     v_vuelo = np.maximum(surv, 0).prod(axis=1).mean()
-    out = []
+    out, vigente = [], fe.LV_STRIKES
     for k in (41, 161):
         fe.LV_STRIKES = k
         try:
             _, pr3, sg3, ks3, tab3 = fe._build(p, mkt, X0, 0.0)
             out.append(100 * (fe._mc(pr3, sg3, ks3, tab3, barreras, T, n)[0] - v_vuelo))
         finally:
-            fe.LV_STRIKES = 41
+            fe.LV_STRIKES = vigente
     return out
 
 
-d41, d161 = diferencia_tabla_vuelo(NT, 91, barrier=19.5, barrier_type="up")
-comun.comprobar("cap15-tabla-nt91-41", d41, 0.0011)
-d41, d161 = diferencia_tabla_vuelo(NT, 730, barrier=22.0, barrier_type="up")
-comun.comprobar("cap15-tabla-nt730-41", d41, 0.0011)
-comun.comprobar("cap15-tabla-nt730-161", d161, 0.0011)
-d41, d161 = diferencia_tabla_vuelo(DNT, 730, lower=15.5, upper=23.0)
-comun.comprobar("cap15-tabla-dnt730-41", d41, 0.0011)
-comun.comprobar("cap15-tabla-dnt730-161", d161, 0.0011)
+for cod, nombre, dias, kw in (("nt91", NT, 91, dict(barrier=19.5, barrier_type="up")),
+                              ("nt365", NT, 365, dict(barrier=20.5, barrier_type="up")),
+                              ("nt730", NT, 730, dict(barrier=22.0, barrier_type="up")),
+                              ("dnt91", DNT, 91, dict(lower=17.5, upper=19.8)),
+                              ("dnt365", DNT, 365, dict(lower=16.0, upper=22.0)),
+                              ("dnt730", DNT, 730, dict(lower=15.5, upper=23.0))):
+    d41, d161 = diferencia_tabla_vuelo(nombre, dias, **kw)
+    comun.comprobar("cap15-tabla-%s-41" % cod, d41, 0.0011)
+    comun.comprobar("cap15-tabla-%s-161" % cod, d161, 0.0011)
 
 # --- la serie de la fórmula cerrada de QuantLib no converge con corredores de ~50 sigma sqrt(T) o más ---
 

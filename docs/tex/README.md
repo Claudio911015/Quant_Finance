@@ -28,8 +28,8 @@ docs/tex/
 Capítulos: 1 Introducción, arquitectura y convenciones · 2 Curvas · 3 Swaps de tasa OIS · 4 Derivados de FX
 y opción sobre acción · 5 Hull–White · 6 Bonos · 7 Cross currency swap · 8 Ciclo de vida, liquidaciones y
 P&L · 9 Riesgo · 10 Contabilidad de coberturas IFRS 9 · 11 Operaciones: conciliación · 12 Validación contra
-QuantLib · 13 Fuentes de datos y procedencia · 14 XVA y curvas de crédito (marcador) · 15 Exóticos de FX
-(marcador) · Apéndice A: tabla de símbolos. Las etiquetas de capítulo son fijas: `cap:introduccion`,
+QuantLib · 13 Fuentes de datos y procedencia · 14 XVA y curvas de crédito · 15 Exóticos de FX
+· Apéndice A: tabla de símbolos. Las etiquetas de capítulo son fijas: `cap:introduccion`,
 `cap:curvas`, `cap:swaps-ois`, `cap:fx`, `cap:hull-white`, `cap:bonos`, `cap:xccy`, `cap:ciclo-vida`,
 `cap:riesgo`, `cap:coberturas`, `cap:operaciones`, `cap:validacion`, `cap:datos`, `cap:xva`,
 `cap:exoticos-fx` y `ap:simbolos` (apéndice). Un capítulo solo referencia con `\ref` sus propias etiquetas
@@ -155,7 +155,7 @@ Los símbolos sin argumento se usan en modo matemático (`$\Nom$`). Los pies de 
 «Cuadro»); el texto remite con «tabla~\ref{…}» o `\cref`. Entornos: `diferencia` (recuadro «Diferencia
 con la referencia»), `limites` (recuadro «Límites y supuestos») y `aviso` (aviso destacado; título opcional
 `\begin{aviso}[Aviso IFRS 9]`). Ecuaciones con `equation`/`align`, numeradas por capítulo; sin teoremas.
-`\todo[inline]{…}` solo en los capítulos marcador 14 y 15. `\cref`/`\Cref` y `\eqref` están disponibles.
+`\todo[inline]{…}` solo en los capítulos marcador (hoy no queda ninguno). `\cref`/`\Cref` y `\eqref` están disponibles.
 
 ## Bibliografía
 

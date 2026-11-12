@@ -6,9 +6,9 @@ $u$, $\hat u$, $\mathrm{se}$ & probabilidad (neutral al riesgo) de no tocar la b
 $r_d$, $r_f$, $f_c(t)$ & tasas cero continuas de \texttt{TIIE-F} (doméstica) y \texttt{SOFR} (foránea) a $T$, y tasa forward instantánea $-\partial_t\ln\DF{c}{t}$ & tasa anual \\
 $\mu$, $\varsigma$ & deriva $r_d-r_f-\tfrac12\vol^2$ del logaritmo del tipo de cambio y desviación $\vol\sqrt T$ & tasa anual, adimensional \\
 $w(y,t)$, $y$, $\sigma_{\mathrm{loc}}(t,K)$ & varianza total implícita de la superficie bicúbica de QuantLib, log-moneyness a plazo $y=\ln(K/F(t))$ y volatilidad local de Dupire & adimensional, adimensional, $1/\sqrt{\text{año}}$ \\
-$\hat\sigma[k,i]$, $K_k$, $\xi_k$, $\tilde t_i$ & tabla de volatilidad local, strikes $K_k=\Spot e^{\xi_k\varsigma}$ con $\xi_k=-5+k/4$ y tiempos de la tabla & $1/\sqrt{\text{año}}$, \MXN\ por \USD, adimensional, años \\
+$\hat\sigma[k,i]$, $K_k$, $\xi_k$, $\tilde t_i$ & tabla de volatilidad local, strikes $K_k=\Spot e^{\xi_k\varsigma}$ con $\xi_k=-5+k/16$ ($k=0,\dots,160$) y tiempos de la tabla & $1/\sqrt{\text{año}}$, \MXN\ por \USD, adimensional, años \\
 $m$, $h$, $t_i$, $X_i$, $Z_i$ & pasos del Monte Carlo ($m=10$), tamaño $h=T/m$, nodos $t_i=ih$, valor de una trayectoria en $t_i$ y normales estándar & ---, años, años, \MXN\ por \USD, adimensional \\
-$n$, $\psi^{(j)}$ & número de trayectorias ($20\,000$) y valor (probabilidad condicional de no tocar) de la trayectoria $j$ & ---, adimensional \\
+$n$, $\psi^{(j)}$, $\mathcal A$ & número de trayectorias ($20\,000$), valor (probabilidad condicional de no tocar) de la trayectoria $j$ y suceso de que todos sus nodos estén en el lado vivo & ---, adimensional, --- \\
 $p_i^{b}$, $q_i$ & probabilidad de cruzar la barrera $b$ en el paso $i$ por el puente browniano, y supervivencia exacta del paso con dos barreras & adimensional \\
 $W$ & ancho del corredor en desviaciones, $\ln(U/L)/\varsigma$ & adimensional \\
-$\Delta_X$, $\mathcal V$ & delta (\MXN\ por peso de spot, choque de $1\,\%$) y vega (\MXN\ por punto de volatilidad) por reprecio & \MXN\ por \MXN/\USD, \MXN \\
+$\Delta_X$, $h_X$, $\mathcal V$ & delta (\MXN\ por peso de spot), su choque $h_X$ (el menor entre $1\,\%$ del spot y la mitad de la distancia a la barrera más cercana) y vega (\MXN\ por punto de volatilidad) por reprecio & \MXN\ por \MXN/\USD, \MXN\ por \USD, \MXN \\
