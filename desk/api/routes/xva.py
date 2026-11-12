@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from desk.api.db import get_conn
 from desk.api.errors import ApiError
-from desk.api.risk import xva
+from desk.api.risk import xva, xva_sens
 from desk.api.validation import body_object, ensure_finite
 
 bp = Blueprint("xva", __name__)
@@ -21,6 +21,11 @@ def _arg(name: str) -> str:
 @bp.get("/api/xva")
 def xva_get():
     return jsonify(ensure_finite(xva.compute(get_conn(), _arg("snapshot"))))
+
+
+@bp.get("/api/xva/sensitivities")
+def xva_sensitivities_get():
+    return jsonify(ensure_finite(xva_sens.compute(get_conn(), _arg("snapshot"), _arg("counterparty"))))
 
 
 @bp.post("/api/xva/incremental")
